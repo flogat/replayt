@@ -75,11 +75,12 @@ class Runner:
         *,
         llm_settings: LLMSettings | None = None,
         log_mode: LogMode = LogMode.redacted,
+        llm_client: OpenAICompatClient | None = None,
     ) -> None:
         self.workflow = workflow
         self.store = store
         self.log_mode = log_mode
-        self._llm_client = OpenAICompatClient(llm_settings or LLMSettings.from_env())
+        self._llm_client = llm_client or OpenAICompatClient(llm_settings or LLMSettings.from_env())
         self.run_id: str = ""
         self._seq = 0
         self._current_state: str | None = None

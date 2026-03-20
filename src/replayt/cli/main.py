@@ -1,18 +1,22 @@
 from __future__ import annotations
 
+import html
 import importlib
 import importlib.util
 import json
+import os
 import sys
+from collections import Counter
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import typer
 
 from replayt.graph_export import workflow_to_mermaid
 from replayt.llm import LLMSettings, OpenAICompatClient
 from replayt.persistence import JSONLStore, MultiStore, SQLiteStore
-from replayt.runner import Runner, resolve_approval_on_store
+from replayt.runner import Runner, RunResult, resolve_approval_on_store
 from replayt.types import LogMode
 from replayt.workflow import Workflow
 from replayt.yaml_workflow import load_workflow_yaml, workflow_from_spec
@@ -112,6 +116,89 @@ def _event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     return summary
 
 
+def _exit_for_run_result(result: RunResult) -> None:
+    """CLI exit codes: 0 completed, 1 failed, 2 paused (waiting for approval or similar)."""
+
+    if result.status == "completed":
+        return
+    if result.status == "paused":
+        raise typer.Exit(code=2)
+    raise typer.Exit(code=1)
+
+
+def _run_result_payload(wf: Workflow, result: RunResult) -> dict[str, Any]:
+    return {
+        "run_id": result.run_id,
+        "workflow": f"{wf.name}@{wf.version}",
+        "status": result.status,
+        "final_state": result.final_state,
+        "error": result.error,
+    }
+
+
+INIT_WORKFLOW_PY = '''"""Scaffolded replayt workflow — run with: replayt run workflow.py --inputs-json '{}' """
+
+from pathlib import Path
+
+from replayt import LogMode, Runner, Workflow
+from replayt.persistence import JSONLStore
+
+wf = Workflow("my_workflow", version="1")
+wf.set_initial("hello")
+
+
+@wf.step("hello")
+def hello(ctx):
+    ctx.set("message", "ready")
+    return None
+
+
+if __name__ == "__main__":
+    runner = Runner(wf, JSONLStore(Path(".replayt/runs")), log_mode=LogMode.redacted)
+    r = runner.run(inputs={})
+    print(r.run_id, r.status)
+'''
+
+INIT_ENV_EXAMPLE = """# Copy to .env and load before running (replayt does not read .env automatically).
+# Example (bash): set -a && source .env && set +a
+OPENAI_API_KEY=
+
+# Optional — OpenAI-compatible API base (overrides REPLAYT_PROVIDER preset default).
+# OPENAI_BASE_URL=https://api.openai.com/v1
+
+# Optional — default model (overrides provider preset default).
+# REPLAYT_MODEL=gpt-4o-mini
+
+# Optional — openai | ollama | groq | together | openrouter | anthropic (see README).
+# REPLAYT_PROVIDER=openai
+"""
+
+
+@app.command("init")
+def cmd_init(
+    path: Path = typer.Option(Path("."), "--path", "-p", help="Directory to write scaffold files into."),
+    force: bool = typer.Option(False, help="Overwrite existing workflow.py / .env.example."),
+) -> None:
+    """Create a minimal workflow.py and .env.example in the given directory."""
+
+    path.mkdir(parents=True, exist_ok=True)
+    wf_file = path / "workflow.py"
+    env_file = path / ".env.example"
+    if not force:
+        if wf_file.exists() or env_file.exists():
+            typer.echo(
+                f"Refusing to overwrite: {wf_file} or {env_file} exists (use --force).",
+                err=True,
+            )
+            raise typer.Exit(code=1)
+    wf_file.write_text(INIT_WORKFLOW_PY, encoding="utf-8")
+    env_file.write_text(INIT_ENV_EXAMPLE, encoding="utf-8")
+    typer.echo(f"Wrote {wf_file}")
+    typer.echo(f"Wrote {env_file}")
+    typer.echo("Next: python -m venv .venv && activate, pip install replayt, export OPENAI_API_KEY=...")
+    typer.echo(f"Run: replayt run {wf_file} --inputs-json '{{}}'")
+
+
 @app.command("run")
 def cmd_run(
     target: str = typer.Argument(..., metavar="TARGET", help="MODULE:VAR, workflow.py, or workflow.yaml."),
@@ -129,6 +216,12 @@ def cmd_run(
         help="redacted|full|structured_only (no body previews; structured_output events still logged)",
     ),
     resume: bool = typer.Option(False, help="Resume a paused run (requires --run-id)."),
+    output: Literal["text", "json"] = typer.Option(
+        "text",
+        "--output",
+        "-o",
+        help="text (default) or json (machine-readable).",
+    ),
 ) -> None:
     if resume and not run_id:
         typer.echo("When using --resume, you must pass --run-id", err=True)
@@ -143,27 +236,41 @@ def cmd_run(
     store = _make_store(log_dir, sqlite)
     runner = Runner(wf, store, log_mode=lm)
     result = runner.run(run_id=run_id, resume=resume, inputs=inputs)
-    typer.echo(f"run_id={result.run_id}")
-    typer.echo(f"workflow={wf.name}@{wf.version}")
-    typer.echo(f"status={result.status}")
-    if result.error:
-        typer.echo(f"error={result.error}")
-        raise typer.Exit(code=1)
+    if output == "json":
+        typer.echo(json.dumps(_run_result_payload(wf, result), indent=2, default=str))
+    else:
+        typer.echo(f"run_id={result.run_id}")
+        typer.echo(f"workflow={wf.name}@{wf.version}")
+        typer.echo(f"status={result.status}")
+        if result.error:
+            typer.echo(f"error={result.error}")
+    _exit_for_run_result(result)
 
 
 @app.command("inspect")
 def cmd_inspect(
     run_id: str = typer.Argument(...),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
-    as_json: bool = typer.Option(False, "--json", help="Print raw events JSON."),
+    as_json: bool = typer.Option(
+        False,
+        "--json",
+        help="Same as --output json (summary + events).",
+    ),
+    output: Literal["text", "json"] = typer.Option(
+        "text",
+        "--output",
+        help="text (default) or json.",
+    ),
 ) -> None:
     store = JSONLStore(log_dir)
     events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r} in {log_dir}", err=True)
         raise typer.Exit(code=2)
-    if as_json:
-        typer.echo(json.dumps(events, indent=2, default=str))
+    use_json = as_json or output == "json"
+    if use_json:
+        summary = _event_summary(events)
+        typer.echo(json.dumps({"summary": summary, "events": events}, indent=2, default=str))
         return
     summary = _event_summary(events)
     typer.echo(
@@ -188,18 +295,8 @@ def cmd_inspect(
         typer.echo(f"{seq:04d}  {typ}")
 
 
-@app.command("replay")
-def cmd_replay(
-    run_id: str = typer.Argument(...),
-    log_dir: Path = typer.Option(Path(".replayt/runs")),
-) -> None:
-    """Print a human-readable timeline from the recorded run (does not call model APIs)."""
-
-    store = JSONLStore(log_dir)
-    events = store.load_events(run_id)
-    if not events:
-        typer.echo(f"No events for run_id={run_id!r}", err=True)
-        raise typer.Exit(code=2)
+def _replay_timeline_lines(events: list[dict[str, Any]]) -> list[str]:
+    lines: list[str] = []
     for e in events:
         typ = e.get("type")
         seq = e.get("seq")
@@ -216,6 +313,76 @@ def cmd_replay(
             "tool_result",
         }:
             line += f"  {json.dumps(payload, ensure_ascii=False, default=str)[:500]}"
+        lines.append(line)
+    return lines
+
+
+def _replay_html(run_id: str, events: list[dict[str, Any]]) -> str:
+    summary = _event_summary(events)
+    title = html.escape(f"replayt run {run_id}")
+    rows = []
+    pre = '<pre class="font-mono text-sm whitespace-pre-wrap border-b border-slate-200 py-1">'
+    for line in _replay_timeline_lines(events):
+        rows.append(f"{pre}{html.escape(line)}</pre>")
+    body_rows = "\n".join(rows)
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>{title}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen p-6">
+  <main class="max-w-4xl mx-auto">
+    <h1 class="text-2xl font-semibold mb-2">{title}</h1>
+    <p class="text-sm text-slate-600 mb-4">
+      status={html.escape(str(summary.get("status")))}
+      workflow={html.escape(str(summary.get("workflow_name")))}@{html.escape(str(summary.get("workflow_version")))}
+    </p>
+    <section class="bg-white rounded-lg shadow border border-slate-200 p-4">
+      {body_rows}
+    </section>
+    <p class="text-xs text-slate-500 mt-4">Generated by replayt (no model calls; timeline from JSONL).</p>
+  </main>
+</body>
+</html>
+"""
+
+
+@app.command("replay")
+def cmd_replay(
+    run_id: str = typer.Argument(...),
+    log_dir: Path = typer.Option(Path(".replayt/runs")),
+    format: Literal["text", "html"] = typer.Option(
+        "text",
+        "--format",
+        "-f",
+        help="text (terminal) or html (self-contained page; uses Tailwind CDN).",
+    ),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Write HTML to this path instead of stdout (only with --format html).",
+    ),
+) -> None:
+    """Print a human-readable timeline from the recorded run (does not call model APIs)."""
+
+    store = JSONLStore(log_dir)
+    events = store.load_events(run_id)
+    if not events:
+        typer.echo(f"No events for run_id={run_id!r}", err=True)
+        raise typer.Exit(code=2)
+    if format == "html":
+        doc = _replay_html(run_id, events)
+        if out is not None:
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(doc, encoding="utf-8")
+            typer.echo(f"wrote {out}")
+        else:
+            typer.echo(doc)
+        return
+    for line in _replay_timeline_lines(events):
         typer.echo(line)
 
 
@@ -240,7 +407,7 @@ def cmd_resume(
     typer.echo(f"status={result.status}")
     if result.error:
         typer.echo(f"error={result.error}")
-        raise typer.Exit(code=1)
+    _exit_for_run_result(result)
 
 
 @app.command("graph")
@@ -273,6 +440,106 @@ def cmd_runs(
         )
 
 
+def _parse_iso_ts(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        s = str(ts).replace("Z", "+00:00")
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+@app.command("stats")
+def cmd_stats(
+    log_dir: Path = typer.Option(Path(".replayt/runs"), help="Directory of JSONL run logs."),
+    days: int | None = typer.Option(
+        None,
+        "--days",
+        min=1,
+        help="Only include runs whose last event is within this many days (UTC).",
+    ),
+    output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
+) -> None:
+    """Summarize local run logs: counts, LLM latency averages, common failure states."""
+
+    store = JSONLStore(log_dir)
+    run_ids = store.list_run_ids()
+    now = datetime.now(timezone.utc)
+    cutoff = None
+    if days is not None:
+        from datetime import timedelta
+
+        cutoff = now - timedelta(days=days)
+
+    total = 0
+    by_status: Counter[str] = Counter()
+    latencies: list[int] = []
+    fail_states: Counter[str] = Counter()
+    first_ts: datetime | None = None
+    last_ts: datetime | None = None
+
+    for rid in run_ids:
+        events = store.load_events(rid)
+        if not events:
+            continue
+        summ = _event_summary(events)
+        last_event_ts = _parse_iso_ts(summ.get("last_ts"))
+        if cutoff is not None and last_event_ts is not None and last_event_ts < cutoff:
+            continue
+        total += 1
+        st = str(summ.get("status", "unknown"))
+        by_status[st] += 1
+        for e in events:
+            t = _parse_iso_ts(e.get("ts"))
+            if t is not None:
+                first_ts = t if first_ts is None or t < first_ts else first_ts
+                last_ts = t if last_ts is None or t > last_ts else last_ts
+            if e.get("type") == "llm_response":
+                p = e.get("payload") or {}
+                ms = p.get("latency_ms")
+                if isinstance(ms, int):
+                    latencies.append(ms)
+            if e.get("type") == "run_failed":
+                p = e.get("payload") or {}
+                state = p.get("state")
+                if state:
+                    fail_states[str(state)] += 1
+
+    avg_latency = round(sum(latencies) / len(latencies), 2) if latencies else None
+    top_fails = fail_states.most_common(5)
+    payload = {
+        "runs_included": total,
+        "runs_total_on_disk": len(run_ids),
+        "status_counts": dict(by_status),
+        "llm_response_count": len(latencies),
+        "llm_latency_ms_avg": avg_latency,
+        "top_failure_states": [{"state": s, "count": c} for s, c in top_fails],
+        "event_time_range_utc": {
+            "first": first_ts.isoformat() if first_ts else None,
+            "last": last_ts.isoformat() if last_ts else None,
+        },
+        "filter_days": days,
+    }
+    if output == "json":
+        typer.echo(json.dumps(payload, indent=2, default=str))
+        return
+    if total == 0:
+        typer.echo(f"No runs matched in {log_dir}" + (f" (last {days} days)" if days else ""))
+        return
+    typer.echo(f"log_dir={log_dir}")
+    typer.echo(f"runs_included={total} (on_disk={len(run_ids)})")
+    typer.echo(f"status_counts={dict(by_status)}")
+    if avg_latency is not None:
+        typer.echo(f"llm_latency_ms_avg={avg_latency} (n={len(latencies)})")
+    else:
+        typer.echo("llm_latency_ms_avg=n/a")
+    if top_fails:
+        typer.echo("top_failure_states=" + ", ".join(f"{s}:{c}" for s, c in top_fails))
+    if first_ts and last_ts:
+        typer.echo(f"event_time_range_utc={first_ts.isoformat()} .. {last_ts.isoformat()}")
+
+
 @app.command("doctor")
 def cmd_doctor() -> None:
     """Check local install health for replayt's default OpenAI-compatible setup."""
@@ -289,6 +556,8 @@ def cmd_doctor() -> None:
     checks.append(("replayt", True, pkg_ver))
     pyver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     checks.append(("python", True, pyver))
+    prov = os.environ.get("REPLAYT_PROVIDER", "")
+    checks.append(("replayt_provider", True, prov or "(unset, using openai-style defaults)"))
     checks.append(("openai_api_key", bool(settings.api_key), "set" if settings.api_key else "missing"))
     checks.append(("openai_base_url", True, settings.base_url))
     checks.append(("model", True, settings.model))
