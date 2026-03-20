@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from replayt.persistence.base import EventStore
+
+_log = logging.getLogger("replayt.persistence")
 
 
 class MultiStore:
@@ -16,7 +19,10 @@ class MultiStore:
     def append_event(self, run_id: str, *, ts: str, typ: str, payload: dict[str, Any]) -> dict[str, Any]:
         event = self._primary.append_event(run_id, ts=ts, typ=typ, payload=payload)
         for store in self._mirror:
-            store.append(run_id, event)
+            try:
+                store.append(run_id, event)
+            except Exception:  # noqa: BLE001
+                _log.warning("Mirror store write failed for run_id=%s", run_id, exc_info=True)
         return event
 
     def append(self, run_id: str, event: dict[str, Any]) -> None:

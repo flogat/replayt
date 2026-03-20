@@ -38,6 +38,7 @@ class LLMSettings:
     timeout_seconds: float = 120.0
     max_tokens: int | None = None
     extra_headers: dict[str, str] = field(default_factory=dict)
+    http_retries: int = 0
 
     _provider_presets: ClassVar[dict[str, tuple[str, str]]] = {
         "openai": ("https://api.openai.com/v1", "gpt-4o-mini"),
@@ -88,11 +89,20 @@ class LLMSettings:
         )
 
 
+_RETRYABLE_STATUS_CODES = frozenset({429, 502, 503, 504})
+_RETRY_BASE_DELAY = 1.0
+_RETRY_MAX_DELAY = 30.0
+
+
 class OpenAICompatClient:
     """Minimal chat.completions client for OpenAI-compatible servers."""
 
     def __init__(self, settings: LLMSettings | None = None) -> None:
         self.settings = settings or LLMSettings.from_env()
+        self._http = httpx.Client(timeout=self.settings.timeout_seconds)
+
+    def close(self) -> None:
+        self._http.close()
 
     def chat_completions(
         self,
@@ -125,10 +135,27 @@ class OpenAICompatClient:
             **(extra_headers or {}),
         }
         timeout = timeout_seconds if timeout_seconds is not None else self.settings.timeout_seconds
-        with httpx.Client(timeout=timeout) as client:
-            r = client.post(url, json=payload, headers=headers)
-            r.raise_for_status()
-            return r.json()
+        max_attempts = max(self.settings.http_retries + 1, 1)
+
+        last_exc: Exception | None = None
+        for attempt in range(max_attempts):
+            try:
+                r = self._http.post(url, json=payload, headers=headers, timeout=timeout)
+                if r.status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts - 1:
+                    retry_after = r.headers.get("retry-after")
+                    delay = float(retry_after) if retry_after and retry_after.isdigit() else _RETRY_BASE_DELAY
+                    delay = min(delay * (2**attempt), _RETRY_MAX_DELAY)
+                    time.sleep(delay)
+                    continue
+                r.raise_for_status()
+                return r.json()
+            except httpx.TransportError as exc:
+                last_exc = exc
+                if attempt < max_attempts - 1:
+                    time.sleep(min(_RETRY_BASE_DELAY * (2**attempt), _RETRY_MAX_DELAY))
+                    continue
+                raise
+        raise last_exc  # type: ignore[misc]
 
 
 class LLMBridge:

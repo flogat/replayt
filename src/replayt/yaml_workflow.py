@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import string
 from pathlib import Path
 from typing import Any, Literal
 
@@ -7,6 +8,18 @@ from pydantic import create_model
 
 from replayt.types import RetryPolicy
 from replayt.workflow import Workflow
+
+
+class _SafeFormatter(string.Formatter):
+    """Format-string handler that rejects attribute access and indexing (e.g. ``{x.attr}``, ``{x[0]}``)."""
+
+    def get_field(self, field_name: str, args: Any, kwargs: Any) -> Any:
+        if "." in field_name or "[" in field_name:
+            raise ValueError(f"Attribute/index access is not allowed in YAML prompts: {field_name!r}")
+        return super().get_field(field_name, args, kwargs)
+
+
+_safe_fmt = _SafeFormatter()
 
 _TYPE_MAP: dict[str, type] = {"string": str, "integer": int, "float": float, "boolean": bool}
 
@@ -84,7 +97,7 @@ def workflow_from_spec(spec: dict[str, Any]) -> Workflow:
                 if llm_cfg is not None:
                     output_key = str(llm_cfg["output_key"])
                     raw_prompt: str = llm_cfg["prompt"]
-                    prompt = raw_prompt.format_map({k: ctx.get(k, "") for k in ctx.data})
+                    prompt = _safe_fmt.format(raw_prompt, **{k: ctx.get(k, "") for k in ctx.data})
 
                     messages: list[dict[str, Any]] = []
                     if llm_cfg.get("system"):

@@ -69,10 +69,14 @@ wf = Workflow("tool_workflow", version="1")
 wf.set_initial("use_tool")
 
 
+def add(a: int, b: int) -> int:
+    return a + b
+
+
 @wf.step("use_tool")
 def use_tool(ctx):
-    ctx.tools.register("add", lambda a, b: a + b, description="Add two numbers")
-    result = ctx.tools.call("add", a=2, b=3)
+    ctx.tools.register(add)
+    result = ctx.tools.call("add", {"a": 2, "b": 3})
     ctx.set("sum", result)
     return None
 

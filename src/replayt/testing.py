@@ -26,7 +26,7 @@ class DryRunLLMClient(OpenAICompatClient):
         required = set(schema.get("required", []))
         result: dict[str, Any] = {}
         for key, prop in props.items():
-            if key not in required and not props:
+            if key not in required:
                 continue
             typ = prop.get("type", "string")
             if typ == "string":

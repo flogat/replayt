@@ -2,6 +2,10 @@
 
 > **Deterministic LLM workflows you can replay.**
 
+<p align="center">
+  <img src="docs/demo.svg" alt="replayt demo: run, inspect, replay" width="820"/>
+</p>
+
 **replayt** is a tiny Python library and CLI for developers who want to use LLMs in real workflows **without** adopting a sprawling agent framework, hosted platform, no-code builder, or “AI operating system.”
 
 The core idea is simple:

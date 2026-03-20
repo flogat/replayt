@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html as _html
 import time
 import traceback
 import uuid
@@ -44,22 +45,24 @@ class RunResult:
             "paused": ("#854d0e", "#fef9c3"),
         }
         fg, bg = status_colors.get(self.status, ("#374151", "#f3f4f6"))
+        esc = _html.escape
         parts = [
             '<div style="font-family:system-ui,sans-serif;border:1px solid #e5e7eb;border-radius:8px;'
             'padding:12px 16px;max-width:420px;background:#fff;">',
             f'<div style="font-size:13px;color:#6b7280;margin-bottom:4px;">run_id: '
-            f"<code>{self.run_id}</code></div>",
+            f"<code>{esc(self.run_id)}</code></div>",
             f'<div style="margin-bottom:4px;">'
             f'<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;'
-            f'font-weight:600;color:{fg};background:{bg};">{self.status}</span></div>',
+            f'font-weight:600;color:{fg};background:{bg};">{esc(self.status)}</span></div>',
         ]
         if self.final_state is not None:
             parts.append(
-                f'<div style="font-size:13px;color:#374151;">final_state: <strong>{self.final_state}</strong></div>'
+                f'<div style="font-size:13px;color:#374151;">final_state: '
+                f"<strong>{esc(self.final_state)}</strong></div>"
             )
         if self.error:
             parts.append(
-                f'<div style="font-size:13px;color:#991b1b;margin-top:4px;">error: {self.error}</div>'
+                f'<div style="font-size:13px;color:#991b1b;margin-top:4px;">error: {esc(self.error)}</div>'
             )
         parts.append("</div>")
         return "".join(parts)

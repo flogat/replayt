@@ -1,0 +1,148 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="610" viewBox="0 0 820 610">
+  <style>
+    @keyframes showOut1     { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes showSep1     { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes showOut2     { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes showSep2     { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes showOut3     { from { opacity: 0 } to { opacity: 1 } }
+
+    @keyframes labelFade1   { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
+    @keyframes labelFade2   { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
+    @keyframes labelFade3   { from { opacity: 0; transform: translateY(6px) } to { opacity: 1; transform: translateY(0) } }
+
+    .term-bg   { fill: #0f172a; rx: 10; ry: 10 }
+    .title-bar { fill: #1e293b }
+    .dot-r     { fill: #f87171 }
+    .dot-y     { fill: #facc15 }
+    .dot-g     { fill: #4ade80 }
+    .title-txt { fill: #94a3b8; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; text-anchor: middle }
+    text       { font-family: ui-monospace, 'Cascadia Code', 'Fira Code', Menlo, monospace; font-size: 13.5px }
+    .prompt    { fill: #38bdf8 }
+    .cmd       { fill: #e2e8f0 }
+    .out       { fill: #94a3b8 }
+    .val       { fill: #a78bfa }
+    .ok        { fill: #4ade80 }
+    .id        { fill: #fbbf24 }
+    .ev-name   { fill: #38bdf8 }
+    .ev-data   { fill: #94a3b8 }
+    .sep       { fill: #334155 }
+    .label-bg  { rx: 4; ry: 4 }
+    .label-txt { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase }
+  </style>
+
+  <defs>
+    <clipPath id="clip1"><rect x="32" y="72" width="0" height="18">
+      <animate attributeName="width" from="0" to="688" begin="0.6s" dur="2.4s" fill="freeze"/>
+    </rect></clipPath>
+    <clipPath id="clip2"><rect x="32" y="280" width="0" height="18">
+      <animate attributeName="width" from="0" to="266" begin="7.6s" dur="1.0s" fill="freeze"/>
+    </rect></clipPath>
+    <clipPath id="clip3"><rect x="32" y="420" width="0" height="18">
+      <animate attributeName="width" from="0" to="252" begin="14.6s" dur="1.0s" fill="freeze"/>
+    </rect></clipPath>
+  </defs>
+
+  <!-- Terminal chrome -->
+  <rect class="term-bg" width="820" height="610"/>
+  <rect class="title-bar" width="820" height="38" rx="10" ry="10"/>
+  <rect class="title-bar" width="820" height="20" y="18"/>
+  <circle class="dot-r" cx="20" cy="19" r="6"/>
+  <circle class="dot-y" cx="40" cy="19" r="6"/>
+  <circle class="dot-g" cx="60" cy="19" r="6"/>
+  <text class="title-txt" x="410" y="24">replayt &#8212; run &#183; inspect &#183; replay</text>
+
+  <!-- STEP 1: run -->
+
+  <g opacity="0" style="animation: labelFade1 0.3s 0.1s forwards">
+    <rect class="label-bg" x="30" y="48" width="38" height="18" fill="#0ea5e9" opacity="0.15"/>
+    <text class="label-txt" x="49" y="61" fill="#38bdf8" text-anchor="middle">RUN</text>
+  </g>
+
+  <text class="prompt" x="32" y="86">$</text>
+  <g clip-path="url(#clip1)">
+    <text class="cmd" x="48" y="86">replayt run examples.issue_triage:wf --inputs-json '{"issue":{"title":"Crash on save"}}'</text>
+  </g>
+
+  <g opacity="0" style="animation: showOut1 0.3s 3.8s forwards">
+    <text x="32" y="118">
+      <tspan class="out">run_id=</tspan><tspan class="id">d7f2a91c</tspan>
+    </text>
+    <text x="32" y="138">
+      <tspan class="out">workflow=</tspan><tspan class="val">issue_triage@1</tspan>
+    </text>
+    <text x="32" y="158">
+      <tspan class="out">status=</tspan><tspan class="ok">completed</tspan>
+    </text>
+    <text class="out" x="32" y="186">states visited: intake &#8594; classify &#8594; route &#8594; done</text>
+    <text class="out" x="32" y="206">llm_calls=2  tool_calls=1  duration=1.4s</text>
+  </g>
+
+  <g opacity="0" style="animation: showSep1 0.2s 5.4s forwards">
+    <line x1="32" y1="232" x2="788" y2="232" stroke="#334155" stroke-width="1" stroke-dasharray="4,4"/>
+  </g>
+
+  <!-- STEP 2: inspect -->
+
+  <g opacity="0" style="animation: labelFade2 0.3s 6.8s forwards">
+    <rect class="label-bg" x="30" y="252" width="66" height="18" fill="#a78bfa" opacity="0.15"/>
+    <text class="label-txt" x="63" y="265" fill="#a78bfa" text-anchor="middle">INSPECT</text>
+  </g>
+
+  <text class="prompt" x="32" y="294" opacity="0" style="animation: showOut1 0.1s 7.4s forwards">$</text>
+  <g clip-path="url(#clip2)">
+    <text class="cmd" x="48" y="294">replayt inspect d7f2a91c</text>
+  </g>
+
+  <g opacity="0" style="animation: showOut2 0.3s 9.4s forwards">
+    <text x="32" y="324">
+      <tspan class="out">run </tspan><tspan class="id">d7f2a91c</tspan>
+      <tspan class="out">  workflow=</tspan><tspan class="val">issue_triage@1</tspan>
+      <tspan class="out">  status=</tspan><tspan class="ok">completed</tspan>
+    </text>
+    <text class="out" x="32" y="344">events=12  states=4  transitions=3  llm_calls=2  tool_calls=1</text>
+    <text x="32" y="370">
+      <tspan class="ev-data">0001  </tspan><tspan class="ev-name">run_started        </tspan><tspan class="ev-data">inputs={issue: {title: "Crash on save"}}</tspan>
+    </text>
+    <text x="32" y="388">
+      <tspan class="ev-data">0002  </tspan><tspan class="ev-name">state_entered      </tspan><tspan class="ev-data">state=intake</tspan>
+    </text>
+  </g>
+
+  <g opacity="0" style="animation: showSep2 0.2s 11.6s forwards">
+    <line x1="32" y1="408" x2="788" y2="408" stroke="#334155" stroke-width="1" stroke-dasharray="4,4"/>
+  </g>
+
+  <!-- STEP 3: replay -->
+
+  <g opacity="0" style="animation: labelFade3 0.3s 13.0s forwards">
+    <rect class="label-bg" x="30" y="420" width="56" height="18" fill="#4ade80" opacity="0.15"/>
+    <text class="label-txt" x="58" y="433" fill="#4ade80" text-anchor="middle">REPLAY</text>
+  </g>
+
+  <text class="prompt" x="32" y="458" opacity="0" style="animation: showOut1 0.1s 14.4s forwards">$</text>
+  <g clip-path="url(#clip3)">
+    <text class="cmd" x="48" y="458">replayt replay d7f2a91c</text>
+  </g>
+
+  <g opacity="0" style="animation: showOut3 0.3s 16.4s forwards">
+    <text x="32" y="488">
+      <tspan class="ev-data">0001  </tspan><tspan class="ev-name">state_entered   </tspan><tspan class="ev-data">intake        </tspan><tspan class="ok">&#10003; validated inputs</tspan>
+    </text>
+    <text x="32" y="508">
+      <tspan class="ev-data">0002  </tspan><tspan class="ev-name">llm_response    </tspan><tspan class="ev-data">classify      </tspan><tspan class="val">action=route confidence=0.95</tspan>
+    </text>
+    <text x="32" y="528">
+      <tspan class="ev-data">0003  </tspan><tspan class="ev-name">tool_call       </tspan><tspan class="ev-data">route         </tspan><tspan class="val">assign_label("bug","P1")</tspan>
+    </text>
+    <text x="32" y="548">
+      <tspan class="ev-data">0004  </tspan><tspan class="ev-name">transition      </tspan><tspan class="ev-data">route &#8594; done  </tspan><tspan class="ok">completed</tspan>
+    </text>
+    <text x="32" y="574">
+      <tspan class="out">4 events &#183; 4 states &#183; 1.4s &#183; no LLM calls made (replay from log)</tspan>
+    </text>
+
+    <text x="32" y="598">
+      <tspan class="sep">&#8593; every step logged, every step replayable &#8212; that's </tspan><tspan class="ok" font-weight="bold">replayt</tspan>
+    </text>
+  </g>
+</svg>
