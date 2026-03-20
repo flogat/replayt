@@ -15,6 +15,7 @@ Events are append-only, one JSON object per line. All events share:
 ### `run_started`
 
 - `workflow_name` (string)
+- `workflow_version` (string)
 - `initial_state` (string)
 - `inputs` (object, optional) — may be redacted
 
