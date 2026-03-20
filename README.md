@@ -167,13 +167,16 @@ A new user should be able to understand the architecture quickly and feel that t
 ### CLI
 
 - `replayt init` — scaffold `workflow.py` + `.env.example`
-- `replayt run TARGET` — `--output json` for machine-readable result; exit **0** completed, **1** failed, **2** paused
+- `replayt run TARGET` — `--output json` for machine-readable result; `--tag key=value`; `--timeout SECONDS`; exit **0** completed, **1** failed, **2** paused
 - `replayt inspect RUN_ID` — `--output json` (or legacy `--json`) for summary + events
 - `replayt replay RUN_ID` — `--format html` for a shareable Tailwind HTML timeline (`--out path`)
 - `replayt resume TARGET RUN_ID --approval ID` — same exit codes as `run`
 - `replayt graph TARGET`
-- `replayt runs`
-- `replayt stats` — aggregate counts and LLM latency from local JSONL logs
+- `replayt validate TARGET` — check graph integrity without calling any LLM (CI-friendly)
+- `replayt diff RUN_A RUN_B` — compare two runs side by side
+- `replayt gc --older-than 90d` — garbage-collect old run logs
+- `replayt runs` — `--tag key=value` to filter
+- `replayt stats` — aggregate counts, LLM latency, token usage; `--tag key=value` to filter
 - `replayt doctor`
 
 `TARGET` can be any of:
@@ -206,6 +209,90 @@ replayt doctor
 Optional dependencies (see [`pyproject.toml`](pyproject.toml)): **`[yaml]`** adds PyYAML for `.yaml` / `.yml` workflow targets; **`[dev]`** adds pytest, ruff, and YAML support for working on the repo.
 
 If you keep secrets in a `.env` file, load them your own way before running replayt (for example `export $(grep -v '^#' .env | xargs)`, [direnv](https://direnv.net/) with `.envrc`, or `python-dotenv` in a wrapper script). replayt does not read `.env` on its own—environment order stays explicit and auditable.
+
+---
+
+## Installation
+
+### Platform-specific virtual environment activation
+
+```bash
+# bash / zsh (macOS, Linux, WSL)
+python -m venv .venv
+source .venv/bin/activate
+
+# fish
+python -m venv .venv
+source .venv/bin/activate.fish
+
+# Windows cmd.exe
+python -m venv .venv
+.venv\Scripts\activate.bat
+
+# Windows PowerShell
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+```
+
+Then install replayt:
+
+```bash
+pip install -e ".[dev]"   # contributors
+# pip install replayt      # end users (add [yaml] for YAML workflow targets)
+```
+
+### Loading `.env` files
+
+replayt does **not** read `.env` automatically — this keeps environment precedence explicit and auditable. Pick one approach:
+
+**bash / zsh:**
+
+```bash
+set -a && source .env && set +a
+```
+
+**PowerShell:**
+
+```powershell
+Get-Content .env | ForEach-Object {
+    if ($_ -match '^\s*([^#][^=]+)=(.*)$') {
+        [System.Environment]::SetEnvironmentVariable($Matches[1].Trim(), $Matches[2].Trim(), 'Process')
+    }
+}
+```
+
+**direnv** (auto-loads on `cd`):
+
+```bash
+# .envrc
+dotenv
+```
+
+```bash
+direnv allow
+```
+
+### Check your setup
+
+```bash
+replayt doctor
+```
+
+`replayt doctor` reports your Python version, installed package version, API key status, provider connectivity, and optional extras. Run it first when something is not working.
+
+### Common errors
+
+| Symptom | Fix |
+|---------|-----|
+| `OPENAI_API_KEY is not set` | Export your key: `export OPENAI_API_KEY=sk-...` (or load from `.env` as above). |
+| `ModuleNotFoundError: No module named 'replayt'` | Activate your virtual environment first, then `pip install -e ".[dev]"`. |
+| `python: command not found` or wrong version | Use `python3` explicitly, or check `python --version` (requires Python 3.10+). |
+| `pip: command not found` | Use `python -m pip install ...` instead. |
+| `SSL: CERTIFICATE_VERIFY_FAILED` (corporate proxy) | Set `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE` to your corporate CA bundle, or `pip install pip-system-certs`. |
+| `yaml_extra: missing` in `replayt doctor` | Install the YAML extra: `pip install replayt[yaml]` (or `pip install -e ".[yaml]"`). |
+| `provider_connectivity: unreachable` | Check `OPENAI_BASE_URL` and network access. Behind a VPN? Try `curl -I $OPENAI_BASE_URL/models`. |
+
+---
 
 ### Scaffold a minimal project
 
@@ -486,7 +573,7 @@ See [`src/examples/README.md`](src/examples/README.md) for runnable commands.
 Write `workflow.py` and `.env.example`. Refuses to overwrite unless `--force`.
 
 ### `replayt run TARGET`
-Run a workflow from a module reference, Python file, or YAML file. Flags: `--output text|json`, `--log-mode …`, `--resume`, etc. **Exit codes:** `0` completed, `1` failed, `2` paused.
+Run a workflow from a module reference, Python file, or YAML file. Flags: `--output text|json`, `--log-mode …`, `--resume`, `--tag key=value` (repeatable), `--timeout SECONDS`, etc. **Exit codes:** `0` completed, `1` failed, `2` paused.
 
 ### `replayt inspect RUN_ID`
 Show a summary and event list for a run. `--output json` (or `--json`) prints `{"summary": …, "events": …}`.
@@ -500,11 +587,20 @@ Resolve an approval gate and continue a paused run. Same exit codes as `run`.
 ### `replayt graph TARGET`
 Print a Mermaid graph of the workflow.
 
-### `replayt runs`
-List recent local runs from the JSONL log directory.
+### `replayt validate TARGET`
+Validate a workflow graph without calling any LLM. Checks: initial state is set, all transition targets are declared states, no orphan states (unreachable from initial), all steps have handlers. Exit `0` if valid, `1` if not. Useful in CI.
 
-### `replayt stats [--days N] [--output text|json]`
-Summarize local logs: status counts, average `llm_response` latency, top failure states, event time range.
+### `replayt diff RUN_A RUN_B`
+Compare two runs: states visited, structured outputs (field-by-field diff), tool calls, final status, and latency differences. `--output json` for machine-readable diff.
+
+### `replayt gc --older-than DURATION`
+Delete JSONL run logs older than a duration (e.g. `90d`, `24h`). `--dry-run` to preview. Prints a summary of files deleted and bytes freed.
+
+### `replayt runs`
+List recent local runs from the JSONL log directory. `--tag key=value` (repeatable) to filter by tags.
+
+### `replayt stats [--days N] [--tag key=value] [--output text|json]`
+Summarize local logs: status counts, average `llm_response` latency, token usage, top failure states, event time range. `--tag key=value` (repeatable) to filter by tags.
 
 ### `replayt doctor`
 Check your local install, environment variables, optional YAML support, and default provider connectivity.

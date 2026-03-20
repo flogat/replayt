@@ -49,6 +49,9 @@ This example has only two states: `greet` and `done`.
 This is the example to use when you want to understand the core replayt model: a named state reads context, writes context, and returns the next state explicitly.
 
 ### What to run
+The smallest workflow in the tutorial set. It writes a greeting and a next action into context so you can inspect and replay the run.
+
+Expected outcome: the run completes successfully and the final context includes `message="Hello, Sam! Your first replayt workflow ran."`, `next_action="Inspect this run, then replay it from the CLI."`, and `completed=true`, so you can compare a finished run against later, more complex examples.
 
 ```bash
 replayt run examples.e01_hello_world:wf \
@@ -87,6 +90,9 @@ The workflow has three stages in spirit, although only two state handlers do rea
 The important lesson is that replayt is not just for LLM calls. It is also useful for deterministic business logic that you want to inspect later.
 
 ### What to run
+Validate a raw lead payload, normalize formatting, and derive an internal segment.
+
+Expected outcome: the run completes successfully and stores `normalized_lead` with `name="Sam Patel"`, `email="sam@example.com"`, `company="Northwind"`, a whitespace-normalized message, and `segment="enterprise"` because the sample message mentions a demo for many seats.
 
 ```bash
 replayt run examples.e02_intake_normalization:wf \
@@ -121,6 +127,9 @@ The workflow validates the incoming `ticket`, then derives a routing decision fr
 Finally, the workflow writes a `routing_decision` dictionary with queue, priority, and SLA hours.
 
 ### What to run
+A deterministic branching flow for support operations.
+
+Expected outcome: the run completes successfully and writes `routing_decision` with `queue="billing"`, `priority="high"`, and `sla_hours=4` because the sample ticket mentions payment failure and the customer tier is `enterprise`.
 
 ```bash
 replayt run examples.e03_support_routing:wf \
@@ -151,6 +160,9 @@ Inside the `intake` step, the workflow registers two tools:
 After validating the purchase request, the `evaluate` step calls those tools through `ctx.tools.call(...)` rather than invoking ad hoc helper functions. That means the tool activity is captured in the run history.
 
 ### What to run
+Register strongly typed tools and use them from a workflow step.
+
+Expected outcome: the run completes successfully, the event log shows typed calls to `calculate_total` and `budget_policy`, and the final `decision` records `total_cost=298.0`, `within_policy=true`, and `recommended_action="auto_approve"` for the sample Design request.
 
 ```bash
 replayt run examples.e04_tool_using_procurement:wf \
@@ -184,6 +196,9 @@ The `lookup` step is decorated with a retry policy of up to three attempts. The 
 The `summarize` step then copies the vendor record into `lookup_summary` and includes the attempt count.
 
 ### What to run
+Show how a state can retry automatically before succeeding.
+
+Expected outcome: the first `lookup` attempt fails with a temporary timeout, replayt retries automatically, the second attempt succeeds, and `lookup_summary` ends with `vendor_name="Acme Fulfillment"`, `status="active"`, `payment_terms="net-30"`, `risk_level="low"`, and `lookup_attempts=2`.
 
 ```bash
 replayt run examples.e05_retrying_vendor_lookup:wf \
@@ -219,6 +234,9 @@ The workflow defines a `CallBrief` schema with these fields:
 The single working state, `draft_brief`, sends the account name and CRM notes to `ctx.llm.parse(...)`. replayt then validates the model output against the schema before storing it in context as `call_brief`.
 
 ### What to run
+Use structured LLM output to turn CRM notes into a call brief.
+
+Expected outcome: the run completes successfully and `call_brief` validates against the `CallBrief` schema, so `inspect` shows structured fields such as `customer_stage`, `top_goals`, `risks`, `recommended_talking_points`, and `next_step` instead of an unstructured paragraph.
 
 ```bash
 replayt run examples.e06_sales_call_brief:wf \
@@ -251,6 +269,9 @@ The workflow defines two schemas:
 The `cluster` step passes the whole feedback list to the model and asks for a structured summary.
 
 ### What to run
+Use the LLM for batch summarization and prioritization.
+
+Expected outcome: the run completes successfully and `feedback_summary` contains a schema-validated list of themes plus a `release_note_hint`; for the sample input you should expect themes around exports/performance and identity access (Okta SSO), each with priorities and suggested owners.
 
 ```bash
 replayt run examples.e07_feedback_clustering:wf \
@@ -282,6 +303,9 @@ The workflow has three important phases:
 The sample input is intentionally chosen to trigger review because it violates two simple policy checks: high estimated cost and short notice.
 
 ### What to run
+Evaluate travel policy automatically, then pause for manager approval only when policy flags require it.
+
+Expected outcome: with the sample input the run pauses with exit code 2 after `policy_check` stores `policy_flags=["high_cost", "late_notice"]` and requests `manager_review`; after approval it finishes with `travel_status="approved_for_booking"`, and after rejection it finishes with `travel_status="rejected"`.
 
 ```bash
 replayt run examples.e08_travel_approval:wf \
@@ -331,6 +355,9 @@ The workflow proceeds through four conceptual stages:
 For sev1 incidents, the workflow pauses for an executive communications decision. Lower-severity incidents skip that approval path.
 
 ### What to run
+Combine typed tools with an executive approval gate for sev1 communications.
+
+Expected outcome: the sample incident is classified as `sev1` because `error_rate=12.5`, the run logs tool calls for paging and status-page draft creation, then pauses for `exec_comms`; approving resumes to `communication_plan="external_statuspage_and_internal_slack"`, while rejecting resumes to `communication_plan="internal_updates_only"`.
 
 ```bash
 replayt run examples.e09_incident_response:wf \
@@ -380,6 +407,9 @@ The workflow starts with `validate`, which ensures the issue payload exists and 
 The `route` step turns that decision into a smaller `routing` object with queue, label, and priority.
 
 ### What to run
+A relatable developer workflow with deterministic validation, LLM classification, and explicit routing.
+
+Expected outcome: the sample issue passes validation, the LLM returns a `TriageDecision`, and the final context either contains a `response_template` asking for clarification or, more likely for this sample, a `routing` object with a category-backed queue, suggested label, and priority for engineering triage.
 
 ```bash
 replayt run examples.issue_triage:wf \
@@ -410,6 +440,9 @@ The workflow:
 The prompt intentionally narrows the policy space: refund, reship, store credit, deny, or escalate.
 
 ### What to run
+A constrained support decision flow where the output space stays narrow and auditable.
+
+Expected outcome: the run completes successfully and `summary_for_agent` contains the schema-validated refund action, reason codes, and customer message; for the sample damaged-order ticket delivered 3 days ago, a refund-oriented outcome is plausible under the stated policy, but the exact action still comes from the model and remains auditable in the log.
 
 ```bash
 replayt run examples.refund_policy:wf \
@@ -441,6 +474,9 @@ The `approval` state behaves much like the travel example:
 - otherwise pause and request `publish`
 
 ### What to run
+Check draft copy, generate a structured checklist, and pause for a human publishing decision.
+
+Expected outcome: the sample draft produces a checklist with one or more issues about unsupported or risky claims, then pauses for `publish` approval; approving resumes to `publish_status="approved"`, while rejecting resumes to `publish_status="aborted"`.
 
 ```bash
 replayt run examples.publishing_preflight:wf \
@@ -941,6 +977,70 @@ def normalize(ctx):
         ctx.set("ticket", modern_ticket_shape(ctx.get("raw")))
     return "classify"
 ```
-</think>
-<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>
-TodoWrite
+
+---
+
+## 13. OpenAI SDK integration — `examples.e10_openai_sdk_integration`
+
+A full integration example using the official `openai` Python SDK inside replayt steps: function calling with Pydantic validation, the `tools` parameter, and streaming with a structured summary pass. Transitions and approvals stay in replayt; the SDK lives inside individual step handlers. Requires `pip install openai`.
+
+```bash
+replayt run examples.e10_openai_sdk_integration:wf \
+  --inputs-json '{"issue_title":"Login page crashes on mobile","issue_body":"Steps: open login on iOS Safari, tap submit, white screen."}'
+```
+
+## 14. Anthropic native SDK — `examples.e11_anthropic_native`
+
+A workaround pattern for developers who want `anthropic.Anthropic()` directly instead of an OpenAI-compatible proxy. LLM traffic from native SDKs is **not** auto-logged by replayt — validated `ctx.set` outputs are your audit surface. Requires `pip install anthropic`.
+
+```bash
+replayt run examples.e11_anthropic_native:wf \
+  --inputs-json '{"text":"The new dashboard is fast and intuitive, but the export feature keeps timing out on large datasets."}'
+```
+
+---
+
+## Workaround patterns (rejected features — composition, not core)
+
+These patterns address common requests that conflict with replayt's design principles. They are documented here as workarounds rather than built into core.
+
+### Pattern: async runner (use `asyncio.to_thread`)
+
+**Request:** "I need `await runner.run_async(...)` for my FastAPI app."
+
+**Why rejected:** Doubles the public API surface; cascading complexity through async EventStore, async tool calls, and async step handlers.
+
+**Workaround:** Use `asyncio.to_thread` (Python 3.9+) to run the synchronous `Runner.run` in a thread pool:
+
+```python
+import asyncio
+from replayt import Runner
+
+# runner: Runner (configured as usual)
+
+async def run_workflow(payload: dict, run_id: str) -> dict:
+    result = await asyncio.to_thread(runner.run, inputs=payload, run_id=run_id)
+    return {"run_id": result.run_id, "status": result.status}
+```
+
+The run is still deterministic and logged; the async boundary is yours.
+
+### Pattern: webhook / lifecycle callbacks
+
+**Request:** "I want Slack notifications when a run completes or fails."
+
+**Why rejected:** Webhook config, auth, retry logic, and failure semantics are a product surface, not a runtime primitive. Conflicts with local-first.
+
+**Workaround:** Wrap `Runner.run` in your notification layer:
+
+```python
+import httpx
+from replayt import Runner
+
+def run_with_notify(runner: Runner, wf_inputs: dict, notify_url: str) -> dict:
+    result = runner.run(inputs=wf_inputs)
+    httpx.post(notify_url, json={"run_id": result.run_id, "status": result.status})
+    return {"run_id": result.run_id, "status": result.status}
+```
+
+Or use the `ForwardingStore` pattern (above) to stream events in real-time to any HTTP sink. The notification layer is yours; replayt stays the engine.

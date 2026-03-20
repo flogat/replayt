@@ -5,6 +5,8 @@ import importlib
 import importlib.util
 import json
 import os
+import re
+import signal
 import sys
 from collections import Counter
 from datetime import datetime, timezone
@@ -80,8 +82,14 @@ def _make_store(log_dir: Path, sqlite: Path | None) -> JSONLStore | MultiStore:
     return MultiStore(primary, SQLiteStore(sqlite))
 
 
+def _read_store(log_dir: Path, sqlite: Path | None) -> JSONLStore | SQLiteStore:
+    if sqlite is not None:
+        return SQLiteStore(sqlite)
+    return JSONLStore(log_dir)
+
+
 def _event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
-    summary = {
+    summary: dict[str, Any] = {
         "status": "unknown",
         "workflow_name": None,
         "workflow_version": None,
@@ -91,6 +99,7 @@ def _event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "tool_calls": 0,
         "approvals": 0,
         "last_ts": None,
+        "tags": {},
     }
     for event in events:
         summary["last_ts"] = event.get("ts")
@@ -99,6 +108,7 @@ def _event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         if typ == "run_started":
             summary["workflow_name"] = payload.get("workflow_name")
             summary["workflow_version"] = payload.get("workflow_version")
+            summary["tags"] = payload.get("tags") or {}
         elif typ == "state_entered":
             summary["state_count"] += 1
         elif typ == "transition":
@@ -159,6 +169,29 @@ if __name__ == "__main__":
     print(r.run_id, r.status)
 '''
 
+REPLAY_HTML_CSS = """
+body{{background:#f8fafc;color:#0f172a;font-family:ui-sans-serif,system-ui,sans-serif;margin:0;padding:24px}}
+main{{max-width:56rem;margin:0 auto}}
+.title{{font-size:1.5rem;font-weight:600;margin:0 0 .5rem}}
+.sub{{font-size:.875rem;color:#475569;margin:0 0 1rem}}
+.card{{
+  background:#fff;
+  border:1px solid #e2e8f0;
+  border-radius:.5rem;
+  box-shadow:0 1px 2px rgba(15,23,42,.08);
+  padding:1rem
+}}
+.row{{
+  font-family:ui-monospace,SFMono-Regular,monospace;
+  font-size:.875rem;
+  white-space:pre-wrap;
+  border-bottom:1px solid #e2e8f0;
+  padding:.25rem 0
+}}
+.foot{{font-size:.75rem;color:#64748b;margin-top:1rem}}
+"""
+
+
 INIT_ENV_EXAMPLE = """# Copy to .env and load before running (replayt does not read .env automatically).
 # Example (bash): set -a && source .env && set +a
 OPENAI_API_KEY=
@@ -215,7 +248,13 @@ def cmd_run(
         case_sensitive=False,
         help="redacted|full|structured_only (no body previews; structured_output events still logged)",
     ),
+    tag: list[str] | None = typer.Option(None, "--tag", help="Tag as key=value (repeatable)."),
     resume: bool = typer.Option(False, help="Resume a paused run (requires --run-id)."),
+    timeout: int | None = typer.Option(
+        None,
+        "--timeout",
+        help="Kill the run after this many seconds with exit code 1.",
+    ),
     output: Literal["text", "json"] = typer.Option(
         "text",
         "--output",
@@ -232,10 +271,36 @@ def cmd_run(
         inputs = json.loads(inputs_json)
         if not isinstance(inputs, dict):
             raise typer.BadParameter("--inputs-json must be a JSON object")
+    tags_dict: dict[str, str] | None = None
+    if tag:
+        tags_dict = {}
+        for t in tag:
+            if "=" not in t:
+                raise typer.BadParameter(f"Tag must be key=value, got: {t!r}")
+            k, v = t.split("=", 1)
+            tags_dict[k] = v
     lm = _parse_log_mode(log_mode)
     store = _make_store(log_dir, sqlite)
     runner = Runner(wf, store, log_mode=lm)
-    result = runner.run(run_id=run_id, resume=resume, inputs=inputs)
+    if timeout is not None and timeout > 0:
+        if sys.platform != "win32":
+            def _timeout_handler(signum: int, frame: Any) -> None:
+                typer.echo(f"Run timed out after {timeout}s", err=True)
+                raise SystemExit(1)
+
+            signal.signal(signal.SIGALRM, _timeout_handler)
+            signal.alarm(timeout)
+        else:
+            import threading
+
+            def _kill_after() -> None:
+                typer.echo(f"Run timed out after {timeout}s", err=True)
+                os._exit(1)
+
+            timer = threading.Timer(float(timeout), _kill_after)
+            timer.daemon = True
+            timer.start()
+    result = runner.run(run_id=run_id, resume=resume, inputs=inputs, tags=tags_dict)
     if output == "json":
         typer.echo(json.dumps(_run_result_payload(wf, result), indent=2, default=str))
     else:
@@ -251,6 +316,7 @@ def cmd_run(
 def cmd_inspect(
     run_id: str = typer.Argument(...),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -262,7 +328,7 @@ def cmd_inspect(
         help="text (default) or json.",
     ),
 ) -> None:
-    store = JSONLStore(log_dir)
+    store = _read_store(log_dir, sqlite)
     events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r} in {log_dir}", err=True)
@@ -321,7 +387,7 @@ def _replay_html(run_id: str, events: list[dict[str, Any]]) -> str:
     summary = _event_summary(events)
     title = html.escape(f"replayt run {run_id}")
     rows = []
-    pre = '<pre class="font-mono text-sm whitespace-pre-wrap border-b border-slate-200 py-1">'
+    pre = '<pre class="row">'
     for line in _replay_timeline_lines(events):
         rows.append(f"{pre}{html.escape(line)}</pre>")
     body_rows = "\n".join(rows)
@@ -331,19 +397,19 @@ def _replay_html(run_id: str, events: list[dict[str, Any]]) -> str:
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>{title}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <style>{REPLAY_HTML_CSS}</style>
 </head>
-<body class="bg-slate-50 text-slate-900 min-h-screen p-6">
-  <main class="max-w-4xl mx-auto">
-    <h1 class="text-2xl font-semibold mb-2">{title}</h1>
-    <p class="text-sm text-slate-600 mb-4">
+<body>
+  <main>
+    <h1 class="title">{title}</h1>
+    <p class="sub">
       status={html.escape(str(summary.get("status")))}
       workflow={html.escape(str(summary.get("workflow_name")))}@{html.escape(str(summary.get("workflow_version")))}
     </p>
-    <section class="bg-white rounded-lg shadow border border-slate-200 p-4">
+    <section class="card">
       {body_rows}
     </section>
-    <p class="text-xs text-slate-500 mt-4">Generated by replayt (no model calls; timeline from JSONL).</p>
+    <p class="foot">Generated by replayt (no model calls; timeline from local event store).</p>
   </main>
 </body>
 </html>
@@ -354,11 +420,12 @@ def _replay_html(run_id: str, events: list[dict[str, Any]]) -> str:
 def cmd_replay(
     run_id: str = typer.Argument(...),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     format: Literal["text", "html"] = typer.Option(
         "text",
         "--format",
         "-f",
-        help="text (terminal) or html (self-contained page; uses Tailwind CDN).",
+        help="text (terminal) or html (HTML page with inline styles).",
     ),
     out: Path | None = typer.Option(
         None,
@@ -368,7 +435,7 @@ def cmd_replay(
 ) -> None:
     """Print a human-readable timeline from the recorded run (does not call model APIs)."""
 
-    store = JSONLStore(log_dir)
+    store = _read_store(log_dir, sqlite)
     events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r}", err=True)
@@ -418,26 +485,100 @@ def cmd_graph(
     typer.echo(workflow_to_mermaid(wf).rstrip())
 
 
+@app.command("validate")
+def cmd_validate(
+    target: str = typer.Argument(..., metavar="TARGET", help="MODULE:VAR, workflow.py, or workflow.yaml."),
+) -> None:
+    """Validate a workflow graph without calling any LLM (useful in CI)."""
+
+    wf = _load_target(target)
+    errors: list[str] = []
+    if not wf.initial_state:
+        errors.append("initial state is not set (call set_initial)")
+    declared = set(wf.step_names())
+    edges = wf.edges()
+    for src, dst in edges:
+        if dst not in declared:
+            errors.append(f"transition target {dst!r} (from {src!r}) is not a declared step")
+        if src not in declared:
+            errors.append(f"transition source {src!r} is not a declared step")
+
+    if wf.initial_state and edges:
+        reachable: set[str] = set()
+        queue = [wf.initial_state]
+        adj: dict[str, list[str]] = {}
+        for src, dst in edges:
+            adj.setdefault(src, []).append(dst)
+        while queue:
+            node = queue.pop()
+            if node in reachable:
+                continue
+            reachable.add(node)
+            for neighbor in adj.get(node, []):
+                if neighbor not in reachable:
+                    queue.append(neighbor)
+        orphans = declared - reachable
+        for orphan in sorted(orphans):
+            errors.append(f"state {orphan!r} is unreachable from initial state {wf.initial_state!r}")
+
+    for name in wf.step_names():
+        try:
+            wf.get_handler(name)
+        except KeyError:
+            errors.append(f"step {name!r} has no handler")
+
+    if errors:
+        typer.echo(f"INVALID: {wf.name}@{wf.version}", err=True)
+        for err in errors:
+            typer.echo(f"  - {err}", err=True)
+        raise typer.Exit(code=1)
+    typer.echo(f"OK: {wf.name}@{wf.version} ({len(declared)} states, {len(edges)} edges)")
+
+
+def _parse_tag_filters(raw: list[str] | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    out: dict[str, str] = {}
+    for t in raw:
+        if "=" not in t:
+            raise typer.BadParameter(f"Tag filter must be key=value, got: {t!r}")
+        k, v = t.split("=", 1)
+        out[k] = v
+    return out
+
+
+def _tags_match(run_tags: dict[str, str], filters: dict[str, str]) -> bool:
+    return all(run_tags.get(k) == v for k, v in filters.items())
+
+
 @app.command("runs")
 def cmd_runs(
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     limit: int = typer.Option(20, min=1, max=200),
+    tag: list[str] | None = typer.Option(None, "--tag", help="Filter by tag key=value (repeatable)."),
 ) -> None:
     """List recent local runs from JSONL logs."""
 
-    store = JSONLStore(log_dir)
-    run_ids = sorted(store.list_run_ids(), reverse=True)[:limit]
-    if not run_ids:
-        typer.echo(f"No runs found in {log_dir}")
-        return
+    tag_filters = _parse_tag_filters(tag)
+    store = _read_store(log_dir, sqlite)
+    run_ids = sorted(store.list_run_ids(), reverse=True)
+    shown = 0
     for run_id in run_ids:
+        if shown >= limit:
+            break
         events = store.load_events(run_id)
         summary = _event_summary(events)
+        if tag_filters and not _tags_match(summary.get("tags") or {}, tag_filters):
+            continue
+        shown += 1
         typer.echo(
             f"{run_id}  {summary['status']}  "
             f"{summary['workflow_name']}@{summary['workflow_version']}  "
             f"{summary['last_ts']}"
         )
+    if shown == 0:
+        typer.echo(f"No runs found in {log_dir}")
 
 
 def _parse_iso_ts(ts: str | None) -> datetime | None:
@@ -453,17 +594,20 @@ def _parse_iso_ts(ts: str | None) -> datetime | None:
 @app.command("stats")
 def cmd_stats(
     log_dir: Path = typer.Option(Path(".replayt/runs"), help="Directory of JSONL run logs."),
+    sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     days: int | None = typer.Option(
         None,
         "--days",
         min=1,
         help="Only include runs whose last event is within this many days (UTC).",
     ),
+    tag: list[str] | None = typer.Option(None, "--tag", help="Filter by tag key=value (repeatable)."),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
-    """Summarize local run logs: counts, LLM latency averages, common failure states."""
+    """Summarize local run logs: counts, LLM latency averages, token usage, common failure states."""
 
-    store = JSONLStore(log_dir)
+    tag_filters = _parse_tag_filters(tag)
+    store = _read_store(log_dir, sqlite)
     run_ids = store.list_run_ids()
     now = datetime.now(timezone.utc)
     cutoff = None
@@ -478,6 +622,9 @@ def cmd_stats(
     fail_states: Counter[str] = Counter()
     first_ts: datetime | None = None
     last_ts: datetime | None = None
+    total_prompt_tokens = 0
+    total_completion_tokens = 0
+    total_all_tokens = 0
 
     for rid in run_ids:
         events = store.load_events(rid)
@@ -486,6 +633,8 @@ def cmd_stats(
         summ = _event_summary(events)
         last_event_ts = _parse_iso_ts(summ.get("last_ts"))
         if cutoff is not None and last_event_ts is not None and last_event_ts < cutoff:
+            continue
+        if tag_filters and not _tags_match(summ.get("tags") or {}, tag_filters):
             continue
         total += 1
         st = str(summ.get("status", "unknown"))
@@ -500,6 +649,17 @@ def cmd_stats(
                 ms = p.get("latency_ms")
                 if isinstance(ms, int):
                     latencies.append(ms)
+                usage = p.get("usage")
+                if isinstance(usage, dict):
+                    pt = usage.get("prompt_tokens")
+                    ct = usage.get("completion_tokens")
+                    tt = usage.get("total_tokens")
+                    if isinstance(pt, int):
+                        total_prompt_tokens += pt
+                    if isinstance(ct, int):
+                        total_completion_tokens += ct
+                    if isinstance(tt, int):
+                        total_all_tokens += tt
             if e.get("type") == "run_failed":
                 p = e.get("payload") or {}
                 state = p.get("state")
@@ -514,6 +674,11 @@ def cmd_stats(
         "status_counts": dict(by_status),
         "llm_response_count": len(latencies),
         "llm_latency_ms_avg": avg_latency,
+        "token_usage": {
+            "total_prompt_tokens": total_prompt_tokens,
+            "total_completion_tokens": total_completion_tokens,
+            "total_tokens": total_all_tokens,
+        },
         "top_failure_states": [{"state": s, "count": c} for s, c in top_fails],
         "event_time_range_utc": {
             "first": first_ts.isoformat() if first_ts else None,
@@ -534,10 +699,185 @@ def cmd_stats(
         typer.echo(f"llm_latency_ms_avg={avg_latency} (n={len(latencies)})")
     else:
         typer.echo("llm_latency_ms_avg=n/a")
+    if total_all_tokens > 0:
+        typer.echo(
+            f"token_usage: prompt={total_prompt_tokens} completion={total_completion_tokens} total={total_all_tokens}"
+        )
     if top_fails:
         typer.echo("top_failure_states=" + ", ".join(f"{s}:{c}" for s, c in top_fails))
     if first_ts and last_ts:
         typer.echo(f"event_time_range_utc={first_ts.isoformat()} .. {last_ts.isoformat()}")
+
+
+def _run_diff_data(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Extract comparable data from a run's events."""
+    states: list[str] = []
+    outputs: dict[str, Any] = {}
+    tool_calls: list[dict[str, Any]] = []
+    status = "unknown"
+    total_latency_ms = 0
+    llm_count = 0
+    for e in events:
+        typ = e.get("type")
+        payload = e.get("payload") or {}
+        if typ == "state_entered":
+            states.append(str(payload.get("state", "")))
+        elif typ == "structured_output":
+            outputs[str(payload.get("schema_name", ""))] = payload.get("data")
+        elif typ == "tool_call":
+            tool_calls.append({"tool": payload.get("tool"), "args": payload.get("args")})
+        elif typ == "llm_response":
+            ms = payload.get("latency_ms")
+            if isinstance(ms, int):
+                total_latency_ms += ms
+                llm_count += 1
+        elif typ == "run_completed":
+            status = payload.get("status", status)
+        elif typ == "run_paused":
+            status = "paused"
+    return {
+        "states_visited": states,
+        "structured_outputs": outputs,
+        "tool_calls": tool_calls,
+        "status": status,
+        "total_latency_ms": total_latency_ms,
+        "llm_calls": llm_count,
+    }
+
+
+@app.command("diff")
+def cmd_diff(
+    run_a: str = typer.Argument(..., metavar="RUN_A"),
+    run_b: str = typer.Argument(..., metavar="RUN_B"),
+    log_dir: Path = typer.Option(Path(".replayt/runs")),
+    output: Literal["text", "json"] = typer.Option("text", "--output", "-o"),
+) -> None:
+    """Compare two runs side by side: states, outputs, tool calls, status, latency."""
+
+    store = JSONLStore(log_dir)
+    events_a = store.load_events(run_a)
+    events_b = store.load_events(run_b)
+    if not events_a:
+        typer.echo(f"No events for run_id={run_a!r}", err=True)
+        raise typer.Exit(code=2)
+    if not events_b:
+        typer.echo(f"No events for run_id={run_b!r}", err=True)
+        raise typer.Exit(code=2)
+
+    da = _run_diff_data(events_a)
+    db = _run_diff_data(events_b)
+
+    diff_payload: dict[str, Any] = {
+        "run_a": run_a,
+        "run_b": run_b,
+        "status": {"a": da["status"], "b": db["status"], "changed": da["status"] != db["status"]},
+        "states_visited": {
+            "a": da["states_visited"],
+            "b": db["states_visited"],
+            "changed": da["states_visited"] != db["states_visited"],
+        },
+        "structured_outputs": {"changed": da["structured_outputs"] != db["structured_outputs"]},
+        "tool_calls": {
+            "a_count": len(da["tool_calls"]),
+            "b_count": len(db["tool_calls"]),
+            "changed": da["tool_calls"] != db["tool_calls"],
+        },
+        "latency": {
+            "a_total_ms": da["total_latency_ms"],
+            "b_total_ms": db["total_latency_ms"],
+            "delta_ms": db["total_latency_ms"] - da["total_latency_ms"],
+        },
+    }
+
+    if da["structured_outputs"] != db["structured_outputs"]:
+        all_keys = sorted(set(da["structured_outputs"]) | set(db["structured_outputs"]))
+        field_diffs: dict[str, Any] = {}
+        for key in all_keys:
+            va = da["structured_outputs"].get(key)
+            vb = db["structured_outputs"].get(key)
+            if va != vb:
+                field_diffs[key] = {"a": va, "b": vb}
+        diff_payload["structured_outputs"]["diffs"] = field_diffs
+
+    if output == "json":
+        typer.echo(json.dumps(diff_payload, indent=2, default=str))
+        return
+
+    typer.echo(f"Comparing {run_a} vs {run_b}")
+    if da["status"] != db["status"]:
+        typer.echo(f"status: {da['status']} -> {db['status']}")
+    else:
+        typer.echo(f"status: {da['status']} (same)")
+    if da["states_visited"] != db["states_visited"]:
+        typer.echo(f"states_a: {' -> '.join(da['states_visited'])}")
+        typer.echo(f"states_b: {' -> '.join(db['states_visited'])}")
+    else:
+        typer.echo(f"states: {' -> '.join(da['states_visited'])} (same)")
+    if da["structured_outputs"] != db["structured_outputs"]:
+        for key in sorted(set(da["structured_outputs"]) | set(db["structured_outputs"])):
+            va = da["structured_outputs"].get(key)
+            vb = db["structured_outputs"].get(key)
+            if va != vb:
+                typer.echo(f"output[{key}] changed:")
+                typer.echo(f"  a: {json.dumps(va, default=str)[:300]}")
+                typer.echo(f"  b: {json.dumps(vb, default=str)[:300]}")
+    else:
+        typer.echo("structured_outputs: (same)")
+    typer.echo(f"tool_calls: a={len(da['tool_calls'])} b={len(db['tool_calls'])}")
+    delta = db["total_latency_ms"] - da["total_latency_ms"]
+    sign = "+" if delta >= 0 else ""
+    typer.echo(f"latency: a={da['total_latency_ms']}ms b={db['total_latency_ms']}ms ({sign}{delta}ms)")
+
+
+def _parse_duration(value: str) -> int | None:
+    """Parse a human duration like '90d', '24h', '30d' into seconds. Returns None on failure."""
+    m = re.fullmatch(r"(\d+)\s*([dhms])", value.strip().lower())
+    if not m:
+        return None
+    n = int(m.group(1))
+    unit = m.group(2)
+    multipliers = {"d": 86400, "h": 3600, "m": 60, "s": 1}
+    return n * multipliers[unit]
+
+
+@app.command("gc")
+def cmd_gc(
+    older_than: str = typer.Option(..., "--older-than", help="Delete runs older than this duration (e.g. 90d, 24h)."),
+    log_dir: Path = typer.Option(Path(".replayt/runs")),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Preview what would be deleted."),
+) -> None:
+    """Garbage-collect old run logs by last-event timestamp."""
+
+    seconds = _parse_duration(older_than)
+    if seconds is None:
+        raise typer.BadParameter(f"Cannot parse duration: {older_than!r} (expected e.g. 90d, 24h, 60m)")
+    from datetime import timedelta
+
+    cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+    store = JSONLStore(log_dir)
+    run_ids = store.list_run_ids()
+    deleted = 0
+    freed_bytes = 0
+    for rid in run_ids:
+        events = store.load_events(rid)
+        if not events:
+            continue
+        last_ts_raw = events[-1].get("ts")
+        last_ts = _parse_iso_ts(last_ts_raw)
+        if last_ts is None or last_ts >= cutoff:
+            continue
+        path = store._path(rid)
+        size = path.stat().st_size if path.is_file() else 0
+        if dry_run:
+            typer.echo(f"[dry-run] would delete {rid} ({size} bytes, last_event={last_ts_raw})")
+        else:
+            path.unlink(missing_ok=True)
+            typer.echo(f"deleted {rid} ({size} bytes)")
+        deleted += 1
+        freed_bytes += size
+
+    verb = "would delete" if dry_run else "deleted"
+    typer.echo(f"\n{verb} {deleted} run(s), {freed_bytes} bytes freed")
 
 
 @app.command("doctor")
