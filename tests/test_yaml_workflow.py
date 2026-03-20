@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
 
 from replayt.persistence import JSONLStore
 from replayt.runner import Runner, resolve_approval_on_store
+from replayt.testing import MockLLMClient, run_with_mock
 from replayt.yaml_workflow import load_workflow_yaml, workflow_from_spec
 
 yaml = pytest.importorskip("yaml")
@@ -104,4 +106,109 @@ def test_yaml_workflow_approval_resume(tmp_path: Path) -> None:
     resolve_approval_on_store(store, paused.run_id, "publish", approved=True)
     resumed = Runner(wf, store).run(run_id=paused.run_id, resume=True)
     assert resumed.status == "completed"
+
+
+def test_yaml_llm_schema_step(tmp_path: Path) -> None:
+    wf = workflow_from_spec(
+        {
+            "name": "llm-schema",
+            "initial": "classify",
+            "steps": {
+                "classify": {
+                    "require": ["ticket"],
+                    "llm": {
+                        "system": "You are a classifier.",
+                        "prompt": "Classify: {ticket}",
+                        "schema": {
+                            "category": {"type": "string"},
+                            "priority": {"type": "string", "enum": ["low", "medium", "high"]},
+                        },
+                        "output_key": "classification",
+                    },
+                    "next": "done",
+                },
+                "done": {"set": {"status": "classified"}},
+            },
+        }
+    )
+    mock = MockLLMClient()
+    mock.enqueue(json.dumps({"category": "billing", "priority": "high"}))
+    store = JSONLStore(tmp_path)
+    result = run_with_mock(wf, store, mock, inputs={"ticket": "charge me twice"})
+    assert result.status == "completed"
+    events = store.load_events(result.run_id)
+    structured = [e for e in events if e["type"] == "structured_output"]
+    assert len(structured) == 1
+    assert structured[0]["payload"]["data"] == {"category": "billing", "priority": "high"}
+
+
+def test_yaml_llm_text_step(tmp_path: Path) -> None:
+    wf = workflow_from_spec(
+        {
+            "name": "llm-text",
+            "initial": "summarize",
+            "steps": {
+                "summarize": {
+                    "require": ["doc"],
+                    "llm": {
+                        "prompt": "Summarize: {doc}",
+                        "output_key": "summary",
+                    },
+                    "next": "done",
+                },
+                "done": {"set": {"status": "done"}},
+            },
+        }
+    )
+    mock = MockLLMClient()
+    mock.enqueue("A short summary.")
+    store = JSONLStore(tmp_path)
+    result = run_with_mock(wf, store, mock, inputs={"doc": "Long document text..."})
+    assert result.status == "completed"
+    events = store.load_events(result.run_id)
+    llm_responses = [e for e in events if e["type"] == "llm_response"]
+    assert len(llm_responses) == 1
+
+
+def test_yaml_llm_prompt_interpolation(tmp_path: Path) -> None:
+    wf = workflow_from_spec(
+        {
+            "name": "llm-interp",
+            "initial": "greet",
+            "steps": {
+                "greet": {
+                    "require": ["name", "topic"],
+                    "llm": {
+                        "prompt": "Hello {name}, let's talk about {topic}.",
+                        "output_key": "greeting",
+                    },
+                },
+            },
+        }
+    )
+    mock = MockLLMClient()
+    mock.enqueue("Hi Alice!")
+    store = JSONLStore(tmp_path)
+    result = run_with_mock(wf, store, mock, inputs={"name": "Alice", "topic": "testing"})
+    assert result.status == "completed"
+    events = store.load_events(result.run_id)
+    llm_reqs = [e for e in events if e["type"] == "llm_request"]
+    assert len(llm_reqs) >= 1
+
+
+def test_yaml_llm_missing_output_key_raises() -> None:
+    with pytest.raises(ValueError, match="output_key"):
+        workflow_from_spec(
+            {
+                "name": "bad",
+                "initial": "step1",
+                "steps": {
+                    "step1": {
+                        "llm": {
+                            "prompt": "do stuff",
+                        },
+                    },
+                },
+            }
+        )
 

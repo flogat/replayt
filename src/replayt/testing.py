@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from typing import Any
 
@@ -10,6 +11,61 @@ from replayt.persistence.base import EventStore
 from replayt.runner import Runner, RunResult
 from replayt.types import LogMode
 from replayt.workflow import Workflow
+
+
+class DryRunLLMClient(OpenAICompatClient):
+    """Returns placeholder responses without calling any LLM. Useful for ``replayt run --dry-run``."""
+
+    def __init__(self) -> None:
+        super().__init__(LLMSettings(api_key="dry-run"))
+
+    @staticmethod
+    def _minimal_json_from_schema(schema: dict[str, Any]) -> dict[str, Any]:
+        """Generate a minimal valid JSON object from a JSON Schema."""
+        props = schema.get("properties", {})
+        required = set(schema.get("required", []))
+        result: dict[str, Any] = {}
+        for key, prop in props.items():
+            if key not in required and not props:
+                continue
+            typ = prop.get("type", "string")
+            if typ == "string":
+                result[key] = ""
+            elif typ == "integer":
+                result[key] = 0
+            elif typ == "number":
+                result[key] = 0
+            elif typ == "boolean":
+                result[key] = False
+            elif typ == "array":
+                result[key] = []
+            elif typ == "object":
+                result[key] = {}
+            else:
+                result[key] = ""
+        return result
+
+    def chat_completions(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.0,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+        extra_headers: dict[str, str] | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        content = "{}"
+        if response_format and isinstance(response_format, dict):
+            json_schema = response_format.get("json_schema", {})
+            schema_body = json_schema.get("schema") if isinstance(json_schema, dict) else None
+            if isinstance(schema_body, dict):
+                content = json.dumps(self._minimal_json_from_schema(schema_body))
+        return {
+            "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
+        }
 
 
 class MockLLMClient(OpenAICompatClient):

@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from replayt.exceptions import ApprovalPending, RunFailed
+from replayt.exceptions import ApprovalPending, ContextSchemaError, RunFailed
 from replayt.llm import LLMBridge, LLMSettings, OpenAICompatClient
 from replayt.persistence.base import EventStore
 from replayt.tools import ToolRegistry
@@ -36,6 +36,33 @@ class RunResult:
     status: str  # completed | failed | paused
     final_state: str | None = None
     error: str | None = None
+
+    def _repr_html_(self) -> str:
+        status_colors = {
+            "completed": ("#065f46", "#d1fae5"),
+            "failed": ("#991b1b", "#fee2e2"),
+            "paused": ("#854d0e", "#fef9c3"),
+        }
+        fg, bg = status_colors.get(self.status, ("#374151", "#f3f4f6"))
+        parts = [
+            '<div style="font-family:system-ui,sans-serif;border:1px solid #e5e7eb;border-radius:8px;'
+            'padding:12px 16px;max-width:420px;background:#fff;">',
+            f'<div style="font-size:13px;color:#6b7280;margin-bottom:4px;">run_id: '
+            f"<code>{self.run_id}</code></div>",
+            f'<div style="margin-bottom:4px;">'
+            f'<span style="display:inline-block;padding:2px 8px;border-radius:4px;font-size:12px;'
+            f'font-weight:600;color:{fg};background:{bg};">{self.status}</span></div>',
+        ]
+        if self.final_state is not None:
+            parts.append(
+                f'<div style="font-size:13px;color:#374151;">final_state: <strong>{self.final_state}</strong></div>'
+            )
+        if self.error:
+            parts.append(
+                f'<div style="font-size:13px;color:#991b1b;margin-top:4px;">error: {self.error}</div>'
+            )
+        parts.append("</div>")
+        return "".join(parts)
 
 
 class RunContext:
@@ -245,6 +272,26 @@ class Runner:
                 policy = self.workflow.retry_policy_for(state)
 
                 self._emit_payload("state_entered", {"state": state})
+
+                expects = self.workflow.expects_for(state)
+                if expects:
+                    violations: list[str] = []
+                    for key, expected_type in expects.items():
+                        value = ctx.data.get(key)
+                        if value is None and key not in ctx.data:
+                            violations.append(f"missing key {key!r}")
+                        elif expected_type is not object and value is not None and not isinstance(value, expected_type):
+                            violations.append(
+                                f"key {key!r}: expected {expected_type.__name__}, got {type(value).__name__}"
+                            )
+                    if violations:
+                        schema_err = ContextSchemaError(state, violations)
+                        err_detail = _serialize_error(
+                            schema_err, include_traceback=self.include_tracebacks
+                        )
+                        self._emit_payload("step_error", {"state": state, "error": err_detail})
+                        self._emit_payload("run_failed", {"error": err_detail, "state": state})
+                        raise RunFailed(str(schema_err)) from schema_err
 
                 next_state: str | None = None
                 last_err: Exception | None = None

@@ -166,3 +166,97 @@ def test_fails_on_undeclared_transition(tmp_path: Path) -> None:
     result = Runner(wf, store, log_mode=LogMode.redacted).run()
     assert result.status == "failed"
     assert "undeclared transition" in str(result.error)
+
+
+def test_expects_list_missing_key_fails(tmp_path: Path) -> None:
+    wf = Workflow("schema")
+    wf.set_initial("need_key")
+
+    @wf.step("need_key", expects=["account_id"])
+    def need_key(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert result.status == "failed"
+    assert "account_id" in str(result.error)
+
+
+def test_expects_dict_wrong_type_fails(tmp_path: Path) -> None:
+    wf = Workflow("schema_type")
+    wf.set_initial("typed")
+
+    @wf.step("typed", expects={"account_id": str})
+    def typed(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run(inputs={"account_id": 42})
+    assert result.status == "failed"
+    assert "expected str" in str(result.error)
+    assert "got int" in str(result.error)
+
+
+def test_expects_dict_correct_type_succeeds(tmp_path: Path) -> None:
+    wf = Workflow("schema_ok")
+    wf.set_initial("typed")
+
+    @wf.step("typed", expects={"account_id": str})
+    def typed(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run(inputs={"account_id": "abc"})
+    assert result.status == "completed"
+
+
+def test_expects_list_validates_existence(tmp_path: Path) -> None:
+    wf = Workflow("schema_list")
+    wf.set_initial("check")
+
+    @wf.step("check", expects=["x", "y"])
+    def check(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run(inputs={"x": 1})
+    assert result.status == "failed"
+    assert "missing key 'y'" in str(result.error)
+
+    result_ok = Runner(wf, store, log_mode=LogMode.redacted).run(inputs={"x": 1, "y": 2})
+    assert result_ok.status == "completed"
+
+
+def test_context_schema_error_message_includes_step_and_violations(tmp_path: Path) -> None:
+    wf = Workflow("schema_msg")
+    wf.set_initial("validate")
+
+    @wf.step("validate", expects={"name": str, "age": int})
+    def validate(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run(inputs={"name": 123})
+    assert result.status == "failed"
+    assert "validate" in str(result.error)
+    assert "missing key 'age'" in str(result.error)
+    assert "expected str" in str(result.error)
+
+
+def test_context_schema_error_logged_as_step_error_event(tmp_path: Path) -> None:
+    wf = Workflow("schema_event")
+    wf.set_initial("guarded")
+
+    @wf.step("guarded", expects=["token"])
+    def guarded(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert result.status == "failed"
+
+    events = store.load_events(result.run_id)
+    step_errors = [e for e in events if e["type"] == "step_error"]
+    assert len(step_errors) == 1
+    assert step_errors[0]["payload"]["state"] == "guarded"
+    assert step_errors[0]["payload"]["error"]["type"] == "ContextSchemaError"

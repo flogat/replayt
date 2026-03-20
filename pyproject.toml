@@ -27,6 +27,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+notebook = ["ipython>=8.0"]
 yaml = ["PyYAML>=6.0"]
 dev = [
   "build>=1.2.2",

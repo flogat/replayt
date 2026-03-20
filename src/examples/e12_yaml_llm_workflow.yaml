@@ -1,0 +1,27 @@
+name: yaml_llm_demo
+version: "1"
+initial: classify
+
+edges:
+  - {from: classify, to: respond}
+
+steps:
+  classify:
+    require: [ticket]
+    llm:
+      system: "You are a support ticket classifier. Return valid JSON."
+      prompt: "Classify this support ticket into a category and priority.\n\nTicket: {ticket}"
+      schema:
+        category:
+          type: string
+        priority:
+          type: string
+          enum: [low, medium, high]
+        reasoning:
+          type: string
+      output_key: classification
+    next: respond
+
+  respond:
+    set:
+      status: classified

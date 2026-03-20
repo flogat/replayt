@@ -25,6 +25,50 @@ from replayt.yaml_workflow import load_workflow_yaml, workflow_from_spec
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
+_SUPPORTED_CONFIG_KEYS = {"log_dir", "log_mode", "sqlite", "provider", "model", "timeout"}
+
+
+def _load_project_config() -> tuple[dict[str, Any], str | None]:
+    """Walk up from cwd looking for ``pyproject.toml`` (``[tool.replayt]``) or ``.replaytrc.toml``.
+
+    Returns ``(config_dict, config_path_or_None)``.
+    """
+    try:
+        import tomllib  # type: ignore[import-not-found]
+    except ImportError:
+        try:
+            import tomli as tomllib  # type: ignore[import-not-found,no-redef]
+        except ImportError:
+            return {}, None
+
+    cur = Path.cwd().resolve()
+    for directory in (cur, *cur.parents):
+        rc = directory / ".replaytrc.toml"
+        if rc.is_file():
+            with open(rc, "rb") as f:
+                data = tomllib.load(f)
+            return {k: v for k, v in data.items() if k in _SUPPORTED_CONFIG_KEYS}, str(rc)
+
+        pyproject = directory / "pyproject.toml"
+        if pyproject.is_file():
+            with open(pyproject, "rb") as f:
+                data = tomllib.load(f)
+            section = (data.get("tool") or {}).get("replayt")
+            if isinstance(section, dict):
+                return {k: v for k, v in section.items() if k in _SUPPORTED_CONFIG_KEYS}, str(pyproject)
+    return {}, None
+
+
+_PROJECT_CONFIG: dict[str, Any] | None = None
+_PROJECT_CONFIG_PATH: str | None = None
+
+
+def _get_project_config() -> tuple[dict[str, Any], str | None]:
+    global _PROJECT_CONFIG, _PROJECT_CONFIG_PATH  # noqa: PLW0603
+    if _PROJECT_CONFIG is None:
+        _PROJECT_CONFIG, _PROJECT_CONFIG_PATH = _load_project_config()
+    return _PROJECT_CONFIG, _PROJECT_CONFIG_PATH
+
 
 def _parse_log_mode(log_mode: str) -> LogMode:
     key = log_mode.strip().lower()
@@ -211,11 +255,18 @@ OPENAI_API_KEY=
 def cmd_init(
     path: Path = typer.Option(Path("."), "--path", "-p", help="Directory to write scaffold files into."),
     force: bool = typer.Option(False, help="Overwrite existing workflow.py / .env.example."),
+    template: str = typer.Option("basic", "--template", "-t", help="basic|approval|tool-using|yaml"),
 ) -> None:
-    """Create a minimal workflow.py and .env.example in the given directory."""
+    """Create a minimal workflow file and .env.example in the given directory."""
 
+    from replayt.cli.templates import TEMPLATES
+
+    if template not in TEMPLATES:
+        raise typer.BadParameter(f"Unknown template {template!r}; choose from: {', '.join(sorted(TEMPLATES))}")
+
+    content, filename = TEMPLATES[template]
     path.mkdir(parents=True, exist_ok=True)
-    wf_file = path / "workflow.py"
+    wf_file = path / filename
     env_file = path / ".env.example"
     if not force:
         if wf_file.exists() or env_file.exists():
@@ -224,9 +275,9 @@ def cmd_init(
                 err=True,
             )
             raise typer.Exit(code=1)
-    wf_file.write_text(INIT_WORKFLOW_PY, encoding="utf-8")
+    wf_file.write_text(content, encoding="utf-8")
     env_file.write_text(INIT_ENV_EXAMPLE, encoding="utf-8")
-    typer.echo(f"Wrote {wf_file}")
+    typer.echo(f"Wrote {wf_file} (template={template})")
     typer.echo(f"Wrote {env_file}")
     typer.echo("Next: python -m venv .venv && activate, pip install replayt, export OPENAI_API_KEY=...")
     typer.echo(f"Run: replayt run {wf_file} --inputs-json '{{}}'")
@@ -255,6 +306,9 @@ def cmd_run(
         "--timeout",
         help="Kill the run after this many seconds with exit code 1.",
     ),
+    dry_run: bool = typer.Option(
+        False, "--dry-run", help="Trace execution with placeholder LLM responses (no API calls)."
+    ),
     output: Literal["text", "json"] = typer.Option(
         "text",
         "--output",
@@ -265,6 +319,17 @@ def cmd_run(
     if resume and not run_id:
         typer.echo("When using --resume, you must pass --run-id", err=True)
         raise typer.Exit(code=2)
+
+    cfg, _ = _get_project_config()
+    if log_dir == Path(".replayt/runs") and cfg.get("log_dir"):
+        log_dir = Path(cfg["log_dir"])
+    if sqlite is None and cfg.get("sqlite"):
+        sqlite = Path(cfg["sqlite"])
+    if log_mode == "redacted" and cfg.get("log_mode"):
+        log_mode = cfg["log_mode"]
+    if timeout is None and cfg.get("timeout"):
+        timeout = int(cfg["timeout"])
+
     wf = _load_target(target)
     inputs: dict[str, Any] | None = None
     if inputs_json is not None:
@@ -281,7 +346,13 @@ def cmd_run(
             tags_dict[k] = v
     lm = _parse_log_mode(log_mode)
     store = _make_store(log_dir, sqlite)
-    runner = Runner(wf, store, log_mode=lm)
+    if dry_run:
+        from replayt.testing import DryRunLLMClient
+
+        typer.echo("Dry run: LLM calls return placeholder responses")
+        runner = Runner(wf, store, log_mode=lm, llm_client=DryRunLLMClient())
+    else:
+        runner = Runner(wf, store, log_mode=lm)
     if timeout is not None and timeout > 0:
         if sys.platform != "win32":
             def _timeout_handler(signum: int, frame: Any) -> None:
@@ -891,9 +962,14 @@ def cmd_doctor() -> None:
     except ImportError:
         pkg_ver = "unknown"
 
+    cfg, cfg_path = _get_project_config()
     settings = LLMSettings.from_env()
     checks: list[tuple[str, bool, str]] = []
     checks.append(("replayt", True, pkg_ver))
+    if cfg_path:
+        checks.append(("project_config", True, cfg_path))
+    else:
+        checks.append(("project_config", False, "No project config found"))
     pyver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     checks.append(("python", True, pyver))
     prov = os.environ.get("REPLAYT_PROVIDER", "")
@@ -932,6 +1008,174 @@ def cmd_doctor() -> None:
     for name, ok, detail in checks:
         icon = "OK" if ok else "WARN"
         typer.echo(f"[{icon}] {name}: {detail}")
+
+
+@app.command("report")
+def cmd_report(
+    run_id: str = typer.Argument(..., help="Run ID to generate report for"),
+    log_dir: Path = typer.Option(Path(".replayt/runs"), "--log-dir"),
+    sqlite: Path | None = typer.Option(None, "--sqlite"),
+    out: str | None = typer.Option(None, "--out", help="Output file path (default: stdout)"),
+) -> None:
+    """Generate a self-contained HTML report for a run."""
+
+    from replayt.cli.report_template import (
+        OUTPUT_ITEM,
+        OUTPUTS_SECTION,
+        REPORT_HTML,
+        TIMELINE_ITEM,
+        TOOL_CALL_ITEM,
+        TOOL_CALLS_SECTION,
+    )
+
+    store = _read_store(log_dir, sqlite)
+    events = store.load_events(run_id)
+    if not events:
+        typer.echo(f"No events for run_id={run_id!r}", err=True)
+        raise typer.Exit(code=2)
+
+    workflow_name = ""
+    workflow_version = ""
+    status = "unknown"
+    tags: dict[str, str] = {}
+    states: list[dict[str, str]] = []
+    outputs: list[dict[str, Any]] = []
+    tool_calls: list[dict[str, Any]] = []
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    first_ts: str | None = None
+    last_ts: str | None = None
+
+    for e in events:
+        ts = e.get("ts", "")
+        if first_ts is None:
+            first_ts = ts
+        last_ts = ts
+        typ = e.get("type")
+        payload = e.get("payload") or {}
+
+        if typ == "run_started":
+            workflow_name = str(payload.get("workflow_name", ""))
+            workflow_version = str(payload.get("workflow_version", ""))
+            tags = payload.get("tags") or {}
+        elif typ == "state_entered":
+            states.append({"state": str(payload.get("state", "")), "ts": ts})
+        elif typ == "structured_output":
+            outputs.append({"schema_name": payload.get("schema_name", ""), "data": payload.get("data")})
+        elif typ == "tool_call":
+            tool_calls.append({"tool": payload.get("tool", ""), "seq": e.get("seq", ""), "args": payload.get("args")})
+        elif typ == "tool_result":
+            tool_calls.append({
+                "tool": payload.get("tool", "result"),
+                "seq": e.get("seq", ""),
+                "args": payload.get("result"),
+            })
+        elif typ == "llm_response":
+            usage = payload.get("usage") or {}
+            pt = usage.get("prompt_tokens")
+            ct = usage.get("completion_tokens")
+            tt = usage.get("total_tokens")
+            if isinstance(pt, int):
+                prompt_tokens += pt
+            if isinstance(ct, int):
+                completion_tokens += ct
+            if isinstance(tt, int):
+                total_tokens += tt
+        elif typ == "run_completed":
+            status = str(payload.get("status", status))
+        elif typ == "run_paused":
+            status = "paused"
+        elif typ == "run_failed":
+            status = "failed"
+
+    duration = "n/a"
+    t0 = _parse_iso_ts(first_ts)
+    t1 = _parse_iso_ts(last_ts)
+    if t0 and t1:
+        delta = t1 - t0
+        secs = delta.total_seconds()
+        if secs < 60:
+            duration = f"{secs:.1f}s"
+        else:
+            duration = f"{secs / 60:.1f}m"
+
+    status_classes = {
+        "completed": "bg-green-100 text-green-800",
+        "failed": "bg-red-100 text-red-800",
+        "paused": "bg-yellow-100 text-yellow-800",
+    }
+    status_class = status_classes.get(status, "bg-slate-100 text-slate-800")
+
+    tags_html = ""
+    if tags:
+        tag_strs = ", ".join(f"{html.escape(k)}={html.escape(v)}" for k, v in tags.items())
+        tags_html = f'<p><span class="font-medium text-slate-500">Tags:</span> {tag_strs}</p>'
+
+    timeline_items = []
+    for s in states:
+        dot_class = "bg-slate-400"
+        if s["state"] == states[-1]["state"] and status == "completed":
+            dot_class = "bg-green-500"
+        elif s["state"] == states[-1]["state"] and status == "failed":
+            dot_class = "bg-red-500"
+        timeline_items.append(
+            TIMELINE_ITEM.format(state=html.escape(s["state"]), ts=html.escape(s["ts"]), dot_class=dot_class)
+        )
+    timeline_html = (
+        "\n".join(timeline_items)
+        if timeline_items
+        else '<li class="ml-6 text-sm text-slate-400">No states recorded</li>'
+    )
+
+    outputs_section = ""
+    if outputs:
+        items = []
+        for o in outputs:
+            items.append(
+                OUTPUT_ITEM.format(
+                    schema_name=html.escape(str(o["schema_name"])),
+                    data_json=html.escape(json.dumps(o["data"], indent=2, default=str)),
+                )
+            )
+        outputs_section = OUTPUTS_SECTION.format(items="\n".join(items))
+
+    tool_calls_section = ""
+    if tool_calls:
+        items = []
+        for tc in tool_calls:
+            items.append(
+                TOOL_CALL_ITEM.format(
+                    tool=html.escape(str(tc["tool"])),
+                    seq=html.escape(str(tc["seq"])),
+                    detail_json=html.escape(json.dumps(tc.get("args"), indent=2, default=str)),
+                )
+            )
+        tool_calls_section = TOOL_CALLS_SECTION.format(items="\n".join(items))
+
+    report = REPORT_HTML.format(
+        run_id=html.escape(run_id),
+        workflow_name=html.escape(workflow_name),
+        workflow_version=html.escape(workflow_version),
+        status=html.escape(status),
+        status_class=status_class,
+        duration=html.escape(duration),
+        tags_html=tags_html,
+        timeline_html=timeline_html,
+        outputs_section=outputs_section,
+        tool_calls_section=tool_calls_section,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+        total_tokens=total_tokens,
+    )
+
+    if out:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(report, encoding="utf-8")
+        typer.echo(f"Wrote report to {out_path}")
+    else:
+        typer.echo(report)
 
 
 def main() -> None:

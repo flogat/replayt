@@ -1044,3 +1044,104 @@ def run_with_notify(runner: Runner, wf_inputs: dict, notify_url: str) -> dict:
 ```
 
 Or use the `ForwardingStore` pattern (above) to stream events in real-time to any HTTP sink. The notification layer is yours; replayt stays the engine.
+
+### Pattern: dashboard without a dashboard (use existing tools)
+
+**Request:** "I want a web app to browse runs, view timelines, and approve pending runs from the browser."
+
+**Why rejected:** A dashboard is a full product surface requiring auth, sessions, real-time updates, and deployment. It conflicts with local-first and tiny mental model. replayt is the engine, not the dashboard.
+
+**Workaround:** Combine existing tools for a dashboard-like experience with zero custom code:
+
+1. **Single-run HTML report:** `replayt report RUN_ID --out run.html` produces a self-contained shareable page.
+2. **SQL over runs with datasette:** Point [datasette](https://datasette.io/) at your SQLite store for an instant browsable, filterable UI:
+
+```bash
+pip install datasette
+replayt run my_workflow.py --sqlite .replayt/runs.db --inputs-json '...'
+datasette .replayt/runs.db
+```
+
+3. **DuckDB ad-hoc analytics:** Query JSONL logs directly (see DuckDB pattern above).
+4. **Approval bridge:** See the FastAPI approval bridge pattern above for a minimal custom approval API.
+
+The pieces exist; assemble the combination your org needs.
+
+### Pattern: static graph with dynamic data (no runtime state creation)
+
+**Request:** "I want the LLM to invent new states at runtime -- 'I need a research step, then a synthesis step.' The graph should grow dynamically."
+
+**Why rejected:** Directly violates *determinism over autonomy* and *explicit states over hidden loops*. If the model can create states, the workflow is no longer inspectable before execution, and replay semantics break.
+
+**Workaround:** Pre-declare all possible states. Let the LLM populate *data* (what to do), not *graph structure* (which states exist):
+
+```python
+from pydantic import BaseModel
+
+class Plan(BaseModel):
+    steps: list[str]
+    reasoning: str
+
+@wf.step("plan")
+def plan(ctx):
+    plan = ctx.llm.parse(Plan, messages=[
+        {"role": "user", "content": f"Plan tasks for: {ctx.get('goal')}"}
+    ])
+    ctx.set("plan", plan.model_dump())
+    ctx.set("step_index", 0)
+    return "execute"
+
+@wf.step("execute")
+def execute(ctx):
+    plan = ctx.get("plan", {})
+    idx = ctx.get("step_index", 0)
+    steps = plan.get("steps", [])
+    if idx >= len(steps):
+        return "summarize"
+    task = steps[idx]
+    result = ctx.llm.complete_text(messages=[
+        {"role": "user", "content": f"Execute this task: {task}"}
+    ])
+    ctx.set(f"result_{idx}", result)
+    ctx.set("step_index", idx + 1)
+    return "execute"  # loop back
+
+@wf.step("summarize")
+def summarize(ctx):
+    ctx.set("status", "all_tasks_complete")
+    return None
+```
+
+For variable-length plans, use a loop state with a counter. The graph is `plan -> execute -> (loop) -> summarize` -- three states, fully inspectable, replayable.
+
+### Pattern: parallel I/O inside one step (no concurrent FSM steps)
+
+**Request:** "My workflow has `enrich_from_crm` and `enrich_from_billing` -- two independent API calls. Running them sequentially doubles latency. I want parallel steps."
+
+**Why rejected:** Parallel execution within a single run introduces concurrency semantics (shared mutable context, race conditions, non-deterministic event ordering) that break determinism and make replay ambiguous.
+
+**Workaround:** Use `concurrent.futures` inside one step. The step handler is the concurrency boundary; the runner sees a single atomic state transition:
+
+```python
+import concurrent.futures
+
+def fetch_crm(account_id: str) -> dict:
+    # your CRM API call
+    ...
+
+def fetch_billing(account_id: str) -> dict:
+    # your billing API call
+    ...
+
+@wf.step("enrich")
+def enrich(ctx):
+    account_id = ctx.get("account_id")
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+        crm_future = pool.submit(fetch_crm, account_id)
+        billing_future = pool.submit(fetch_billing, account_id)
+        ctx.set("crm_data", crm_future.result(timeout=30))
+        ctx.set("billing_data", billing_future.result(timeout=30))
+    return "score"
+```
+
+Parallelism lives *inside* one step, not across the FSM. For truly independent enrichment workflows, run them as separate `Runner.run()` calls (separate run IDs, separate logs) and merge results in a parent step.

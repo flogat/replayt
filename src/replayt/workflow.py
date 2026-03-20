@@ -18,15 +18,23 @@ class Workflow:
         self._steps: dict[str, Callable[..., Any]] = {}
         self._retries: dict[str, RetryPolicy] = {}
         self._edges: list[tuple[str, str]] = []
+        self._expects: dict[str, dict[str, type]] = {}
 
     def set_initial(self, state: str) -> None:
         self.initial_state = state
 
-    def step(self, name: str, *, retries: RetryPolicy | None = None) -> Callable[[F], F]:
+    def step(
+        self, name: str, *, retries: RetryPolicy | None = None, expects: dict[str, type] | list[str] | None = None
+    ) -> Callable[[F], F]:
         def deco(fn: F) -> F:
             self._steps[name] = fn
             if retries is not None:
                 self._retries[name] = retries
+            if expects is not None:
+                if isinstance(expects, list):
+                    self._expects[name] = {key: object for key in expects}
+                else:
+                    self._expects[name] = expects
             return fn
 
         return deco
@@ -35,6 +43,9 @@ class Workflow:
         if name not in self._steps:
             raise KeyError(f"Unknown step/state: {name}")
         return self._steps[name]
+
+    def expects_for(self, name: str) -> dict[str, type]:
+        return self._expects.get(name, {})
 
     def retry_policy_for(self, name: str) -> RetryPolicy:
         return self._retries.get(name, RetryPolicy())

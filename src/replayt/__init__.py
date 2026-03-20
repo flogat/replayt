@@ -1,11 +1,17 @@
-from replayt.exceptions import ApprovalPending, ReplaytError, RunFailed
+from replayt.exceptions import ApprovalPending, ContextSchemaError, ReplaytError, RunFailed
 from replayt.runner import RunContext, Runner, RunResult, resolve_approval_on_store
 from replayt.testing import MockLLMClient, assert_events, run_with_mock
 from replayt.types import LogMode, RetryPolicy
 from replayt.workflow import Workflow
 
+try:
+    from replayt.notebook import display_graph, display_run
+except ImportError:
+    pass
+
 __all__ = [
     "ApprovalPending",
+    "ContextSchemaError",
     "LogMode",
     "MockLLMClient",
     "ReplaytError",
@@ -16,6 +22,8 @@ __all__ = [
     "RetryPolicy",
     "Workflow",
     "assert_events",
+    "display_graph",
+    "display_run",
     "resolve_approval_on_store",
     "run_with_mock",
 ]

@@ -25,5 +25,15 @@ class ApprovalPending(ReplaytError):
         super().__init__(summary)
 
 
+class ContextSchemaError(ReplaytError):
+    """Raised when step context expectations are not met."""
+
+    def __init__(self, step_name: str, violations: list[str]) -> None:
+        self.step_name = step_name
+        self.violations = violations
+        msg = f"Context schema violation in step {step_name!r}: {'; '.join(violations)}"
+        super().__init__(msg)
+
+
 class RunFailed(ReplaytError):
     """Fatal workflow failure after retries exhausted."""

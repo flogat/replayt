@@ -1,10 +1,24 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
+
+from pydantic import create_model
 
 from replayt.types import RetryPolicy
 from replayt.workflow import Workflow
+
+_TYPE_MAP: dict[str, type] = {"string": str, "integer": int, "float": float, "boolean": bool}
+
+
+def _build_pydantic_model(name: str, schema: dict[str, Any]) -> type:
+    fields: dict[str, Any] = {}
+    for field_name, field_spec in schema.items():
+        base_type = _TYPE_MAP.get(field_spec.get("type", "string"), str)
+        if "enum" in field_spec:
+            base_type = Literal[tuple(field_spec["enum"])]  # type: ignore[valid-type]
+        fields[field_name] = (base_type, ...)
+    return create_model(name, **fields)
 
 
 def load_workflow_yaml(path: Path) -> dict[str, Any]:
@@ -48,6 +62,13 @@ def workflow_from_spec(spec: dict[str, Any]) -> Workflow:
         )
 
         def make_handler(step_name: str, step_cfg: dict[str, Any]):
+            llm_spec = step_cfg.get("llm")
+            if llm_spec is not None:
+                if not isinstance(llm_spec, dict) or "prompt" not in llm_spec:
+                    raise ValueError(f"step {step_name!r} llm must be a mapping with at least 'prompt'")
+                if not llm_spec.get("output_key"):
+                    raise ValueError(f"step {step_name!r} llm must include 'output_key'")
+
             def handler(ctx):
                 for key in step_cfg.get("require", []):
                     if ctx.get(str(key)) is None:
@@ -58,6 +79,32 @@ def workflow_from_spec(spec: dict[str, Any]) -> Workflow:
                     raise ValueError(f"step {step_name!r} field 'set' must be a mapping")
                 for key, value in set_values.items():
                     ctx.set(str(key), value)
+
+                llm_cfg = step_cfg.get("llm")
+                if llm_cfg is not None:
+                    output_key = str(llm_cfg["output_key"])
+                    raw_prompt: str = llm_cfg["prompt"]
+                    prompt = raw_prompt.format_map({k: ctx.get(k, "") for k in ctx.data})
+
+                    messages: list[dict[str, Any]] = []
+                    if llm_cfg.get("system"):
+                        messages.append({"role": "system", "content": str(llm_cfg["system"])})
+                    messages.append({"role": "user", "content": prompt})
+
+                    model_override = llm_cfg.get("model")
+                    temperature = float(llm_cfg.get("temperature", 0.0))
+                    llm_kwargs: dict[str, Any] = {"messages": messages, "temperature": temperature}
+                    if model_override:
+                        llm_kwargs["model"] = str(model_override)
+
+                    schema = llm_cfg.get("schema")
+                    if schema:
+                        dynamic_model = _build_pydantic_model(f"{step_name}_output", schema)
+                        result = ctx.llm.parse(dynamic_model, **llm_kwargs)
+                        ctx.set(output_key, result.model_dump())
+                    else:
+                        text = ctx.llm.complete_text(**llm_kwargs)
+                        ctx.set(output_key, text)
 
                 approval = step_cfg.get("approval")
                 if approval is not None:
