@@ -1,6 +1,6 @@
 # replayt
 
-> **Deterministic LLM workflows you can replay.**
+> **Deterministic control flow for LLM workflows you can replay.**
 
 <p align="center">
   <img src="docs/demo.svg" alt="replayt demo: run, inspect, replay" width="820"/>
@@ -8,11 +8,34 @@
 
 **replayt** is a tiny Python library and CLI for developers who want to use LLMs in real workflows **without** adopting a sprawling agent framework, hosted platform, no-code builder, or “AI operating system.”
 
+**Where it fits**
+
+| Topic | **Plain Python** (`if` / `else`, ad hoc logging) | **Agent / planner stacks** | **replayt** |
+| --- | --- | --- | --- |
+| **Control flow** | Fully explicit, but you reinvent structure each time | Often implicit or planner-driven | **Explicit** states and transitions in code |
+| **Audit trail** | Whatever you print | Often uneven | **Append-only JSONL** (and optional SQLite) with a stable event schema |
+| **Human gates** | Custom | Often bolted on | **First-class** pause / resume with exit code `2` |
+| **Tradeoff** | No conventions | Harder to answer “what happened?” | You model a **finite run**—not a distributed workflow engine |
+
 The core idea is simple:
 
 > If a workflow matters, it should be explicit, inspectable, and replayable.
 
-That is the entire pitch.
+Transitions and branching are **your code**; the model does not silently rewrite the graph. Structured outputs are **validated** (Pydantic) and **logged**. **Timeline replay** (`replayt replay`, `replayt report`) walks the **recorded** history without calling the provider again—it is not a promise of bitwise-identical regeneration from the API (see [docs/SCOPE.md](docs/SCOPE.md)).
+
+**Start here:** [Five-minute quickstart](docs/QUICKSTART.md) · [Progressive tutorial & patterns](src/examples/README.md)
+
+**Terminal demo:** Record a short walkthrough with [docs/DEMO.md](docs/DEMO.md) (asciinema or screen capture); embed or link the cast from the README when published.
+
+**Three commands** once installed:
+
+```bash
+replayt run examples.e01_hello_world:wf --inputs-json '{"customer_name":"Sam"}'
+replayt inspect <run_id>
+replayt replay <run_id>
+```
+
+That is the whole loop; everything else is detail.
 
 replayt gives you a small, strict workflow runner where:
 
@@ -181,6 +204,7 @@ When things go wrong, the run log is the debugging tool:
 - `replayt run TARGET` — `--output json` for machine-readable result; `--tag key=value`; `--timeout SECONDS`; exit **0** completed, **1** failed, **2** paused
 - `replayt inspect RUN_ID` — `--output json` (or legacy `--json`) for summary + events
 - `replayt replay RUN_ID` — `--format html` for a shareable Tailwind HTML timeline (`--out path`)
+- `replayt report RUN_ID` — self-contained HTML report; `--out path` or stdout
 - `replayt resume TARGET RUN_ID --approval ID` — same exit codes as `run`
 - `replayt graph TARGET`
 - `replayt validate TARGET` — check graph integrity without calling any LLM (CI-friendly)
@@ -210,9 +234,9 @@ python -m venv .venv
 source .venv/bin/activate  # POSIX
 # .venv\Scripts\activate     # Windows cmd.exe
 # .venv\Scripts\Activate.ps1 # Windows PowerShell
-pip install -e ".[dev]"    # contributors: tests, ruff, PyYAML
-# pip install -e ".[yaml]"   # minimal editable + YAML workflows only
-# pip install replayt        # when published: add [yaml] if you need YAML targets
+pip install replayt
+# pip install replayt[yaml]  # if you run .yaml / .yml workflow targets
+# pip install -e ".[dev]"     # from a clone: tests, ruff, PyYAML for contributors
 export OPENAI_API_KEY=...  # required only for workflows that call a model
 replayt doctor
 ```
@@ -248,8 +272,9 @@ python -m venv .venv
 Then install replayt:
 
 ```bash
-pip install -e ".[dev]"   # contributors
-# pip install replayt      # end users (add [yaml] for YAML workflow targets)
+pip install replayt
+# pip install replayt[yaml]  # YAML workflow targets
+# pip install -e ".[dev]"    # from a clone: contributors
 ```
 
 ### Loading `.env` files
@@ -324,6 +349,7 @@ replayt run examples.issue_triage:wf \
 ```bash
 replayt inspect <run_id>
 replayt replay <run_id>
+replayt report <run_id> --out report.html   # self-contained HTML summary
 replayt runs
 ```
 
@@ -476,11 +502,13 @@ replayt logs the request, response metadata, and validated structured output as 
 
 Start here when you want the repo's major guides in one place:
 
+- [Five-minute quickstart](docs/QUICKSTART.md) — install, first run, annotated JSONL sample
 - [Main README](README.md) — overview, quickstart, examples, and CLI reference
-- [Docs index](docs/README.md) — consolidated documentation for schemas, demos, style notes, and architecture artifacts
-- [Examples README](src/examples/README.md) — runnable workflows, approval patterns, and integration composition ideas
+- [Scope / non-goals (long)](docs/SCOPE.md) — what will not land in core and recommended composition patterns
+- [Docs index](docs/README.md) — schemas, demos, style notes, architecture artifacts
+- [Examples README](src/examples/README.md) — progressive tutorial (14 runnable workflows), approval patterns, integration ideas
 
-See [src/examples/README.md](src/examples/README.md) for a progressive tutorial set with 12 real-life workflows, from a two-step hello-world run to tool use, retries, approvals, and structured LLM output.
+See [src/examples/README.md](src/examples/README.md) for the full tutorial path—from a two-step hello world through tools, retries, approvals, structured LLM output, YAML, and SDK integration examples.
 
 ---
 
@@ -572,13 +600,13 @@ steps:
 
 ## Example workflows included
 
-replayt ships with three example workflows that demonstrate the intended product shape:
+The repo ships a **progressive tutorial** of **14 runnable workflows** (deterministic steps, LLM-backed classification, tools, retries, approvals, YAML, OpenAI/Anthropic SDK patterns)—see [`src/examples/README.md`](src/examples/README.md).
+
+**Featured narratives** (good first reads in the tutorial):
 
 - **GitHub issue triage** — validate issue shape, classify it, route or request more information
-- **Refund policy workflow** — enforce constrained support outcomes with explicit actions
-- **Publishing preflight** — check a draft, pause for approval, then finalize or abort
-
-See [`src/examples/README.md`](src/examples/README.md) for runnable commands.
+- **Refund policy** — constrained support decisions with structured model output
+- **Publishing preflight** — checklist + pause for approval, then finalize or abort
 
 ---
 
@@ -595,6 +623,9 @@ Show a summary and event list for a run. `--output json` (or `--json`) prints `{
 
 ### `replayt replay RUN_ID`
 Show the recorded execution timeline without calling any model APIs. `--format html` emits a self-contained HTML page (Tailwind CDN); `--out PATH` writes to a file.
+
+### `replayt report RUN_ID`
+Generate a self-contained HTML report for a run (summary, states, structured outputs, tool calls). `--out PATH` writes to a file; omit `--out` to print to stdout. Uses `--log-dir` / `--sqlite` like other read-only commands.
 
 ### `replayt resume TARGET RUN_ID --approval ID`
 Resolve an approval gate and continue a paused run. Same exit codes as `run`.
@@ -702,24 +733,7 @@ Put **retries across jobs**, concurrency limits, and backpressure in your schedu
 
 ## Requests we will not take in core (and what to do instead)
 
-replayt stays small on purpose. These are common asks that **do not belong in the core library**; compose them in **your** app or ops stack.
-
-| You might ask for… | Why we avoid it in core | Do this instead |
-| --- | --- | --- |
-| **Hosted approval UI, multi-user queues, team RBAC** | That is a product surface, not a runtime primitive. | Build a tiny local **approval bridge**: read paused runs from JSONL/SQLite, render a UI, append `approval_resolved` (same event shape as `replayt resume`). See **Pattern: approval bridge** in [`src/examples/README.md`](src/examples/README.md). |
-| **OpenTelemetry traces, metrics, fancy dashboards** | replayt is not an observability platform. | Treat JSONL as the **source of truth**; ship lines to Vector, Loki, Splunk, or S3 with your existing pipeline. Example Vector skeleton (conceptual): `source file` → `sink http`/`sink console`; point `include` at `.replayt/runs/*.jsonl`. |
-| **Built-in RAG / memory / vector DB** | Scope creep into an “AI platform.” | Put retrieval **inside a typed tool** or a plain Python function your step calls; return a Pydantic model, log `tool_result`. |
-| **LangChain / LangGraph / “agent framework” integration** | Hides control flow; competes with our explicit FSM story. | If you must: call that stack **inside one step’s handler**; keep transitions and approvals in replayt. Confine the framework to **one step** and normalize to **one** Pydantic exit shape before transitioning. Prefer **no** framework in the hot path. |
-| **Multi-tenant isolation, enterprise secrets managers** | Deployment and policy vary per org. | **One tenant → one log directory** (or SQLite file): e.g. `.replayt/runs/customer_a/` on an **encrypted volume** if policy requires encryption at rest. Load secrets in your process wrapper or shell; export `OPENAI_API_KEY` before `replayt run`. Combine with `LogMode.redacted` or `structured_only` to limit sensitive payloads in logs (see examples README). |
-| **Batch orchestration (Spark, Celery, Airflow as “the runner”)** | replayt is not a distributed engine. | **Outer loop** in your scheduler: for each row/job, `Runner.run(..., inputs=..., run_id=...)` with a unique `run_id`; use separate log dirs per job if needed. See **Pattern: batch driver** in examples README. |
-| **Streaming tokens as first-class events** | Complicates replay semantics and event volume. | Stream inside your code if required; log **final** structured output (or a summary event you emit yourself in application code). Do **not** let the model silently rewrite the graph—changing control flow stays **human- or code-initiated** (`replayt resume`, explicit transitions, or a new run). |
-| **Built-in eval suite (`replayt eval`), leaderboards, golden datasets** | replayt is a workflow runner, not an eval product (see *What replayt is not*). | Drive **`Runner.run`** from **pytest** (or any harness) with frozen inputs; assert on final context or `structured_output` events in JSONL; use **`replayt replay`** for human-readable postmortems. See **Pattern: golden path test** in [`src/examples/README.md`](src/examples/README.md). |
-| **Warehouse-native sinks (Snowflake, BigQuery) and bundled dbt models** | replayt is not an observability or analytics platform. | Treat JSONL as the source of truth: **`duckdb` + `read_json_auto`**, **`jq`**, or your existing log shipper (see the Vector sketch in the OpenTelemetry row). See **Pattern: DuckDB ad-hoc analytics** in [`src/examples/README.md`](src/examples/README.md). |
-| **Workflow plugin marketplace, dynamic `pip install` of steps at runtime** | **Tiny mental model** and explicit code imports; dynamic loading hides behavior. | Distribute shared workflows as **normal Python packages** (`from my_org_workflows import wf`); pin versions in `requirements.txt`. See **Pattern: reusable workflow package** in [`src/examples/README.md`](src/examples/README.md). |
-| **Official Kubernetes operator, sidecar, or “always-on” replayt daemon** | replayt is not a distributed process engine. | Use **one Job Pod or task per run**, or a **queue worker** that calls `Runner.run` once per message (examples README). |
-| **Guaranteed bitwise replay of LLM outputs across providers** | Not achievable in general. | Use **timeline replay** (`replayt replay`) for audit; for tests, **mock** the client or freeze fixtures; pin provider + model in metadata. |
-
-For **per-call LLM settings** (model, temperature, `max_tokens`, timeout, extra headers) without a fork, use `ctx.llm.with_settings(...)` so overrides are explicit and show up under `effective` on `llm_request` events.
+replayt stays small on purpose. The full table of common asks, rationale, and **composition patterns** (approval bridge, batch driver, golden tests, etc.) lives in **[docs/SCOPE.md](docs/SCOPE.md)** so this README stays easier to scan.
 
 ---
 

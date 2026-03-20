@@ -2,6 +2,7 @@
 
 ## 0.2.0 — 2026-03-20
 
+- Documentation: add [`docs/QUICKSTART.md`](docs/QUICKSTART.md) and [`docs/SCOPE.md`](docs/SCOPE.md); tighten README above-the-fold (comparison table, `pip install replayt`, `replayt report`, links); trim [`docs/DEMO.md`](docs/DEMO.md) to checklist; fix examples README link to [`docs/STYLE.md`](docs/STYLE.md); PyPI classifier **Beta**.
 - HTML-escape all user-facing values in `RunResult._repr_html_` to prevent XSS in notebooks.
 - Harden YAML workflow prompt interpolation against attribute-access injection (`format_map` replaced with safe formatter).
 - Reuse `httpx.Client` across LLM calls for connection pooling and lower latency.

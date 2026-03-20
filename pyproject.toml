@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "replayt"
 version = "0.2.0"
-description = "Deterministic LLM workflows you can replay — explicit states, strict schemas, local logs."
+description = "Deterministic control flow for LLM workflows you can replay — explicit states, strict schemas, local logs."
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.10"
 authors = [{ name = "replayt contributors" }]
 keywords = ["llm", "workflow", "fsm", "pydantic", "replay", "deterministic"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.10",

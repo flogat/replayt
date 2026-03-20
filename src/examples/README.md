@@ -9,7 +9,7 @@ Each section below tries to answer four questions:
 - **What command should you run?**
 - **What should you expect to see after it runs?**
 
-If you are new to replayt, read the examples in order. They move from a two-step deterministic workflow to LLM-backed classification, typed tools, retries, and approval gates. By the time you reach the later examples, you should be comfortable opening the corresponding Python file, reading the state handlers, and mapping that code to the events you see in `inspect` and `replay`.
+If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTART.md), then read the sections below **in order**. There are **14** runnable workflows here (sections 1–12, plus OpenAI and Anthropic SDK examples). They move from a two-step deterministic run to LLM-backed classification, typed tools, retries, and approval gates. By the later sections, you should be comfortable opening each source file, reading the state handlers, and mapping that code to the events you see in `inspect` and `replay`.
 
 <p align="center">
   <img src="../../docs/demo-why.svg" alt="typical agent framework vs replayt" width="820"/>
@@ -596,7 +596,7 @@ def resolve(run_id: str, approval_id: str, reject: bool = False) -> dict:
     return {"ok": True}
 ```
 
-For a **shareable HTML timeline** without a server, run `replayt replay RUN_ID --format html --out run.html` (self-contained page using Tailwind CDN). For a richer dashboard, render HTML with Tailwind per [`documentation/STYLE.md`](../../documentation/STYLE.md).
+For a **shareable HTML timeline** without a server, run `replayt replay RUN_ID --format html --out run.html` (self-contained page using Tailwind CDN). For a summary report, use `replayt report RUN_ID --out report.html`. For Tailwind conventions when building your own UI, see [`docs/STYLE.md`](../../docs/STYLE.md).
 
 ### Pattern: batch driver (Airflow / Celery / plain loop)
 
