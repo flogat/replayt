@@ -19,21 +19,25 @@ def test_sqlite_roundtrip(tmp_path: Path) -> None:
     assert ev[0]["type"] == "run_started"
 
 
+def test_sqlite_append_event_allocates_monotonic_sequence(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "db.sqlite3")
+    first = store.append_event("r1", ts="t1", typ="run_started", payload={})
+    second = store.append_event("r1", ts="t2", typ="state_entered", payload={})
+    assert first["seq"] == 1
+    assert second["seq"] == 2
+
+
 def test_multi_store_writes_both(tmp_path: Path) -> None:
     j = JSONLStore(tmp_path / "j")
     s = SQLiteStore(tmp_path / "db.sqlite3")
     m = MultiStore(j, s)
-    m.append(
-        "r2",
-        {"ts": "t", "run_id": "r2", "seq": 1, "type": "run_started", "payload": {}},
-    )
+    event = m.append_event("r2", ts="t", typ="run_started", payload={})
+    assert event["seq"] == 1
     assert len(j.load_events("r2")) == 1
     assert len(s.load_events("r2")) == 1
 
 
 def test_sqlite_store_rejects_path_traversal_run_id(tmp_path: Path) -> None:
-    from replayt.persistence.sqlite import SQLiteStore
-
     store = SQLiteStore(tmp_path / "events.db")
 
     with pytest.raises(ValueError, match="run_id"):

@@ -4,7 +4,7 @@ import inspect
 from collections.abc import Callable
 from typing import Any, TypeVar, get_type_hints
 
-from pydantic import BaseModel
+from pydantic import BaseModel, TypeAdapter
 
 T = TypeVar("T")
 
@@ -34,18 +34,29 @@ class ToolRegistry:
         try:
             sig = inspect.signature(fn)
             hints = get_type_hints(fn)
+            unknown = set(arguments) - set(sig.parameters)
+            if unknown:
+                raise TypeError(f"Unexpected tool arguments: {sorted(unknown)}")
+
             bound: dict[str, Any] = {}
             for param_name, param in sig.parameters.items():
+                if param.kind not in {
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                    inspect.Parameter.KEYWORD_ONLY,
+                }:
+                    raise TypeError(f"Unsupported tool parameter kind for {param_name}: {param.kind}")
                 if param_name not in arguments:
                     if param.default is inspect.Parameter.empty:
                         raise TypeError(f"Missing tool argument: {param_name}")
                     continue
                 raw = arguments[param_name]
-                ann = hints.get(param_name)
-                if isinstance(ann, type) and issubclass(ann, BaseModel):
+                ann = hints.get(param_name, Any)
+                if ann is Any:
+                    bound[param_name] = raw
+                elif isinstance(ann, type) and issubclass(ann, BaseModel):
                     bound[param_name] = ann.model_validate(raw)
                 else:
-                    bound[param_name] = raw
+                    bound[param_name] = TypeAdapter(ann).validate_python(raw)
             result = fn(**bound)
             out: Any = result
             if isinstance(result, BaseModel):
@@ -55,6 +66,12 @@ class ToolRegistry:
         except Exception as e:  # noqa: BLE001
             self._emit(
                 "tool_result",
-                {"state": state, "name": name, "ok": False, "result": None, "error": str(e)},
+                {
+                    "state": state,
+                    "name": name,
+                    "ok": False,
+                    "result": None,
+                    "error": {"type": e.__class__.__name__, "message": str(e)},
+                },
             )
             raise
