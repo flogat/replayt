@@ -43,5 +43,4 @@ def test_workflow_from_spec_records_declared_edges() -> None:
 
     assert wf.name == "yaml-demo"
     assert wf.initial_state == "validate"
-    assert wf.transitions["validate"] == {"approved"}
-    assert wf.transitions["approved"] == {"done"}
+    assert wf.edges() == [("validate", "approved"), ("approved", "done")]
