@@ -99,12 +99,12 @@ steps:
   greet:
     set:
       message: "Hello from YAML workflow"
-    transition: process
+    next: process
 
   process:
     set:
       status: "processed"
-    transition: done
+    next: done
 
   done:
     set:

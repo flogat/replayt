@@ -260,3 +260,46 @@ def test_context_schema_error_logged_as_step_error_event(tmp_path: Path) -> None
     assert len(step_errors) == 1
     assert step_errors[0]["payload"]["state"] == "guarded"
     assert step_errors[0]["payload"]["error"]["type"] == "ContextSchemaError"
+
+
+def test_context_snapshot_deep_copies_nested_data(tmp_path: Path) -> None:
+    """Verify that mutating nested context data after a snapshot does not corrupt the snapshot."""
+
+    wf = Workflow("deep_copy")
+    wf.set_initial("gate")
+    wf.note_transition("gate", "verify")
+
+    @wf.step("gate")
+    def gate(ctx) -> str | None:
+        ctx.set("nested", {"items": [1, 2, 3]})
+        if ctx.is_approved("go"):
+            return "verify"
+        ctx.request_approval("go", summary="proceed?", on_approve="verify")
+
+    @wf.step("verify")
+    def verify(ctx) -> str | None:
+        assert ctx.get("nested") == {"items": [1, 2, 3]}, "snapshot must preserve original nested data"
+        return None
+
+    store = JSONLStore(tmp_path)
+    paused = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert paused.status == "paused"
+
+    resolve_approval_on_store(store, paused.run_id, "go", approved=True)
+    completed = Runner(wf, store, log_mode=LogMode.redacted).run(run_id=paused.run_id, resume=True)
+    assert completed.status == "completed"
+
+
+def test_runner_context_manager_closes_client(tmp_path: Path) -> None:
+    wf = Workflow("ctx_mgr")
+    wf.set_initial("start")
+
+    @wf.step("start")
+    def start(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    with Runner(wf, store, log_mode=LogMode.redacted) as r:
+        result = r.run()
+    assert result.status == "completed"
+    assert r._llm_client._http is None

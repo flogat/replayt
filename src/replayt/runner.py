@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import html as _html
 import time
 import traceback
@@ -140,11 +141,22 @@ class Runner:
         self.store = store
         self.log_mode = log_mode
         self.include_tracebacks = include_tracebacks
+        self._owns_client = llm_client is None
         self._llm_client = llm_client or OpenAICompatClient(llm_settings or LLMSettings.from_env())
         self.run_id: str = ""
         self._current_state: str | None = None
         self._resolved_approved: set[str] = set()
         self._resolved_rejected: set[str] = set()
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._llm_client.close()
+
+    def __enter__(self) -> Runner:
+        return self
+
+    def __exit__(self, *exc: Any) -> None:
+        self.close()
 
     def _emit_payload(self, typ: str, payload: dict[str, Any]) -> None:
         self.store.append_event(self.run_id, ts=_utcnow_iso(), typ=typ, payload=payload)
@@ -311,7 +323,7 @@ class Runner:
                     except ApprovalPending as approval:
                         self._emit_payload(
                             "context_snapshot",
-                            {"state": state, "data": dict(ctx.data)},
+                            {"state": state, "data": copy.deepcopy(ctx.data)},
                         )
                         self._emit_payload(
                             "run_paused",

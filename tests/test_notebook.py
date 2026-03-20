@@ -87,7 +87,7 @@ class TestDisplayRun:
             {
                 "type": "tool_call",
                 "ts": "2025-01-01T00:00:03Z",
-                "payload": {"tool": "calc", "args": {"x": 1}},
+                "payload": {"name": "calc", "arguments": {"x": 1}},
             },
             {
                 "type": "tool_result",

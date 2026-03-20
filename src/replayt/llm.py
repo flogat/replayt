@@ -99,10 +99,18 @@ class OpenAICompatClient:
 
     def __init__(self, settings: LLMSettings | None = None) -> None:
         self.settings = settings or LLMSettings.from_env()
-        self._http = httpx.Client(timeout=self.settings.timeout_seconds)
+        self._http: httpx.Client | None = None
+
+    @property
+    def _client(self) -> httpx.Client:
+        if self._http is None:
+            self._http = httpx.Client(timeout=self.settings.timeout_seconds)
+        return self._http
 
     def close(self) -> None:
-        self._http.close()
+        if self._http is not None:
+            self._http.close()
+            self._http = None
 
     def chat_completions(
         self,
@@ -140,7 +148,7 @@ class OpenAICompatClient:
         last_exc: Exception | None = None
         for attempt in range(max_attempts):
             try:
-                r = self._http.post(url, json=payload, headers=headers, timeout=timeout)
+                r = self._client.post(url, json=payload, headers=headers, timeout=timeout)
                 if r.status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts - 1:
                     retry_after = r.headers.get("retry-after")
                     delay = float(retry_after) if retry_after and retry_after.isdigit() else _RETRY_BASE_DELAY

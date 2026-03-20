@@ -796,7 +796,7 @@ def _run_diff_data(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif typ == "structured_output":
             outputs[str(payload.get("schema_name", ""))] = payload.get("data")
         elif typ == "tool_call":
-            tool_calls.append({"tool": payload.get("tool"), "args": payload.get("args")})
+            tool_calls.append({"tool": payload.get("name"), "args": payload.get("arguments")})
         elif typ == "llm_response":
             ms = payload.get("latency_ms")
             if isinstance(ms, int):
@@ -821,11 +821,12 @@ def cmd_diff(
     run_a: str = typer.Argument(..., metavar="RUN_A"),
     run_b: str = typer.Argument(..., metavar="RUN_B"),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o"),
 ) -> None:
     """Compare two runs side by side: states, outputs, tool calls, status, latency."""
 
-    store = JSONLStore(log_dir)
+    store = _read_store(log_dir, sqlite)
     events_a = store.load_events(run_a)
     events_b = store.load_events(run_b)
     if not events_a:
@@ -1064,10 +1065,12 @@ def cmd_report(
         elif typ == "structured_output":
             outputs.append({"schema_name": payload.get("schema_name", ""), "data": payload.get("data")})
         elif typ == "tool_call":
-            tool_calls.append({"tool": payload.get("tool", ""), "seq": e.get("seq", ""), "args": payload.get("args")})
+            tool_calls.append({
+                "tool": payload.get("name", ""), "seq": e.get("seq", ""), "args": payload.get("arguments"),
+            })
         elif typ == "tool_result":
             tool_calls.append({
-                "tool": payload.get("tool", "result"),
+                "tool": payload.get("name", "result"),
                 "seq": e.get("seq", ""),
                 "args": payload.get("result"),
             })

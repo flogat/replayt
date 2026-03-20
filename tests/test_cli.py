@@ -338,6 +338,24 @@ def test_init_template_yaml(tmp_path: Path) -> None:
     assert "template=yaml" in result.stdout
 
 
+def test_init_template_yaml_runs_all_states(tmp_path: Path) -> None:
+    pytest.importorskip("yaml")
+    runner = CliRunner()
+    runner.invoke(app, ["init", "--path", str(tmp_path), "--template", "yaml"])
+    wf_file = tmp_path / "workflow.yaml"
+    result = runner.invoke(app, ["run", str(wf_file), "--log-dir", str(tmp_path / "logs")])
+    assert result.exit_code == 0
+    assert "status=completed" in result.stdout
+    run_id = next(line.split("=", 1)[1] for line in result.stdout.splitlines() if line.startswith("run_id="))
+    inspect_result = runner.invoke(app, ["inspect", run_id, "--log-dir", str(tmp_path / "logs"), "--output", "json"])
+    assert inspect_result.exit_code == 0
+    import json as _json
+
+    data = _json.loads(inspect_result.stdout)
+    visited = [e["payload"]["state"] for e in data["events"] if e["type"] == "state_entered"]
+    assert visited == ["greet", "process", "done"]
+
+
 def test_init_template_tool_using(tmp_path: Path) -> None:
     runner = CliRunner()
     result = runner.invoke(app, ["init", "--path", str(tmp_path), "--template", "tool-using"])
@@ -457,4 +475,112 @@ def start(ctx):
     content = out_file.read_text(encoding="utf-8")
     assert "tailwindcss" in content
     assert run_id in content
+
+
+def test_diff_command_text_and_json(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "diff_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("diff_test")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    ctx.set("x", ctx.get("x", 0))
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    run_a = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+    assert run_a.exit_code == 0
+    id_a = next(line.split("=", 1)[1] for line in run_a.stdout.splitlines() if line.startswith("run_id="))
+
+    run_b = runner.invoke(
+        app, ["run", str(workflow_path), "--log-dir", str(tmp_path), "--inputs-json", '{"x": 99}']
+    )
+    assert run_b.exit_code == 0
+    id_b = next(line.split("=", 1)[1] for line in run_b.stdout.splitlines() if line.startswith("run_id="))
+
+    text_result = runner.invoke(app, ["diff", id_a, id_b, "--log-dir", str(tmp_path)])
+    assert text_result.exit_code == 0
+    assert "Comparing" in text_result.stdout
+    assert "(same)" in text_result.stdout
+
+    json_result = runner.invoke(app, ["diff", id_a, id_b, "--log-dir", str(tmp_path), "--output", "json"])
+    assert json_result.exit_code == 0
+    import json as _json
+
+    payload = _json.loads(json_result.stdout)
+    assert payload["run_a"] == id_a
+    assert payload["run_b"] == id_b
+    assert "status" in payload
+
+
+def test_diff_command_with_sqlite(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "diff_sqlite_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("diff_sqlite")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "events.sqlite3"
+    runner = CliRunner()
+    run_a = runner.invoke(
+        app,
+        ["run", str(workflow_path), "--log-dir", str(tmp_path / "jsonl"), "--sqlite", str(db_path)],
+    )
+    assert run_a.exit_code == 0
+    id_a = next(line.split("=", 1)[1] for line in run_a.stdout.splitlines() if line.startswith("run_id="))
+
+    run_b = runner.invoke(
+        app,
+        ["run", str(workflow_path), "--log-dir", str(tmp_path / "jsonl"), "--sqlite", str(db_path)],
+    )
+    assert run_b.exit_code == 0
+    id_b = next(line.split("=", 1)[1] for line in run_b.stdout.splitlines() if line.startswith("run_id="))
+
+    result = runner.invoke(app, ["diff", id_a, id_b, "--sqlite", str(db_path)])
+    assert result.exit_code == 0
+    assert "Comparing" in result.stdout
+
+
+def test_report_includes_tool_call_names(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "tool_report_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("tool_report")
+wf.set_initial("use_tool")
+
+def add(a: int, b: int) -> int:
+    return a + b
+
+@wf.step("use_tool")
+def use_tool(ctx):
+    ctx.tools.register(add)
+    ctx.tools.call("add", {"a": 1, "b": 2})
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    run = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    result = runner.invoke(app, ["report", run_id, "--log-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "add" in result.stdout
 

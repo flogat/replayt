@@ -26,8 +26,12 @@ class MultiStore:
         return event
 
     def append(self, run_id: str, event: dict[str, Any]) -> None:
-        for s in self._all:
-            s.append(run_id, event)
+        self._primary.append(run_id, event)
+        for store in self._mirror:
+            try:
+                store.append(run_id, event)
+            except Exception:  # noqa: BLE001
+                _log.warning("Mirror store append failed for run_id=%s", run_id, exc_info=True)
 
     def load_events(self, run_id: str) -> list[dict[str, Any]]:
         return self._primary.load_events(run_id)
