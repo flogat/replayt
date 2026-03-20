@@ -166,25 +166,25 @@ if __name__ == "__main__":
 '''
 
 REPLAY_HTML_CSS = """
-body{{background:#f8fafc;color:#0f172a;font-family:ui-sans-serif,system-ui,sans-serif;margin:0;padding:24px}}
-main{{max-width:56rem;margin:0 auto}}
-.title{{font-size:1.5rem;font-weight:600;margin:0 0 .5rem}}
-.sub{{font-size:.875rem;color:#475569;margin:0 0 1rem}}
-.card{{
+body{background:#f8fafc;color:#0f172a;font-family:ui-sans-serif,system-ui,sans-serif;margin:0;padding:24px}
+main{max-width:56rem;margin:0 auto}
+.title{font-size:1.5rem;font-weight:600;margin:0 0 .5rem}
+.sub{font-size:.875rem;color:#475569;margin:0 0 1rem}
+.card{
   background:#fff;
   border:1px solid #e2e8f0;
   border-radius:.5rem;
   box-shadow:0 1px 2px rgba(15,23,42,.08);
   padding:1rem
-}}
-.row{{
+}
+.row{
   font-family:ui-monospace,SFMono-Regular,monospace;
   font-size:.875rem;
   white-space:pre-wrap;
   border-bottom:1px solid #e2e8f0;
   padding:.25rem 0
-}}
-.foot{{font-size:.75rem;color:#64748b;margin-top:1rem}}
+}
+.foot{font-size:.75rem;color:#64748b;margin-top:1rem}
 """
 
 
