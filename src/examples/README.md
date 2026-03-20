@@ -667,6 +667,70 @@ def normalize(ctx):
         ctx.set("ticket", modern_ticket_shape(ctx.get("raw")))
     return "classify"
 ```
-</think>
-<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>
-TodoWrite
+
+---
+
+## 13. OpenAI SDK integration — `examples.e10_openai_sdk_integration`
+
+A full integration example using the official `openai` Python SDK inside replayt steps: function calling with Pydantic validation, the `tools` parameter, and streaming with a structured summary pass. Transitions and approvals stay in replayt; the SDK lives inside individual step handlers. Requires `pip install openai`.
+
+```bash
+replayt run examples.e10_openai_sdk_integration:wf \
+  --inputs-json '{"issue_title":"Login page crashes on mobile","issue_body":"Steps: open login on iOS Safari, tap submit, white screen."}'
+```
+
+## 14. Anthropic native SDK — `examples.e11_anthropic_native`
+
+A workaround pattern for developers who want `anthropic.Anthropic()` directly instead of an OpenAI-compatible proxy. LLM traffic from native SDKs is **not** auto-logged by replayt — validated `ctx.set` outputs are your audit surface. Requires `pip install anthropic`.
+
+```bash
+replayt run examples.e11_anthropic_native:wf \
+  --inputs-json '{"text":"The new dashboard is fast and intuitive, but the export feature keeps timing out on large datasets."}'
+```
+
+---
+
+## Workaround patterns (rejected features — composition, not core)
+
+These patterns address common requests that conflict with replayt's design principles. They are documented here as workarounds rather than built into core.
+
+### Pattern: async runner (use `asyncio.to_thread`)
+
+**Request:** "I need `await runner.run_async(...)` for my FastAPI app."
+
+**Why rejected:** Doubles the public API surface; cascading complexity through async EventStore, async tool calls, and async step handlers.
+
+**Workaround:** Use `asyncio.to_thread` (Python 3.9+) to run the synchronous `Runner.run` in a thread pool:
+
+```python
+import asyncio
+from replayt import Runner
+
+# runner: Runner (configured as usual)
+
+async def run_workflow(payload: dict, run_id: str) -> dict:
+    result = await asyncio.to_thread(runner.run, inputs=payload, run_id=run_id)
+    return {"run_id": result.run_id, "status": result.status}
+```
+
+The run is still deterministic and logged; the async boundary is yours.
+
+### Pattern: webhook / lifecycle callbacks
+
+**Request:** "I want Slack notifications when a run completes or fails."
+
+**Why rejected:** Webhook config, auth, retry logic, and failure semantics are a product surface, not a runtime primitive. Conflicts with local-first.
+
+**Workaround:** Wrap `Runner.run` in your notification layer:
+
+```python
+import httpx
+from replayt import Runner
+
+def run_with_notify(runner: Runner, wf_inputs: dict, notify_url: str) -> dict:
+    result = runner.run(inputs=wf_inputs)
+    httpx.post(notify_url, json={"run_id": result.run_id, "status": result.status})
+    return {"run_id": result.run_id, "status": result.status}
+```
+
+Or use the `ForwardingStore` pattern (above) to stream events in real-time to any HTTP sink. The notification layer is yours; replayt stays the engine.

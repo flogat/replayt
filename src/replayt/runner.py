@@ -182,6 +182,7 @@ class Runner:
         inputs: dict[str, Any] | None = None,
         run_id: str | None = None,
         resume: bool = False,
+        tags: dict[str, str] | None = None,
     ) -> RunResult:
         if not self.workflow.initial_state:
             raise RuntimeError("Workflow.initial_state is not set (call set_initial)")
@@ -209,15 +210,15 @@ class Runner:
                     start_state = snapped
 
         if not resume:
-            self._emit_payload(
-                "run_started",
-                {
-                    "workflow_name": self.workflow.name,
-                    "workflow_version": self.workflow.version,
-                    "initial_state": self.workflow.initial_state,
-                    "inputs": inputs or {},
-                },
-            )
+            started_payload: dict[str, Any] = {
+                "workflow_name": self.workflow.name,
+                "workflow_version": self.workflow.version,
+                "initial_state": self.workflow.initial_state,
+                "inputs": inputs or {},
+            }
+            if tags:
+                started_payload["tags"] = tags
+            self._emit_payload("run_started", started_payload)
         elif paused_from_state is not None and start_state != paused_from_state:
             self._emit_payload(
                 "approval_applied",
