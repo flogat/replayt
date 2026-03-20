@@ -1,6 +1,6 @@
 # Examples
 
-These examples are meant to show what replayt is good at:
+These examples show what replayt is good at in practice:
 
 - concrete workflows
 - explicit branching
@@ -15,13 +15,13 @@ pip install -e ".[dev]"
 export OPENAI_API_KEY=...
 ```
 
-## A. GitHub issue triage
+## 1. Hello world — `examples.e01_hello_world`
 
-A relatable developer workflow with deterministic routing.
+The smallest workflow in the tutorial set. It writes a greeting and a next action into context so you can inspect and replay the run.
 
 ```bash
-replayt run examples.issue_triage:wf \
-  --inputs-json '{"issue":{"title":"Crash on save","body":"Open app, click save, stack trace appears, expected file write."}}'
+replayt run examples.e01_hello_world:wf \
+  --inputs-json '{"customer_name":"Sam"}'
 ```
 
 Then inspect what happened:
@@ -31,16 +31,17 @@ replayt inspect <run_id>
 replayt replay <run_id>
 ```
 
-## B. Refund policy workflow
+## 2. Intake normalization — `examples.e02_intake_normalization`
 
-A constrained support decision flow where the output space stays narrow and auditable.
+Validate a raw lead payload, normalize formatting, and derive an internal segment.
 
 ```bash
 replayt run examples.e02_intake_normalization:wf \
   --inputs-json '{"lead":{"name":"  Sam Patel ","email":"SAM@example.com ","company":"Northwind","message":"Need a demo for 40 seats"}}'
 ```
 
-### 3. Route a support ticket — `examples.e03_support_routing`
+## 3. Support routing — `examples.e03_support_routing`
+
 A deterministic branching flow for support operations.
 
 ```bash
@@ -48,15 +49,17 @@ replayt run examples.e03_support_routing:wf \
   --inputs-json '{"ticket":{"channel":"email","subject":"Payment failed twice","body":"Enterprise invoice card was declined during renewal.","customer_tier":"enterprise"}}'
 ```
 
-### 4. Typed tool calls — `examples.e04_tool_using_procurement`
-Register strongly-typed tools and use them from a workflow step.
+## 4. Typed tool calls — `examples.e04_tool_using_procurement`
+
+Register strongly typed tools and use them from a workflow step.
 
 ```bash
 replayt run examples.e04_tool_using_procurement:wf \
   --inputs-json '{"request":{"employee":"Maya","department":"Design","item":"monitor arm","unit_price":149.0,"quantity":2}}'
 ```
 
-### 5. Retries for flaky integrations — `examples.e05_retrying_vendor_lookup`
+## 5. Retries for flaky integrations — `examples.e05_retrying_vendor_lookup`
+
 Show how a state can retry automatically before succeeding.
 
 ```bash
@@ -64,15 +67,17 @@ replayt run examples.e05_retrying_vendor_lookup:wf \
   --inputs-json '{"vendor_name":"Acme Fulfillment"}'
 ```
 
-### 6. Sales call prep brief — `examples.e06_sales_call_brief`
-First structured LLM output example: turn CRM notes into a call brief.
+## 6. Sales call prep brief — `examples.e06_sales_call_brief`
+
+Use structured LLM output to turn CRM notes into a call brief.
 
 ```bash
 replayt run examples.e06_sales_call_brief:wf \
   --inputs-json '{"account_name":"Northwind Health","notes":"Champion wants SOC 2 confirmation, budget approved, pilot starts in April."}'
 ```
 
-### 7. Customer feedback clustering — `examples.e07_feedback_clustering`
+## 7. Customer feedback clustering — `examples.e07_feedback_clustering`
+
 Use the LLM for batch summarization and prioritization.
 
 ```bash
@@ -80,9 +85,69 @@ replayt run examples.e07_feedback_clustering:wf \
   --inputs-json '{"product":"analytics dashboard","feedback":["Export to CSV times out on big reports.","Need SSO for Okta.","Dashboard is slow on Mondays."]}'
 ```
 
-## C. Publishing preflight with approval gate
+## 8. Travel approval — `examples.e08_travel_approval`
 
-A workflow that pauses for a human decision before continuing.
+Evaluate travel policy automatically, then pause for manager approval only when policy flags require it.
+
+```bash
+replayt run examples.e08_travel_approval:wf \
+  --inputs-json '{"trip":{"employee":"Sam Patel","destination":"New York","reason":"Customer onsite kickoff","estimated_cost":3200.0,"days_notice":5}}'
+```
+
+Approve it:
+
+```bash
+replayt resume examples.e08_travel_approval:wf <run_id> --approval manager_review
+```
+
+Reject it instead:
+
+```bash
+replayt resume examples.e08_travel_approval:wf <run_id> --approval manager_review --reject
+```
+
+## 9. Incident response — `examples.e09_incident_response`
+
+Combine typed tools with an executive approval gate for sev1 communications.
+
+```bash
+replayt run examples.e09_incident_response:wf \
+  --inputs-json '{"incident":{"service":"api","error_rate":12.5,"customer_impact":"Checkout requests are failing for many customers.","suspected_cause":"Database connection pool exhaustion"}}'
+```
+
+For a sev1 incident, approve external comms:
+
+```bash
+replayt resume examples.e09_incident_response:wf <run_id> --approval exec_comms
+```
+
+Or keep the response internal-only:
+
+```bash
+replayt resume examples.e09_incident_response:wf <run_id> --approval exec_comms --reject
+```
+
+## 10. GitHub issue triage — `examples.issue_triage`
+
+A relatable developer workflow with deterministic validation, LLM classification, and explicit routing.
+
+```bash
+replayt run examples.issue_triage:wf \
+  --inputs-json '{"issue":{"title":"Crash on save","body":"Open app, click save, stack trace appears, expected file write."}}'
+```
+
+## 11. Refund policy workflow — `examples.refund_policy`
+
+A constrained support decision flow where the output space stays narrow and auditable.
+
+```bash
+replayt run examples.refund_policy:wf \
+  --inputs-json '{"ticket":"My order arrived damaged and I need a refund.","order":{"order_id":"ORD-1001","amount_cents":12999,"delivered":true,"days_since_delivery":3}}'
+```
+
+## 12. Publishing preflight with approval gate — `examples.publishing_preflight`
+
+Check draft copy, generate a structured checklist, and pause for a human publishing decision.
 
 ```bash
 replayt run examples.publishing_preflight:wf \
@@ -101,7 +166,7 @@ Reject it instead:
 replayt resume examples.publishing_preflight:wf <run_id> --approval publish --reject
 ```
 
-## D. Python file target
+## Python file target
 
 replayt can load a workflow directly from a Python file if it exports `wf` or `workflow`.
 
@@ -109,7 +174,7 @@ replayt can load a workflow directly from a Python file if it exports `wf` or `w
 replayt run workflow.py --inputs-json '{"ticket":"hello"}'
 ```
 
-## E. YAML workflow target
+## YAML workflow target
 
 For small declarative flows, replayt can run a workflow directly from YAML.
 
@@ -117,7 +182,7 @@ For small declarative flows, replayt can run a workflow directly from YAML.
 replayt run workflow.yaml --inputs-json '{"route":"refund","ticket":"where is my order?"}'
 ```
 
-## F. Graph export
+## Graph export
 
 ```bash
 replayt graph examples.e04_tool_using_procurement:wf
