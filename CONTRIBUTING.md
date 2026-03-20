@@ -17,6 +17,16 @@ The `dev` extra includes the YAML dependency and package build tooling so local 
 
 replayt intentionally stays small. PRs that expand it into a general agent platform are likely to be declined.
 
+## Versioning (semver)
+
+- **MAJOR** — breaking Python API, CLI behavior users rely on, or **documented** JSONL event payload shapes that consumers parse.
+- **MINOR** — backward-compatible additions (new optional CLI flags, new optional `Workflow` / `Runner` kwargs, new optional event fields).
+- **PATCH** — bug fixes and docs that do not change runtime contracts.
+
+Tutorial imports under `replayt_examples` should keep working across **minor** releases when pinned to a compatible **major**.
+
+**Pull requests:** CI runs `scripts/check_changelog_if_needed.py` on PRs. If you touch `src/replayt/`, `src/replayt_examples/`, or `docs/RUN_LOG_SCHEMA.md`, update **`CHANGELOG.md`** in the same PR (add a bullet under **Unreleased** or the next version).
+
 ## Releasing a new version
 
 Publishing to PyPI is fully automated via GitHub Actions. To cut a release:

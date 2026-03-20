@@ -11,6 +11,59 @@ from replayt.workflow import Workflow
 from replayt.yaml_workflow import workflow_from_spec
 
 
+def test_runner_before_after_step_hooks(tmp_path: Path) -> None:
+    wf = Workflow("hooks_wf")
+    wf.set_initial("a")
+    wf.note_transition("a", "b")
+    wf.note_transition("b", None)
+
+    @wf.step("a")
+    def a(ctx) -> str:
+        ctx.set("seen", list(ctx.get("seen", [])) + ["handler_a"])
+        return "b"
+
+    @wf.step("b")
+    def b(ctx) -> None:
+        ctx.set("seen", list(ctx.get("seen", [])) + ["handler_b"])
+        return None
+
+    log: list[tuple[str, ...]] = []
+
+    def before(ctx, st: str) -> None:
+        log.append(("before", st))
+
+    def after(ctx, st: str, nxt: str | None) -> None:
+        log.append(("after", st, nxt))
+
+    store = JSONLStore(tmp_path)
+    r = Runner(wf, store, log_mode=LogMode.redacted, before_step=before, after_step=after)
+    result = r.run()
+    assert result.status == "completed"
+    assert ("before", "a") in log
+    assert ("after", "a", "b") in log
+    assert ("before", "b") in log
+    assert ("after", "b", None) in log
+    ev = store.load_events(result.run_id)
+    completed_ev = next(e for e in ev if e["type"] == "run_completed")
+    assert completed_ev["payload"]["status"] == "completed"
+
+
+def test_workflow_meta_in_run_started(tmp_path: Path) -> None:
+    wf = Workflow("m", version="2", meta={"pkg": "demo", "git_sha": "abc"})
+    wf.set_initial("a")
+
+    @wf.step("a")
+    def a(ctx) -> None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    r = Runner(wf, store, log_mode=LogMode.redacted)
+    result = r.run()
+    ev = store.load_events(result.run_id)
+    started = next(e for e in ev if e["type"] == "run_started")
+    assert started["payload"]["workflow_meta"] == {"pkg": "demo", "git_sha": "abc"}
+
+
 def test_linear_run(tmp_path: Path) -> None:
     wf = Workflow("linear")
     wf.set_initial("a")

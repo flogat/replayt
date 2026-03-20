@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import html
 import importlib
 import importlib.util
@@ -94,6 +95,69 @@ def _load_python_file(path: Path) -> Any:
         if hasattr(module, attr):
             return getattr(module, attr)
     raise typer.BadParameter(f"Python workflow file {path} must define `wf` or `workflow`")
+
+
+def _validate_workflow(wf: Workflow) -> list[str]:
+    """Graph / handler checks without executing steps (no LLM)."""
+
+    errors: list[str] = []
+    if not wf.initial_state:
+        errors.append("initial state is not set (call set_initial)")
+    declared = set(wf.step_names())
+    edges = wf.edges()
+    for src, dst in edges:
+        if dst not in declared:
+            errors.append(f"transition target {dst!r} (from {src!r}) is not a declared step")
+        if src not in declared:
+            errors.append(f"transition source {src!r} is not a declared step")
+
+    if wf.initial_state and edges:
+        reachable: set[str] = set()
+        queue = [wf.initial_state]
+        adj: dict[str, list[str]] = {}
+        for src, dst in edges:
+            adj.setdefault(src, []).append(dst)
+        while queue:
+            node = queue.pop()
+            if node in reachable:
+                continue
+            reachable.add(node)
+            for neighbor in adj.get(node, []):
+                if neighbor not in reachable:
+                    queue.append(neighbor)
+        orphans = declared - reachable
+        for orphan in sorted(orphans):
+            errors.append(f"state {orphan!r} is unreachable from initial state {wf.initial_state!r}")
+
+    for name in wf.step_names():
+        try:
+            wf.get_handler(name)
+        except KeyError:
+            errors.append(f"step {name!r} has no handler")
+    return errors
+
+
+def _dry_check_suggested_command(
+    *,
+    target: str,
+    inputs_json: str | None,
+    log_dir: Path,
+    sqlite: Path | None,
+    log_mode: str,
+    tag: list[str] | None,
+    dry_run: bool,
+) -> str:
+    parts = ["replayt", "run", target, "--log-dir", str(log_dir), "--log-mode", log_mode]
+    if sqlite is not None:
+        parts.extend(["--sqlite", str(sqlite)])
+    if inputs_json is not None:
+        parts.extend(["--inputs-json", inputs_json])
+    if tag:
+        for t in tag:
+            parts.extend(["--tag", t])
+    if dry_run:
+        parts.append("--dry-run")
+    return " ".join(parts)
 
 
 def _load_target(target: str) -> Workflow:
@@ -367,6 +431,11 @@ def cmd_run(
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Trace execution with placeholder LLM responses (no API calls)."
     ),
+    dry_check: bool = typer.Option(
+        False,
+        "--dry-check",
+        help="Validate workflow graph and --inputs-json only; no run, no LLM, no log files written.",
+    ),
     output: Literal["text", "json"] = typer.Option(
         "text",
         "--output",
@@ -392,6 +461,36 @@ def cmd_run(
         timeout = int(cfg["timeout"])
     if in_child:
         timeout = None
+
+    if dry_check:
+        if resume:
+            typer.echo("--dry-check cannot be used with --resume", err=True)
+            raise typer.Exit(code=2)
+        wf = _load_target(target)
+        errors = _validate_workflow(wf)
+        if inputs_json is not None:
+            parsed = json.loads(inputs_json)
+            if not isinstance(parsed, dict):
+                raise typer.BadParameter("--inputs-json must be a JSON object")
+        if errors:
+            typer.echo(f"INVALID: {wf.name}@{wf.version}", err=True)
+            for err in errors:
+                typer.echo(f"  - {err}", err=True)
+            raise typer.Exit(code=1)
+        typer.echo(f"OK: {wf.name}@{wf.version} (dry check passed; no run executed)")
+        typer.echo(
+            "Next: "
+            + _dry_check_suggested_command(
+                target=target,
+                inputs_json=inputs_json,
+                log_dir=log_dir,
+                sqlite=sqlite,
+                log_mode=log_mode,
+                tag=tag,
+                dry_run=dry_run,
+            )
+        )
+        return
 
     if not in_child and timeout is not None and timeout > 0:
         argv = _build_internal_run_argv(
@@ -457,6 +556,116 @@ def cmd_run(
         if result.error:
             typer.echo(f"error={result.error}")
     _exit_for_run_result(result)
+
+
+@app.command("try")
+def cmd_try(
+    ctx: typer.Context,
+    log_dir: Path = typer.Option(Path(".replayt/runs"), help="Directory for JSONL run logs."),
+    sqlite: Path | None = typer.Option(None, help="Optional SQLite mirror."),
+    log_mode: str = typer.Option(
+        "redacted",
+        case_sensitive=False,
+        help="redacted|full|structured_only",
+    ),
+    tag: list[str] | None = typer.Option(None, "--tag", help="Tag as key=value (repeatable)."),
+    run_id: str | None = typer.Option(None, help="Optional run id (default: random UUID)."),
+    timeout: int | None = typer.Option(
+        None,
+        "--timeout",
+        help="Kill the run after this many seconds (exit 1). Uses an isolated subprocess on all platforms.",
+    ),
+    dry_run: bool = typer.Option(False, "--dry-run", help="Placeholder LLM responses (no API calls)."),
+    dry_check: bool = typer.Option(False, "--dry-check", help="Validate only; same as replayt run --dry-check."),
+    output: Literal["text", "json"] = typer.Option(
+        "text",
+        "--output",
+        "-o",
+        help="text (default) or json (machine-readable).",
+    ),
+    customer_name: str = typer.Option("Sam", "--customer-name", help="Value for tutorial key customer_name."),
+) -> None:
+    """Run the packaged hello-world tutorial (``replayt_examples.e01_hello_world``); no local workflow file needed."""
+
+    return ctx.invoke(
+        cmd_run,
+        target="replayt_examples.e01_hello_world:wf",
+        run_id=run_id,
+        inputs_json=json.dumps({"customer_name": customer_name}),
+        log_dir=log_dir,
+        sqlite=sqlite,
+        log_mode=log_mode,
+        tag=tag,
+        resume=False,
+        timeout=timeout,
+        dry_run=dry_run,
+        dry_check=dry_check,
+        output=output,
+    )
+
+
+@app.command("ci")
+def cmd_ci(
+    ctx: typer.Context,
+    target: str = typer.Argument(..., metavar="TARGET", help="MODULE:VAR, workflow.py, or workflow.yaml."),
+    run_id: str | None = typer.Option(None, help="Optional run id (default: random UUID)."),
+    inputs_json: str | None = typer.Option(
+        None,
+        "--inputs-json",
+        help="Optional JSON object merged into the run context.",
+    ),
+    log_dir: Path = typer.Option(Path(".replayt/runs"), help="Directory for JSONL run logs."),
+    sqlite: Path | None = typer.Option(None, help="Optional SQLite file mirrored alongside JSONL."),
+    log_mode: str = typer.Option(
+        "redacted",
+        case_sensitive=False,
+        help="redacted|full|structured_only",
+    ),
+    tag: list[str] | None = typer.Option(None, "--tag", help="Tag as key=value (repeatable)."),
+    resume: bool = typer.Option(False, help="Resume a paused run (requires --run-id)."),
+    timeout: int | None = typer.Option(
+        None,
+        "--timeout",
+        help="Kill the run after this many seconds (exit 1). Uses an isolated subprocess on all platforms.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Trace execution with placeholder LLM responses (no API calls).",
+    ),
+    dry_check: bool = typer.Option(
+        False,
+        "--dry-check",
+        help="Validate workflow graph and --inputs-json only; no run, no LLM.",
+    ),
+    output: Literal["text", "json"] = typer.Option(
+        "text",
+        "--output",
+        "-o",
+        help="text (default) or json (machine-readable).",
+    ),
+) -> None:
+    """Same as ``replayt run``; intended for CI (exit 2 = paused / approval pending)."""
+
+    typer.echo(
+        "replayt ci: exit 0=completed, 1=failed, 2=paused (e.g. approval). See docs/RECIPES.md.",
+        err=True,
+    )
+    return ctx.invoke(
+        cmd_run,
+        target=target,
+        run_id=run_id,
+        inputs_json=inputs_json,
+        log_dir=log_dir,
+        sqlite=sqlite,
+        log_mode=log_mode,
+        tag=tag,
+        resume=resume,
+        timeout=timeout,
+        dry_run=dry_run,
+        dry_check=dry_check,
+        output=output,
+    )
 
 
 @app.command("inspect")
@@ -653,47 +862,16 @@ def cmd_validate(
     """Validate a workflow graph without calling any LLM (useful in CI)."""
 
     wf = _load_target(target)
-    errors: list[str] = []
-    if not wf.initial_state:
-        errors.append("initial state is not set (call set_initial)")
-    declared = set(wf.step_names())
-    edges = wf.edges()
-    for src, dst in edges:
-        if dst not in declared:
-            errors.append(f"transition target {dst!r} (from {src!r}) is not a declared step")
-        if src not in declared:
-            errors.append(f"transition source {src!r} is not a declared step")
-
-    if wf.initial_state and edges:
-        reachable: set[str] = set()
-        queue = [wf.initial_state]
-        adj: dict[str, list[str]] = {}
-        for src, dst in edges:
-            adj.setdefault(src, []).append(dst)
-        while queue:
-            node = queue.pop()
-            if node in reachable:
-                continue
-            reachable.add(node)
-            for neighbor in adj.get(node, []):
-                if neighbor not in reachable:
-                    queue.append(neighbor)
-        orphans = declared - reachable
-        for orphan in sorted(orphans):
-            errors.append(f"state {orphan!r} is unreachable from initial state {wf.initial_state!r}")
-
-    for name in wf.step_names():
-        try:
-            wf.get_handler(name)
-        except KeyError:
-            errors.append(f"step {name!r} has no handler")
+    errors = _validate_workflow(wf)
 
     if errors:
         typer.echo(f"INVALID: {wf.name}@{wf.version}", err=True)
         for err in errors:
             typer.echo(f"  - {err}", err=True)
         raise typer.Exit(code=1)
-    typer.echo(f"OK: {wf.name}@{wf.version} ({len(declared)} states, {len(edges)} edges)")
+    typer.echo(
+        f"OK: {wf.name}@{wf.version} ({len(wf.step_names())} states, {len(wf.edges())} edges)"
+    )
 
 
 def _parse_tag_filters(raw: list[str] | None) -> dict[str, str]:
@@ -1060,6 +1238,56 @@ def cmd_gc(
     typer.echo(f"\n{verb} {deleted} run(s)")
 
 
+@app.command("seal")
+def cmd_seal(
+    run_id: str = typer.Argument(..., help="Run id (JSONL file basename without .jsonl)."),
+    log_dir: Path = typer.Option(Path(".replayt/runs"), "--log-dir"),
+    out: Path | None = typer.Option(
+        None,
+        "--out",
+        help="Manifest output path (default: <log-dir>/<run_id>.seal.json).",
+    ),
+    output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
+) -> None:
+    """Write a SHA-256 manifest for a JSONL run log (best-effort audit helper; not cryptographic proof)."""
+
+    cfg, _ = _get_project_config()
+    if log_dir == Path(".replayt/runs") and cfg.get("log_dir"):
+        log_dir = Path(cfg["log_dir"])
+
+    path = log_dir / f"{run_id}.jsonl"
+    if not path.is_file():
+        typer.echo(
+            f"No JSONL at {path} (``seal`` applies to the primary JSONL file, not SQLite-only stores).",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    raw = path.read_bytes()
+    file_digest = hashlib.sha256(raw).hexdigest()
+    line_digests = [hashlib.sha256(line).hexdigest() for line in raw.splitlines(keepends=True)]
+    manifest: dict[str, Any] = {
+        "schema": "replayt.seal.v1",
+        "run_id": run_id,
+        "jsonl_path": str(path.resolve()),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "line_count": len(line_digests),
+        "line_sha256": line_digests,
+        "file_sha256": file_digest,
+        "note": (
+            "Best-effort integrity record. Anyone who can write the log directory can replace "
+            "both the JSONL and this manifest; use WORM storage or external signing for stronger guarantees."
+        ),
+    }
+    out_path = out if out is not None else log_dir / f"{run_id}.seal.json"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
+    if output == "json":
+        typer.echo(json.dumps({**manifest, "manifest_path": str(out_path.resolve())}, indent=2))
+    else:
+        typer.echo(f"wrote {out_path} ({len(line_digests)} lines, file_sha256={file_digest[:12]}...)")
+
+
 @app.command("doctor")
 def cmd_doctor(
     skip_connectivity: bool = typer.Option(
@@ -1137,14 +1365,22 @@ def cmd_report(
     log_dir: Path = typer.Option(Path(".replayt/runs"), "--log-dir"),
     sqlite: Path | None = typer.Option(None, "--sqlite"),
     out: str | None = typer.Option(None, "--out", help="Output file path (default: stdout)"),
+    style: Literal["default", "stakeholder"] = typer.Option(
+        "default",
+        "--style",
+        help="default (full) or stakeholder (approvals-first; omits tool/token sections).",
+    ),
 ) -> None:
     """Generate a self-contained HTML report for a run."""
 
     from replayt.cli.report_template import (
+        APPROVAL_ITEM,
+        APPROVALS_SECTION,
         OUTPUT_ITEM,
         OUTPUTS_SECTION,
         REPORT_HTML,
         TIMELINE_ITEM,
+        TOKEN_USAGE_SECTION,
         TOOL_CALL_ITEM,
         TOOL_CALLS_SECTION,
     )
@@ -1167,6 +1403,8 @@ def cmd_report(
     total_tokens = 0
     first_ts: str | None = None
     last_ts: str | None = None
+    approval_requests: dict[str, dict[str, Any]] = {}
+    approval_last: dict[str, bool] = {}
 
     for e in events:
         ts = e.get("ts", "")
@@ -1211,6 +1449,17 @@ def cmd_report(
             status = "paused"
         elif typ == "run_failed":
             status = "failed"
+        elif typ == "approval_requested":
+            aid = payload.get("approval_id")
+            if aid is not None:
+                approval_requests[str(aid)] = {
+                    "summary": payload.get("summary", ""),
+                    "state": payload.get("state", ""),
+                }
+        elif typ == "approval_resolved":
+            aid = payload.get("approval_id")
+            if aid is not None:
+                approval_last[str(aid)] = bool(payload.get("approved"))
 
     duration = "n/a"
     t0 = _parse_iso_ts(first_ts)
@@ -1264,7 +1513,7 @@ def cmd_report(
         outputs_section = OUTPUTS_SECTION.format(items="\n".join(items))
 
     tool_calls_section = ""
-    if tool_calls:
+    if tool_calls and style == "default":
         items = []
         for tc in tool_calls:
             items.append(
@@ -1276,7 +1525,42 @@ def cmd_report(
             )
         tool_calls_section = TOOL_CALLS_SECTION.format(items="\n".join(items))
 
+    approvals_section = ""
+    if approval_requests:
+        items_a: list[str] = []
+        for aid, meta in sorted(approval_requests.items()):
+            if aid in approval_last:
+                outcome = "Approved" if approval_last[aid] else "Rejected"
+            else:
+                outcome = "Pending (no resolution in this log)"
+            items_a.append(
+                APPROVAL_ITEM.format(
+                    approval_id=html.escape(aid),
+                    state=html.escape(str(meta.get("state", ""))),
+                    summary=html.escape(str(meta.get("summary", ""))),
+                    outcome=html.escape(outcome),
+                )
+            )
+        approvals_section = APPROVALS_SECTION.format(items="\n".join(items_a))
+
+    if style == "stakeholder":
+        token_section = (
+            '<section class="rp-section"><p class="rp-muted">Tool-call and token usage sections omitted. '
+            "For the full technical report, run "
+            f'<code class="rp-code">replayt report {html.escape(run_id)} --style default</code>'
+            "</p></section>"
+        )
+        report_title = "Run summary"
+    else:
+        token_section = TOKEN_USAGE_SECTION.format(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+        report_title = "Run Report"
+
     report = REPORT_HTML.format(
+        report_title=html.escape(report_title),
         run_id=html.escape(run_id),
         workflow_name=html.escape(workflow_name),
         workflow_version=html.escape(workflow_version),
@@ -1284,12 +1568,11 @@ def cmd_report(
         status_class=status_class,
         duration=html.escape(duration),
         tags_html=tags_html,
+        approvals_section=approvals_section,
         timeline_html=timeline_html,
         outputs_section=outputs_section,
         tool_calls_section=tool_calls_section,
-        prompt_tokens=prompt_tokens,
-        completion_tokens=completion_tokens,
-        total_tokens=total_tokens,
+        token_section=token_section,
     )
 
     if out:

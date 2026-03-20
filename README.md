@@ -39,10 +39,11 @@ Transitions and branching are **your code**; the model does not silently rewrite
 
 **Terminal demo:** Short illustrative cast [`docs/replayt-demo.cast`](docs/replayt-demo.cast) (`asciinema play docs/replayt-demo.cast`). To share in a browser, upload the cast to [asciinema.org](https://asciinema.org/) and link the player URL here or in your fork—steps in [docs/DEMO.md](docs/DEMO.md).
 
-**Three commands** once installed:
+**Core loop** once installed:
 
 ```bash
 replayt run replayt_examples.e01_hello_world:wf --inputs-json '{"customer_name":"Sam"}'
+# or: replayt try
 replayt inspect <run_id>
 replayt replay <run_id>
 ```
@@ -211,7 +212,7 @@ A new user should be able to understand the architecture quickly and feel that t
 
 ### Workflow engine
 
-- Python-first workflow definitions with explicit state handlers
+- Python-first workflow definitions with explicit state handlers (optional `Workflow(..., meta={...})` emitted as `workflow_meta` on `run_started`)
 - Optional YAML workflow specs for simple declarative flows
 - Per-state retry policies
 - Transition declarations and runtime transition validation
@@ -222,7 +223,7 @@ A new user should be able to understand the architecture quickly and feel that t
 - OpenAI-compatible chat provider support
 - Strict Pydantic schema parsing for structured outputs
 - Redacted, structured-only (minimal LLM log fields—no message text or previews), or full logging modes
-- Per-call LLM overrides via `ctx.llm.with_settings(...)` (logged as `effective` on each `llm_request` / `llm_response`)
+- Per-call LLM overrides via `ctx.llm.with_settings(...)` (logged as `effective` on each `llm_request` / `llm_response`, including optional `experiment={...}` for tags you want in the audit trail)
 
 ### Tooling
 
@@ -246,6 +247,8 @@ When things go wrong, the run log is the debugging tool:
 ### CLI
 
 Command reference: **[docs/CLI.md](docs/CLI.md)**. Everyday flow: `run` → `inspect` / `replay` / `report` → optional `resume` after approvals. **`TARGET`** is `module:variable`, `workflow.py`, or `workflow.yaml` / `.yml`.
+
+Extras: **`replayt try`** runs the packaged hello-world tutorial; **`replayt ci`** is the same as `run` with a CI-oriented banner; **`replayt run … --dry-check`** validates the graph and `--inputs-json` without executing; **`replayt report --style stakeholder`** trims tool/token sections for sharing; **`replayt seal`** writes a SHA-256 manifest for a JSONL run (audit helper). In Python, optional **`Runner(..., before_step=..., after_step=...)`** supports explicit in-process hooks (notifications, trace IDs) without a second workflow engine.
 
 Project defaults (log dir, provider preset, timeout, …): **[docs/CONFIG.md](docs/CONFIG.md)**.
 

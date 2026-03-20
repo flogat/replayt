@@ -7,6 +7,7 @@ import logging
 import time
 import traceback
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -158,6 +159,11 @@ class Runner:
     use ``run_completed`` for uniform end-of-run detection (same event type as success).
 
     **Approval IDs** are compared as strings after coercion; use stable string IDs in workflows.
+
+    **Lifecycle hooks:** Optional ``before_step`` / ``after_step`` run in the same process as the workflow
+    (after context schema checks / after a successful handler return, respectively). They are for explicit
+    side effects—metrics, trace IDs, notifications—not a parallel control-flow mechanism; keep transitions
+    in step code.
     """
 
     _DEFAULT_MAX_STEPS = 200
@@ -172,6 +178,8 @@ class Runner:
         llm_client: OpenAICompatClient | None = None,
         include_tracebacks: bool = False,
         max_steps: int | None = None,
+        before_step: Callable[[RunContext, str], None] | None = None,
+        after_step: Callable[[RunContext, str, str | None], None] | None = None,
     ) -> None:
         self.workflow = workflow
         self.store = store
@@ -184,6 +192,10 @@ class Runner:
         self._current_state: str | None = None
         # approval_id -> True (approved) / False (rejected); last resolution wins when replaying events
         self._approval_outcomes: dict[str, bool] = {}
+        #: Called after context schema checks pass and before the step handler (once per state visit, not per retry).
+        self._before_step = before_step
+        #: Called after a successful handler return, before ``state_exited`` / ``transition`` events.
+        self._after_step = after_step
 
     def close(self) -> None:
         if self._owns_client:
@@ -294,6 +306,8 @@ class Runner:
                 "initial_state": self.workflow.initial_state,
                 "inputs": inputs or {},
             }
+            if self.workflow.meta:
+                started_payload["workflow_meta"] = self.workflow.meta
             if tags:
                 started_payload["tags"] = tags
             self._emit_payload("run_started", started_payload)
@@ -355,6 +369,9 @@ class Runner:
                         self._emit_payload("step_error", {"state": state, "error": err_detail})
                         self._emit_payload("run_failed", {"error": err_detail, "state": state})
                         raise RunFailed(str(schema_err)) from schema_err
+
+                if self._before_step is not None:
+                    self._before_step(ctx, state)
 
                 next_state: str | None = None
                 last_err: Exception | None = None
@@ -422,6 +439,9 @@ class Runner:
                         },
                     )
                     raise RunFailed(str(last_err)) from last_err
+
+                if self._after_step is not None:
+                    self._after_step(ctx, state, next_state)
 
                 self._emit_payload(
                     "state_exited",

@@ -15,6 +15,29 @@ class Answer(BaseModel):
     value: int
 
 
+def test_llm_bridge_with_settings_merges_experiment_into_effective() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="test-key", model="base-model")
+    client = OpenAICompatClient(settings)
+    bridge = (
+        LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+        .with_settings(experiment={"run_id": "r1"})
+        .with_settings(experiment={"prompt_hash": "abc"})
+    )
+
+    canned = {"choices": [{"message": {"content": "{}"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["experiment"] == {"run_id": "r1", "prompt_hash": "abc"}
+
+
 def test_llm_bridge_with_settings_merges_into_effective_and_request() -> None:
     events: list[tuple[str, dict]] = []
 

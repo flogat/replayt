@@ -201,6 +201,7 @@ class LLMBridge:
         timeout_seconds: float | None = None,
         max_tokens: int | None = None,
         extra_headers: dict[str, str] | None = None,
+        experiment: dict[str, Any] | None = None,
     ) -> LLMBridge:
         """Return a new bridge with merged per-call defaults (logged on each request as ``effective``)."""
 
@@ -217,6 +218,12 @@ class LLMBridge:
             h = dict(merged.get("extra_headers") or {})
             h.update(extra_headers)
             merged["extra_headers"] = h
+        if experiment is not None:
+            prev = merged.get("experiment")
+            if isinstance(prev, dict):
+                merged["experiment"] = {**prev, **experiment}
+            else:
+                merged["experiment"] = dict(experiment)
         return LLMBridge(
             emit=self._emit,
             client=self._client,
@@ -248,13 +255,16 @@ class LLMBridge:
         hdrs.update(dict(base.extra_headers or {}))
         hdrs.update(dict(d.get("extra_headers") or {}))
         hdrs.update(extra_headers or {})
-        effective = {
+        effective: dict[str, Any] = {
             "model": eff_model,
             "temperature": eff_temp,
             "max_tokens": eff_max,
             "timeout_seconds": eff_timeout,
             "extra_header_names": sorted(hdrs.keys()),
         }
+        exp = d.get("experiment")
+        if isinstance(exp, dict) and exp:
+            effective["experiment"] = dict(exp)
         return effective, hdrs
 
     def complete_text(

@@ -172,6 +172,104 @@ def test_cli_init_scaffold(tmp_path: Path) -> None:
     assert r3.exit_code == 0
 
 
+def test_cli_seal_writes_manifest(tmp_path: Path) -> None:
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"x"}',
+        ],
+    )
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    seal = runner.invoke(app, ["seal", run_id, "--log-dir", str(tmp_path)])
+    assert seal.exit_code == 0
+    manifest_path = tmp_path / f"{run_id}.seal.json"
+    assert manifest_path.is_file()
+    import json
+
+    data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert data["schema"] == "replayt.seal.v1"
+    assert data["run_id"] == run_id
+    assert len(data["line_sha256"]) == data["line_count"]
+
+
+def test_cli_run_dry_check() -> None:
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--dry-check",
+            "--inputs-json",
+            '{"customer_name":"Pat"}',
+        ],
+    )
+    assert r.exit_code == 0
+    assert "dry check passed" in r.stdout
+    assert "Next: replayt run" in r.stdout
+
+
+def test_cli_try_smoke(tmp_path: Path) -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["try", "--log-dir", str(tmp_path)])
+    assert r.exit_code == 0
+    assert "workflow=hello_world_tutorial@1" in r.stdout
+
+
+def test_cli_ci_runs_with_stderr_banner(tmp_path: Path) -> None:
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "ci",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"Z"}',
+        ],
+    )
+    assert r.exit_code == 0
+    assert "replayt ci:" in (r.stderr or "")
+
+
+def test_cli_report_stakeholder_omits_token_table(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "rep_stake.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("rep_stake")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    ctx.set("ok", True)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    run = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    report = runner.invoke(
+        app,
+        ["report", run_id, "--log-dir", str(tmp_path), "--style", "stakeholder"],
+    )
+    assert report.exit_code == 0
+    assert "Run summary" in report.stdout
+    assert "Token Usage" not in report.stdout
+    assert "omitted" in report.stdout.lower()
+
+
 def test_cli_report_has_no_external_cdn(tmp_path: Path) -> None:
     workflow_path = tmp_path / "rep_flow.py"
     workflow_path.write_text(

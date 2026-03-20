@@ -502,6 +502,8 @@ def run_with_notify(runner: Runner, wf_inputs: dict, notify_url: str) -> dict:
 
 Or use the `ForwardingStore` pattern (above) to stream events in real-time to any HTTP sink. The notification layer is yours; replayt stays the engine.
 
+**In-process policy / trace IDs:** For lightweight hooks without a second workflow engine, pass **`before_step`** / **`after_step`** to **`Runner(...)`** in Python (`before_step` runs after context schema checks, before the handler; **`after_step`** runs after a successful return, before `state_exited`). Keep side effects explicit; do not move control flow out of step handlers.
+
 ### Pattern: dashboard without a dashboard (use existing tools)
 
 **Request:** "I want a web app to browse runs, view timelines, and approve pending runs from the browser."

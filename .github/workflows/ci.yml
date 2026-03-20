@@ -16,6 +16,8 @@ jobs:
         python-version: ["3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
@@ -27,5 +29,11 @@ jobs:
         run: python -m build
       - name: Ruff
         run: ruff check src tests
+      - name: Changelog gate (pull requests)
+        if: github.event_name == 'pull_request'
+        run: python scripts/check_changelog_if_needed.py
+        env:
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+          GITHUB_BASE_REF: ${{ github.base_ref }}
       - name: Pytest
         run: pytest

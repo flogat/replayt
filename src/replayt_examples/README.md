@@ -54,6 +54,31 @@ See [`README.md`](../../README.md) for Windows activation lines, `replayt doctor
 
 Sections **1–5** of this tutorial need **no API key**. For LLM-backed workflows in **automated tests**, use **`MockLLMClient`** with **`run_with_mock`** (or mock `httpx`) and assert on context or JSONL events—see **Pattern: golden path test (pytest)** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md). For **`replayt validate`** and CI exit codes, see [`docs/RECIPES.md`](../../docs/RECIPES.md).
 
+## When core ends: streaming, hooks, approvals, and audit integrity
+
+replayt’s contract is explicit states, an append-only **JSONL** timeline, and structured LLM outputs—use **`ctx.llm.with_settings(...)`** when you need per-call overrides so they show up under **`effective`** on **`llm_request`** events. Core does **not** emit per-token streams as first-class log lines (that would flood the timeline and blur replay semantics); instead, stream inside a step and record a **Pydantic-validated** result or a small summary you control. Terminal **`replayt resume`** is enough for many teams; stakeholder-facing or SSO-adjacent approvals stay in **your** app that reads the same JSONL and resolves gates without changing replayt’s graph. Org notifications, trace IDs, and policy checks should live in outer wrappers or callbacks so the FSM is never a hidden second engine. Tamper-evident or compliance-heavy bundles mean hashing, encrypting, or archiving **your** log files—the runtime cannot cryptographically prove integrity if an attacker can write the log directory (see **Security and trust boundaries** in the main [`README.md`](../../README.md)).
+
+**Composition patterns** (copy the names into EXAMPLES_PATTERNS search):
+
+- **Pattern: stream inside step, log structured summary** — streaming UX without core token events.
+- **Pattern: approval bridge (local UI)** — web or chat approvals while replayt stays the engine.
+- **Pattern: webhook / lifecycle callbacks** — notifications and policy hooks without an observability platform in core.
+- **Pattern: encrypted run logs** and **Pattern: post-hoc PII scrub on JSONL files** — stronger disk posture and redaction.
+
+Share a read-only timeline for review without building a server:
+
+```bash
+replayt replay <run_id> --format html --out run.html
+```
+
+Optional **line/file SHA-256 manifest** for a JSONL run (best-effort audit packet; not proof against someone who can edit the log dir):
+
+```bash
+replayt seal <run_id>
+```
+
+For **in-process** trace IDs or policy logging, use **`Runner(..., before_step=..., after_step=...)`** in Python (see **Pattern: webhook / lifecycle callbacks** for outer-wrapper alternatives).
+
 ## 1. Hello world — `replayt_examples.e01_hello_world`
 
 Start here if you want the absolute minimum replayt workflow.

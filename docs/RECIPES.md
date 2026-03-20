@@ -50,7 +50,7 @@ runner = Runner(
 )
 ```
 
-**Per-call** — tighten one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., timeout_seconds=..., max_tokens=..., extra_headers={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events.
+**Per-call** — tighten one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., timeout_seconds=..., max_tokens=..., extra_headers={...}, experiment={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events (use `experiment` for prompt hashes, dataset ids, or A/B labels — not a full eval product; see [`SCOPE.md`](SCOPE.md)).
 
 For timeouts, retries, or betas exposed only through the official `openai` SDK, keep replayt’s graph and approvals as-is and call the SDK **inside a single step** (see **Pattern: OpenAI Python SDK inside a step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md)).
 
@@ -70,4 +70,18 @@ echo "$OUT" | jq -e '.status == "completed"' >/dev/null
 
 For **no API key** in CI, tests should use **`MockLLMClient`** / **`run_with_mock`** (`from replayt.testing import MockLLMClient, run_with_mock`) or mock `httpx`; keep smoke workflows that hit a real provider optional. See **Pattern: golden path test (pytest)** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
-Add **`replayt validate TARGET`** in CI to catch broken graphs without calling an LLM ([`CLI.md`](CLI.md)).
+Add **`replayt validate TARGET`** in CI to catch broken graphs without calling an LLM ([`CLI.md`](CLI.md)). For a quick graph + `--inputs-json` shape check without writing logs, use **`replayt run TARGET --dry-check`** (or **`replayt ci TARGET --dry-check`**).
+
+### GitHub Actions and exit code `2`
+
+`replayt run` / `replayt ci` exit **`2`** when the run pauses for approval. Treat that as **neutral** in Actions if approvals are expected, or fail the job if your CI run should never pause:
+
+```yaml
+- name: Run workflow
+  run: replayt ci mypkg.workflow:wf --inputs-json '{"id":"${{ github.run_id }}"}'
+  # exit 0 = completed, 1 = failed, 2 = paused (approval)
+
+- name: Run workflow (fail if paused)
+  run: replayt ci mypkg.workflow:wf --inputs-json '{"id":"${{ github.run_id }}"}'
+  # Default: step fails on exit 1 or 2. Use a follow-up job or `continue-on-error` if you handle exit 2 elsewhere.
+```

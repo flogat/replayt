@@ -11,9 +11,17 @@ F = TypeVar("F", bound=Callable[..., Any])
 class Workflow:
     """Finite-state workflow definition with explicit handlers and optional metadata."""
 
-    def __init__(self, name: str, *, version: str = "1") -> None:
+    def __init__(
+        self,
+        name: str,
+        *,
+        version: str = "1",
+        meta: dict[str, Any] | None = None,
+    ) -> None:
         self.name = name
         self.version = version
+        #: Optional JSON-serializable bag (package id, git SHA, etc.) emitted on ``run_started`` as ``workflow_meta``.
+        self.meta = dict(meta) if meta else None
         self.initial_state: str | None = None
         self._steps: dict[str, Callable[..., Any]] = {}
         self._retries: dict[str, RetryPolicy] = {}

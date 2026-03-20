@@ -18,6 +18,8 @@ Events are append-only, one JSON object per line. All events share:
 - `workflow_version` (string)
 - `initial_state` (string)
 - `inputs` (object, optional) — may be redacted
+- `tags` (object, optional) — string key/value pairs from CLI `--tag`
+- `workflow_meta` (object, optional) — JSON-serializable bag from `Workflow(..., meta={...})` (e.g. package id, git SHA)
 
 ### `state_entered`
 
@@ -37,7 +39,7 @@ Events are append-only, one JSON object per line. All events share:
 ### `llm_request`
 
 - `state` (string)
-- `effective` (object) — resolved settings for this call (always logged): `model`, `temperature`, `max_tokens`, `timeout_seconds`, `extra_header_names` (header **names** only, never values)
+- `effective` (object) — resolved settings for this call (always logged): `model`, `temperature`, `max_tokens`, `timeout_seconds`, `extra_header_names` (header **names** only, never values), optional `experiment` (object) from `ctx.llm.with_settings(experiment={...})` (merged across chained `with_settings` calls)
 - `messages_summary` (object) — counts / roles when logging mode is not `full`
 - `messages` (array) — only when logging mode is `full`
 
@@ -116,3 +118,7 @@ Events are append-only, one JSON object per line. All events share:
 ## SQLite
 
 Optional SQLite store mirrors the same events in table `events(run_id, seq, type, payload_json, ts)`.
+
+## Seal sidecar (`replayt seal`)
+
+Not a JSONL line: the CLI can write `<run_id>.seal.json` next to `<run_id>.jsonl` with `schema: "replayt.seal.v1"`, `line_sha256` (one digest per raw line, including newlines where present), and `file_sha256` for the whole file. See [`CLI.md`](CLI.md).

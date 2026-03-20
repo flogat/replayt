@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Add `replayt seal` (SHA-256 manifest for JSONL run logs), optional `Runner(..., before_step=..., after_step=...)` hooks, PR CI gate requiring `CHANGELOG.md` when protected paths change, and a test that tutorial `MODULE:wf` targets from the examples README stay importable.
+
 ## 0.3.0 — 2026-03-20
 
 - **Breaking:** the tutorial package on PyPI is now **`replayt_examples`** (was `examples`). Update targets: `replayt run replayt_examples.e01_hello_world:wf` (not `examples.*`).
