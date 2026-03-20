@@ -37,15 +37,18 @@ Events are append-only, one JSON object per line. All events share:
 ### `llm_request`
 
 - `state` (string)
-- `model` (string)
-- `messages_summary` (object) — counts / roles, not full text unless logging mode is `full`
+- `effective` (object) — resolved settings for this call (always logged): `model`, `temperature`, `max_tokens`, `timeout_seconds`, `extra_header_names` (header **names** only, never values)
+- `messages_summary` (object) — counts / roles when logging mode is not `full`
+- `messages` (array) — only when logging mode is `full`
 
 ### `llm_response`
 
 - `state` (string)
 - `model` (string)
 - `usage` (object, optional)
-- `content_preview` (string, optional) — truncated unless `full` mode
+- `effective` (object) — same shape as on `llm_request` for this round trip
+- `content_preview` (string, optional) — truncated in `redacted` mode only
+- `content` (string) — only when logging mode is `full`
 
 ### `structured_output`
 
@@ -104,7 +107,8 @@ Events are append-only, one JSON object per line. All events share:
 
 ## Logging modes
 
-- **`redacted` (default)**: message bodies are not stored; only summaries and structured outputs as configured.
+- **`redacted` (default)**: message bodies are not stored; only summaries and structured outputs as configured. LLM responses may include a short `content_preview`.
+- **`structured_only`**: like `redacted`, but **no** `content_preview` on `llm_response` — rely on `structured_output` events for audit.
 - **`full`**: full message content in `llm_request` / `llm_response` payloads — opt-in only.
 
 ## SQLite
