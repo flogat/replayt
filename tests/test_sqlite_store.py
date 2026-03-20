@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from replayt.persistence import JSONLStore, MultiStore, SQLiteStore
 
 
@@ -27,3 +29,15 @@ def test_multi_store_writes_both(tmp_path: Path) -> None:
     )
     assert len(j.load_events("r2")) == 1
     assert len(s.load_events("r2")) == 1
+
+
+def test_sqlite_store_rejects_path_traversal_run_id(tmp_path: Path) -> None:
+    from replayt.persistence.sqlite import SQLiteStore
+
+    store = SQLiteStore(tmp_path / "events.db")
+
+    with pytest.raises(ValueError, match="run_id"):
+        store.append("../escape", {"seq": 1, "type": "x", "ts": "now", "payload": {}})
+
+    with pytest.raises(ValueError, match="run_id"):
+        store.load_events("../escape")
