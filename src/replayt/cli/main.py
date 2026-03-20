@@ -353,7 +353,9 @@ def cmd_run(
     log_mode: str = typer.Option(
         "redacted",
         case_sensitive=False,
-        help="redacted|full|structured_only (no body previews; structured_output events still logged)",
+        help=(
+            "redacted|full|structured_only (minimal LLM logs—no message text; structured_output still logged)"
+        ),
     ),
     tag: list[str] | None = typer.Option(None, "--tag", help="Tag as key=value (repeatable)."),
     resume: bool = typer.Option(False, help="Resume a paused run (requires --run-id)."),
@@ -763,6 +765,12 @@ def cmd_stats(
         min=1,
         help="Only include runs whose last event is within this many days (UTC).",
     ),
+    max_runs: int | None = typer.Option(
+        None,
+        "--max-runs",
+        min=1,
+        help="Load at most this many runs (by run_id descending) to limit memory use on large log dirs.",
+    ),
     tag: list[str] | None = typer.Option(None, "--tag", help="Filter by tag key=value (repeatable)."),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
@@ -787,7 +795,10 @@ def cmd_stats(
     total_all_tokens = 0
 
     with _read_store(log_dir, sqlite) as store:
-        run_ids = store.list_run_ids()
+        all_run_ids = store.list_run_ids()
+        run_ids = all_run_ids
+        if max_runs is not None:
+            run_ids = sorted(all_run_ids, reverse=True)[:max_runs]
         all_run_events = [(rid, store.load_events(rid)) for rid in run_ids]
 
     for rid, events in all_run_events:
@@ -833,7 +844,9 @@ def cmd_stats(
     top_fails = fail_states.most_common(5)
     payload = {
         "runs_included": total,
-        "runs_total_on_disk": len(run_ids),
+        "runs_total_on_disk": len(all_run_ids),
+        "runs_scanned": len(run_ids),
+        "max_runs": max_runs,
         "status_counts": dict(by_status),
         "llm_response_count": len(latencies),
         "llm_latency_ms_avg": avg_latency,
@@ -856,7 +869,7 @@ def cmd_stats(
         typer.echo(f"No runs matched in {log_dir}" + (f" (last {days} days)" if days else ""))
         return
     typer.echo(f"log_dir={log_dir}")
-    typer.echo(f"runs_included={total} (on_disk={len(run_ids)})")
+    typer.echo(f"runs_included={total} (on_disk={len(all_run_ids)}, scanned={len(run_ids)})")
     typer.echo(f"status_counts={dict(by_status)}")
     if avg_latency is not None:
         typer.echo(f"llm_latency_ms_avg={avg_latency} (n={len(latencies)})")
@@ -1048,8 +1061,19 @@ def cmd_gc(
 
 
 @app.command("doctor")
-def cmd_doctor() -> None:
-    """Check local install health for replayt's default OpenAI-compatible setup."""
+def cmd_doctor(
+    skip_connectivity: bool = typer.Option(
+        False,
+        "--skip-connectivity",
+        help="Do not HTTP GET OPENAI_BASE_URL/models (no network; use when base URL is sensitive or untrusted).",
+    ),
+) -> None:
+    """Check local install health for replayt's default OpenAI-compatible setup.
+
+    Without ``--skip-connectivity``, this command sends a request to ``OPENAI_BASE_URL`` (see README
+    security notes): the URL and optional API key come from your environment—only use connectivity
+    checks against hosts you trust.
+    """
 
     try:
         import replayt as _rt
@@ -1081,23 +1105,26 @@ def cmd_doctor() -> None:
     except ImportError:
         checks.append(("yaml_extra", False, "missing (pip install replayt[yaml])"))
 
-    try:
-        import httpx
+    if skip_connectivity:
+        checks.append(("provider_connectivity", True, "skipped (--skip-connectivity)"))
+    else:
+        try:
+            import httpx
 
-        with httpx.Client(timeout=5.0) as http_client:
-            headers: dict[str, str] = {}
-            if settings.api_key:
-                headers["Authorization"] = f"Bearer {settings.api_key}"
-            r = http_client.get(settings.base_url.rstrip("/") + "/models", headers=headers)
-        # Any sub-5xx response means something answered; 404 is common when /models is absent (chat may still work).
-        reachable = r.status_code < 500
-        detail = f"HTTP {r.status_code}"
-        if r.status_code == 404:
-            detail += " (/models not implemented — try a chat request)"
-        connectivity_detail = detail if reachable else f"{detail} (server error)"
-        checks.append(("provider_connectivity", reachable, connectivity_detail))
-    except Exception as exc:  # noqa: BLE001
-        checks.append(("provider_connectivity", False, str(exc)))
+            with httpx.Client(timeout=5.0) as http_client:
+                headers: dict[str, str] = {}
+                if settings.api_key:
+                    headers["Authorization"] = f"Bearer {settings.api_key}"
+                r = http_client.get(settings.base_url.rstrip("/") + "/models", headers=headers)
+            # Any sub-5xx response means something answered; 404 is common when /models is absent (chat may still work).
+            reachable = r.status_code < 500
+            detail = f"HTTP {r.status_code}"
+            if r.status_code == 404:
+                detail += " (/models not implemented — try a chat request)"
+            connectivity_detail = detail if reachable else f"{detail} (server error)"
+            checks.append(("provider_connectivity", reachable, connectivity_detail))
+        except Exception as exc:  # noqa: BLE001
+            checks.append(("provider_connectivity", False, str(exc)))
 
     for name, ok, detail in checks:
         icon = "OK" if ok else "WARN"

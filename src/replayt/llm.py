@@ -46,7 +46,7 @@ class LLMSettings:
         "groq": ("https://api.groq.com/openai/v1", "llama-3.1-8b-instant"),
         "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.1-8B-Instruct-Turbo"),
         "openrouter": ("https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
-        # Native Anthropic HTTP API is not OpenAI-compatible; use a gateway or SDK-in-step (see examples README).
+        # Anthropic native HTTP is not OpenAI-compat; use a gateway or SDK-in-step (replayt_examples README).
         "anthropic": (
             "https://api.anthropic.com/v1",
             "claude-3-5-sonnet-20241022",
@@ -158,7 +158,14 @@ class OpenAICompatClient:
                     time.sleep(delay)
                     continue
                 r.raise_for_status()
-                return r.json()
+                try:
+                    return r.json()
+                except json.JSONDecodeError as exc:
+                    preview = (r.text or "")[:500]
+                    raise RuntimeError(
+                        f"Chat completions response was not valid JSON (HTTP {r.status_code}): {exc}; "
+                        f"body preview: {preview!r}"
+                    ) from exc
             except httpx.TransportError as exc:
                 last_exc = exc
                 if attempt < max_attempts - 1:
@@ -276,11 +283,12 @@ class LLMBridge:
         req_payload: dict[str, Any] = {"state": state, "effective": effective}
         if self._log_mode == LogMode.full:
             req_payload["messages"] = messages
-        else:
+        elif self._log_mode == LogMode.redacted:
             req_payload["messages_summary"] = {
                 "count": len(messages),
                 "roles": [msg.get("role") for msg in messages],
             }
+        # structured_only: state + effective only (no message bodies or role metadata); see LogMode.structured_only
         self._emit("llm_request", req_payload)
 
         t0 = time.perf_counter()
@@ -309,6 +317,7 @@ class LLMBridge:
             resp_payload["content"] = content
         elif self._log_mode == LogMode.redacted:
             resp_payload["content_preview"] = content[:800]
+        # structured_only: omit content and preview; structured_output events still carry validated data from parse()
         self._emit("llm_response", resp_payload)
         return content
 

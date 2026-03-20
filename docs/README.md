@@ -4,8 +4,10 @@ This directory collects the repository's supporting documentation in one place.
 
 ## What's here
 
-- [`QUICKSTART.md`](QUICKSTART.md) — five-minute path: install, first run, annotated JSONL sample, failed-run inspect, minimal LLM step.
+- [`QUICKSTART.md`](QUICKSTART.md) — five-minute path: install, first run, replay semantics diagram, annotated JSONL sample, failed-run inspect, minimal LLM step.
 - [`INSTALL.md`](INSTALL.md) — venv shells, `.env` loading, common install errors.
+- [`PRODUCTION.md`](PRODUCTION.md) — finite-run model, logs/PII, approvals, CI, multi-tenant sketch.
+- [`RECIPES.md`](RECIPES.md) — LLM client configuration, CI exit codes, mocks pointer.
 - [`CLI.md`](CLI.md) — full CLI command reference.
 - [`CONFIG.md`](CONFIG.md) — `.replaytrc.toml` and `[tool.replayt]` defaults for the CLI.
 - [`COMPARISON.md`](COMPARISON.md) — how replayt relates to plain Python, agent frameworks, Temporal, hosted stacks.
@@ -19,4 +21,4 @@ This directory collects the repository's supporting documentation in one place.
 ## Related guides
 
 - [`../README.md`](../README.md) — main project overview, quickstart, examples, and links into the rest of the docs.
-- [`../src/examples/README.md`](../src/examples/README.md) — linear tutorial (14 runnable workflows).
+- [`../src/replayt_examples/README.md`](../src/replayt_examples/README.md) — linear tutorial (14 runnable workflows).

@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.3.0 — 2026-03-20
 
-- Documentation: split composition patterns into [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md); add [`docs/INSTALL.md`](docs/INSTALL.md), [`docs/CLI.md`](docs/CLI.md), [`docs/CONFIG.md`](docs/CONFIG.md), [`docs/COMPARISON.md`](docs/COMPARISON.md); README above-the-fold mental model + Beta callout; quickstart sections for failed runs and minimal LLM step; illustrative [`docs/replayt-demo.cast`](docs/replayt-demo.cast); update [`docs/DEMO.md`](docs/DEMO.md) and docs index.
+- **Breaking:** the tutorial package on PyPI is now **`replayt_examples`** (was `examples`). Update targets: `replayt run replayt_examples.e01_hello_world:wf` (not `examples.*`).
+- Documentation: add [`docs/PRODUCTION.md`](docs/PRODUCTION.md) and [`docs/RECIPES.md`](docs/RECIPES.md); README slimming (recipes extracted, merged “when to use” + positioning, embedded architecture Mermaid, PII/log note, asciinema share hint); quickstart “replay vs regenerate” diagram + PII note; tutorial README PyPI-first install and early CI/mock pointer; docs index updates.
 
 ## 0.2.0 — 2026-03-20
 

@@ -14,7 +14,7 @@ Run a workflow from a module reference, Python file, or YAML file. Common flags:
 
 `TARGET` can be:
 
-- `module:variable` (e.g. `examples.e01_hello_world:wf`)
+- `module:variable` (e.g. `replayt_examples.e01_hello_world:wf`)
 - `workflow.py` (must export `wf` or `workflow`)
 - `workflow.yaml` / `workflow.yml` (requires `pip install replayt[yaml]`)
 

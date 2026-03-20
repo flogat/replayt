@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -10,7 +11,7 @@ from replayt.cli.main import REPLAY_HTML_CSS, _replay_html, app
 
 def test_cli_graph_smoke() -> None:
     runner = CliRunner()
-    r = runner.invoke(app, ["graph", "examples.issue_triage:wf"])
+    r = runner.invoke(app, ["graph", "replayt_examples.issue_triage:wf"])
     assert r.exit_code == 0
     assert "flowchart TD" in r.stdout
 
@@ -22,7 +23,7 @@ def test_cli_run_inspect_and_replay(tmp_path: Path) -> None:
         app,
         [
             "run",
-            "examples.issue_triage:wf",
+            "replayt_examples.issue_triage:wf",
             "--log-dir",
             str(tmp_path),
             "--inputs-json",
@@ -258,7 +259,7 @@ def test_cli_runs_and_doctor(tmp_path: Path) -> None:
         app,
         [
             "run",
-            "examples.issue_triage:wf",
+            "replayt_examples.issue_triage:wf",
             "--log-dir",
             str(tmp_path),
             "--inputs-json",
@@ -362,6 +363,52 @@ def test_project_config_doctor_output(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "project_config" in result.stdout
     assert "pyproject.toml" in result.stdout
+
+
+def test_cli_doctor_skip_connectivity(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    import replayt.cli.main as cli_mod
+
+    monkeypatch.setattr(cli_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cli_mod, "_PROJECT_CONFIG_PATH", None)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["doctor", "--skip-connectivity"])
+    assert result.exit_code == 0
+    assert "skipped" in result.stdout.lower()
+
+
+def test_cli_stats_respects_max_runs(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    for rid in ("run-a", "run-b", "run-c"):
+        lines = [
+            {
+                "ts": "2025-06-01T12:00:00+00:00",
+                "run_id": rid,
+                "seq": 1,
+                "type": "run_started",
+                "payload": {"workflow_name": "w", "workflow_version": "1"},
+            },
+            {
+                "ts": "2025-06-01T12:01:00+00:00",
+                "run_id": rid,
+                "seq": 2,
+                "type": "run_completed",
+                "payload": {"status": "completed"},
+            },
+        ]
+        (log_dir / f"{rid}.jsonl").write_text(
+            "\n".join(json.dumps(x) for x in lines) + "\n",
+            encoding="utf-8",
+        )
+    runner = CliRunner()
+    out = runner.invoke(app, ["stats", "--log-dir", str(log_dir), "--max-runs", "2", "--output", "json"])
+    assert out.exit_code == 0
+    data = json.loads(out.stdout)
+    assert data["runs_total_on_disk"] == 3
+    assert data["runs_scanned"] == 2
+    assert data["max_runs"] == 2
 
 
 def test_init_template_approval(tmp_path: Path) -> None:

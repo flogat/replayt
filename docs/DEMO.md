@@ -21,8 +21,8 @@ asciinema play docs/replayt-demo.cast
 
 To produce a **real** cast from your machine (recommended for sharing):
 
-1. `replayt graph examples.issue_triage:wf`
-2. `replayt run examples.issue_triage:wf --inputs-json '{"issue":{"title":"Crash on save","body":"Steps: open, save, crash."}}'`
+1. `replayt graph replayt_examples.issue_triage:wf`
+2. `replayt run replayt_examples.issue_triage:wf --inputs-json '{"issue":{"title":"Crash on save","body":"Steps: open, save, crash."}}'`
 3. `replayt inspect <run_id>` then `replayt replay <run_id>` (or `replayt report <run_id> --out report.html`)
 4. Approvals: run the publishing example until it pauses, then `replayt resume ... --approval publish` and `replayt replay`
 
@@ -32,7 +32,7 @@ Record with [asciinema](https://asciinema.org/) or any screen recorder. Upload t
 
 ```bash
 pip install -e ".[dev]"
-replayt graph examples.issue_triage:wf
+replayt graph replayt_examples.issue_triage:wf
 ```
 
 ## PyPI publish

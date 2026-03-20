@@ -2,7 +2,7 @@
 
 These recipes are **not** built into replayt core. They show how to stay within the design principles (explicit states, local logs, no hosted platform in core) while integrating queues, UIs, other SDKs, and analytics.
 
-**Tutorial first:** work through sections 1–14 in [`src/examples/README.md`](../src/examples/README.md) in order. Return here when you need a reference pattern.
+**Tutorial first:** work through sections 1–14 in [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) in order. Return here when you need a reference pattern.
 
 ---
 
@@ -37,7 +37,7 @@ from fastapi import FastAPI, HTTPException
 
 app = FastAPI()
 LOG_DIR = Path(".replayt/runs")
-TARGET = "examples.publishing_preflight:wf"  # your MODULE:wf or path
+TARGET = "replayt_examples.publishing_preflight:wf"  # your MODULE:wf or path
 
 
 @app.get("/api/runs/{run_id}/events")

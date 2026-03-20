@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from unittest.mock import MagicMock, patch
 
 import httpx
@@ -69,9 +70,15 @@ def test_llm_bridge_structured_only_skips_content_preview() -> None:
     with patch.object(client, "chat_completions", return_value=canned):
         bridge.complete_text(messages=[{"role": "user", "content": "x"}])
 
+    req = next(p for t, p in events if t == "llm_request")
+    assert "messages" not in req
+    assert "messages_summary" not in req
+    assert "effective" in req
+
     resp = next(p for t, p in events if t == "llm_response")
     assert "content_preview" not in resp
     assert "content" not in resp
+    assert "latency_ms" in resp
 
 
 def test_llm_bridge_parse_extracts_first_valid_json_object() -> None:
@@ -142,6 +149,19 @@ def test_extract_json_object_ignores_arrays() -> None:
 
     with pytest.raises(ValueError, match="No JSON object"):
         _extract_json_object("[1, 2, 3]")
+
+
+def test_openai_compat_invalid_json_body_raises() -> None:
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.text = "<html>not json</html>"
+    mock_resp.json.side_effect = json.JSONDecodeError("Expecting value", "<html>", 0)
+    mock_resp.raise_for_status = MagicMock()
+
+    client = OpenAICompatClient(LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"))
+    with patch.object(httpx.Client, "post", return_value=mock_resp):
+        with pytest.raises(RuntimeError, match="not valid JSON"):
+            client.chat_completions(messages=[{"role": "user", "content": "x"}])
 
 
 def test_openai_compat_omits_authorization_without_api_key() -> None:

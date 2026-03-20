@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from replayt.persistence import JSONLStore
 from replayt.runner import Runner, resolve_approval_on_store
 from replayt.types import LogMode, RetryPolicy
@@ -147,6 +149,26 @@ def test_fail_after_retries(tmp_path: Path) -> None:
     assert result.error
     failed_event = next(e for e in store.load_events(result.run_id) if e["type"] == "run_failed")
     assert failed_event["payload"]["error"]["type"] == "RuntimeError"
+
+
+def test_retry_policy_rejects_non_positive_max_attempts() -> None:
+    with pytest.raises(ValueError, match="max_attempts"):
+        RetryPolicy(max_attempts=0)
+    with pytest.raises(ValueError, match="max_attempts"):
+        RetryPolicy(max_attempts=-1)
+
+
+def test_yaml_workflow_rejects_invalid_max_attempts() -> None:
+    with pytest.raises(ValueError, match="max_attempts"):
+        workflow_from_spec(
+            {
+                "name": "bad-retry",
+                "initial": "a",
+                "steps": {
+                    "a": {"retry": {"max_attempts": 0}, "next": None},
+                },
+            }
+        )
 
 
 def test_fails_on_undeclared_transition(tmp_path: Path) -> None:

@@ -24,7 +24,7 @@ def checklist(ctx) -> str:
     draft = ctx.get("draft")
     audience = ctx.get("audience", "general")
     if not isinstance(draft, str):
-        raise ValueError('context requires draft: str (see examples README)')
+        raise ValueError("context requires draft: str (see replayt_examples tutorial README)")
     result = ctx.llm.parse(
         ChecklistResult,
         messages=[

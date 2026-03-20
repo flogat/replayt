@@ -1,6 +1,6 @@
 # Five-minute quickstart
 
-This page is the shortest path from zero to **run → inspect → understand the log**. For a full progressive tutorial (many workflows, patterns, and integrations), use [`src/examples/README.md`](../src/examples/README.md).
+This page is the shortest path from zero to **run → inspect → understand the log**. For a full progressive tutorial (many workflows, patterns, and integrations), use [`src/replayt_examples/README.md`](../src/replayt_examples/README.md).
 
 ## 1. Install
 
@@ -20,12 +20,14 @@ pip install -e ".[dev]"
 replayt doctor
 ```
 
+**Logs and PII:** events land under `.replayt/runs/` by default. Pick **`--log-mode`** (CLI) or **`LogMode.*`** in Python if prompts may contain sensitive text—see [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md) and [`PRODUCTION.md`](PRODUCTION.md).
+
 ## 2. Run a workflow (no API key needed)
 
 The hello-world example is deterministic—no LLM:
 
 ```bash
-replayt run examples.e01_hello_world:wf \
+replayt run replayt_examples.e01_hello_world:wf \
   --inputs-json '{"customer_name":"Sam"}'
 ```
 
@@ -50,9 +52,25 @@ Or a self-contained report:
 replayt report <run_id> --out report.html
 ```
 
-## 4. Annotated run log (what “inspectable” means)
+## 4. What “replay” means (timeline playback)
 
-Each run is an append-only **JSONL** file under `.replayt/runs/` (one line per event). Shapes are defined in [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md). Below is a **trimmed excerpt** from `examples.e01_hello_world` (line breaks added for reading; on disk each event is one line).
+**`replayt replay`** walks the **recorded** JSONL timeline: states, transitions, LLM metadata, tool calls, approvals—**without** calling the provider again. That is **not** a guarantee of bitwise-identical LLM output if you re-ran the same prompt (providers, temperature, and content can drift). For tests, use mocks or fixtures; for audits, trust the **logged** history. See [`SCOPE.md`](SCOPE.md).
+
+```mermaid
+flowchart LR
+  subgraph live [Live run]
+    A[Handler runs] --> B[Events append to JSONL]
+    B --> C[Provider called when step uses LLM]
+  end
+  subgraph later [Later]
+    D[replayt replay] --> E[Read events only]
+  end
+  B -.-> D
+```
+
+## 5. Annotated run log (what “inspectable” means)
+
+Each run is an append-only **JSONL** file under `.replayt/runs/` (one line per event). Shapes are defined in [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md). Below is a **trimmed excerpt** from `replayt_examples.e01_hello_world` (line breaks added for reading; on disk each event is one line).
 
 ```jsonl
 {"ts": "2026-03-20T19:22:59.181461+00:00", "run_id": "…", "seq": 1, "type": "run_started", "payload": {"workflow_name": "hello_world_tutorial", "workflow_version": "1", "initial_state": "greet", "inputs": {"customer_name": "Sam"}}}
@@ -74,7 +92,7 @@ Each run is an append-only **JSONL** file under `.replayt/runs/` (one line per e
 
 Workflows that call an LLM add `llm_request`, `llm_response`, and `structured_output` events; tool usage adds `tool_call` / `tool_result`; approvals add `approval_requested` / `approval_resolved`. Same file—same mental model.
 
-## 5. Where replayt fits (one glance)
+## 6. Where replayt fits (one glance)
 
 | Approach | You get… | Tradeoff |
 |----------|----------|----------|
@@ -82,12 +100,12 @@ Workflows that call an LLM add `llm_request`, `llm_response`, and `structured_ou
 | **Agent / planner frameworks** | Fast demos | Hidden control flow; “what happened?” is often unclear. |
 | **replayt** | Explicit FSM + **schema-shaped** outputs + **local JSONL** + CLI (`inspect`, `replay`, `report`) | You write states and transitions; not a distributed workflow engine. |
 
-## 6. When a run fails (still inspectable)
+## 7. When a run fails (still inspectable)
 
 Invalid inputs produce **exit code `1`** and a full event trail—including `run_failed` with validation or error detail—so you can debug the same way as a happy path.
 
 ```bash
-replayt run examples.e02_intake_normalization:wf --inputs-json '{"lead":{}}'
+replayt run replayt_examples.e02_intake_normalization:wf --inputs-json '{"lead":{}}'
 # note run_id from output, then:
 replayt inspect <run_id>
 replayt replay <run_id>
@@ -95,7 +113,7 @@ replayt replay <run_id>
 
 You should see `status=failed` and structured error payload on the failing state. See [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md) for `run_failed` / `run_completed`.
 
-## 7. Smallest LLM-shaped step (API key required)
+## 8. Smallest LLM-shaped step (API key required)
 
 After hello-world, this is the minimal “model output drives context” pattern (inside an existing `Workflow` with `OPENAI_API_KEY` set):
 
@@ -115,12 +133,15 @@ def classify(ctx):
     return None
 ```
 
-Run a full tutorial workflow with the same idea: **§6** in [`src/examples/README.md`](../src/examples/README.md) (`examples.e06_sales_call_brief`).
+Run a full tutorial workflow with the same idea: **§6** in [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) (`replayt_examples.e06_sales_call_brief`).
 
 ## Next steps
 
-- LLM-backed examples: [`src/examples/README.md`](../src/examples/README.md) (start at section 6+ or jump to **issue triage**).
+- LLM-backed examples: [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) (start at section 6+ or jump to **issue triage**).
 - Composition patterns: [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+- Recipes (LLM client, CI): [`RECIPES.md`](RECIPES.md).
+- Production checklist: [`PRODUCTION.md`](PRODUCTION.md).
 - Event schema reference: [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md).
 - Scope / non-goals in depth: [`SCOPE.md`](SCOPE.md).
 - Vs other tools: [`COMPARISON.md`](COMPARISON.md).
+- Runtime diagram source: [`architecture.mmd`](architecture.mmd).

@@ -29,7 +29,7 @@ def ingest(ctx) -> str:
     ticket = ctx.get("ticket")
     meta = ctx.get("order")
     if not isinstance(ticket, str) or not isinstance(meta, dict):
-        raise ValueError('context requires ticket: str and order: object (see examples README)')
+        raise ValueError("context requires ticket: str and order: object (see replayt_examples tutorial README)")
     ctx.set("ticket", ticket)
     ctx.set("order", OrderMeta.model_validate(meta).model_dump())
     return "decide"
