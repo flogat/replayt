@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Documentation: split composition patterns into [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md); add [`docs/INSTALL.md`](docs/INSTALL.md), [`docs/CLI.md`](docs/CLI.md), [`docs/CONFIG.md`](docs/CONFIG.md), [`docs/COMPARISON.md`](docs/COMPARISON.md); README above-the-fold mental model + Beta callout; quickstart sections for failed runs and minimal LLM step; illustrative [`docs/replayt-demo.cast`](docs/replayt-demo.cast); update [`docs/DEMO.md`](docs/DEMO.md) and docs index.
+
 ## 0.2.0 — 2026-03-20
 
 - Documentation: add [`docs/QUICKSTART.md`](docs/QUICKSTART.md) and [`docs/SCOPE.md`](docs/SCOPE.md); tighten README above-the-fold (comparison table, `pip install replayt`, `replayt report`, links); trim [`docs/DEMO.md`](docs/DEMO.md) to checklist; fix examples README link to [`docs/STYLE.md`](docs/STYLE.md); PyPI classifier **Beta**.

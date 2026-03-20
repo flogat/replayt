@@ -55,6 +55,29 @@ def test_workflow_from_spec_records_declared_edges() -> None:
     assert wf.edges() == [("validate", "approved"), ("approved", "done")]
 
 
+def test_yaml_branch_int_context_matches_string_case_keys(tmp_path: Path) -> None:
+    wf = workflow_from_spec(
+        {
+            "name": "branch-int",
+            "initial": "b",
+            "steps": {
+                "b": {
+                    "branch": {
+                        "key": "route",
+                        "cases": {"1": "one", "2": "two"},
+                        "default": "two",
+                    }
+                },
+                "one": {"next": None},
+                "two": {"next": None},
+            },
+        }
+    )
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store).run(inputs={"route": 1})
+    assert result.status == "completed"
+
+
 def test_yaml_workflow_runs_without_python_handlers(tmp_path: Path) -> None:
     wf = workflow_from_spec(
         {

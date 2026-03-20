@@ -138,10 +138,10 @@ class RunContext:
         )
 
     def is_approved(self, approval_id: str) -> bool:
-        return approval_id in self._runner._resolved_approved
+        return self._runner._approval_outcomes.get(str(approval_id)) is True
 
     def is_rejected(self, approval_id: str) -> bool:
-        return approval_id in self._runner._resolved_rejected
+        return self._runner._approval_outcomes.get(str(approval_id)) is False
 
 
 class Runner:
@@ -150,7 +150,14 @@ class Runner:
     .. warning::
         ``Runner`` is **not thread-safe**. Each concurrent run must use its own
         ``Runner`` instance because per-run state (``run_id``, ``_current_state``,
-        approval sets) is stored on the instance and mutated during ``run()``.
+        approval outcome map) is stored on the instance and mutated during ``run()``.
+
+    **Terminal failure events:** On failure the store records a ``run_failed`` event
+    (payload includes structured ``error`` and ``state``), then a final
+    ``run_completed`` with ``status: "failed"``. Use ``run_failed`` for diagnostics;
+    use ``run_completed`` for uniform end-of-run detection (same event type as success).
+
+    **Approval IDs** are compared as strings after coercion; use stable string IDs in workflows.
     """
 
     _DEFAULT_MAX_STEPS = 200
@@ -175,8 +182,8 @@ class Runner:
         self._llm_client = llm_client or OpenAICompatClient(llm_settings or LLMSettings.from_env())
         self.run_id: str = ""
         self._current_state: str | None = None
-        self._resolved_approved: set[str] = set()
-        self._resolved_rejected: set[str] = set()
+        # approval_id -> True (approved) / False (rejected); last resolution wins when replaying events
+        self._approval_outcomes: dict[str, bool] = {}
 
     def close(self) -> None:
         if self._owns_client:
@@ -192,16 +199,14 @@ class Runner:
         self.store.append_event(self.run_id, ts=_utcnow_iso(), typ=typ, payload=payload)
 
     def _load_approval_state_from_events(self, events: list[dict[str, Any]]) -> None:
-        self._resolved_approved.clear()
-        self._resolved_rejected.clear()
+        self._approval_outcomes.clear()
         for e in events:
             if e.get("type") == "approval_resolved":
                 p = e.get("payload") or {}
-                aid = str(p.get("approval_id"))
-                if p.get("approved"):
-                    self._resolved_approved.add(aid)
-                else:
-                    self._resolved_rejected.add(aid)
+                aid = p.get("approval_id")
+                if aid is None:
+                    continue
+                self._approval_outcomes[str(aid)] = bool(p.get("approved"))
 
     def _replay_context_data(self, events: list[dict[str, Any]]) -> dict[str, Any]:
         data: dict[str, Any] = {}
@@ -223,7 +228,7 @@ class Runner:
 
     def _resume_target_from_events(self, events: list[dict[str, Any]]) -> tuple[str | None, str | None]:
         requests: dict[str, dict[str, Any]] = {}
-        latest_resolved: dict[str, bool] = {}
+        resolutions: list[tuple[str, bool]] = []
         for e in events:
             payload = e.get("payload") or {}
             if e.get("type") == "approval_requested":
@@ -233,12 +238,12 @@ class Runner:
             elif e.get("type") == "approval_resolved":
                 approval_id = payload.get("approval_id")
                 if approval_id is not None:
-                    latest_resolved[str(approval_id)] = bool(payload.get("approved"))
+                    resolutions.append((str(approval_id), bool(payload.get("approved"))))
 
-        if not latest_resolved:
+        if not resolutions:
             return None, None
 
-        for approval_id, approved in reversed(list(latest_resolved.items())):
+        for approval_id, approved in reversed(resolutions):
             request = requests.get(approval_id)
             if not request:
                 continue
@@ -260,8 +265,7 @@ class Runner:
             raise RuntimeError("Workflow.initial_state is not set (call set_initial)")
 
         self.run_id = run_id or str(uuid.uuid4())
-        self._resolved_approved.clear()
-        self._resolved_rejected.clear()
+        self._approval_outcomes.clear()
         if resume and not run_id:
             raise ValueError("run_id is required when resume=True")
         events = self.store.load_events(self.run_id) if resume else []
@@ -447,12 +451,15 @@ def resolve_approval_on_store(store: EventStore, run_id: str, approval_id: str, 
     if not events:
         raise RuntimeError(f"No events found for run_id={run_id!r}")
 
+    want = str(approval_id)
     pending_request: dict[str, Any] | None = None
     for event in events:
         payload = event.get("payload") or {}
-        if event.get("type") == "approval_requested" and payload.get("approval_id") == approval_id:
+        aid = payload.get("approval_id")
+        aid_str = str(aid) if aid is not None else ""
+        if event.get("type") == "approval_requested" and aid_str == want:
             pending_request = payload
-        elif event.get("type") == "approval_resolved" and payload.get("approval_id") == approval_id:
+        elif event.get("type") == "approval_resolved" and aid_str == want:
             pending_request = None
 
     if pending_request is None:

@@ -26,6 +26,15 @@ def test_jsonl_append_event_allocates_monotonic_sequence(tmp_path: Path) -> None
     assert second["seq"] == 2
 
 
+def test_jsonl_append_event_tail_seq_on_long_log(tmp_path: Path) -> None:
+    store = JSONLStore(tmp_path)
+    rid = "longrun"
+    for i in range(40):
+        store.append_event(rid, ts=f"t{i}", typ="state_entered", payload={"i": i})
+    last = store.append_event(rid, ts="tlast", typ="run_completed", payload={"status": "completed"})
+    assert last["seq"] == 41
+
+
 def test_jsonl_store_rejects_path_traversal_run_id(tmp_path: Path) -> None:
     store = JSONLStore(tmp_path)
 

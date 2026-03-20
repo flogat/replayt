@@ -82,8 +82,45 @@ Workflows that call an LLM add `llm_request`, `llm_response`, and `structured_ou
 | **Agent / planner frameworks** | Fast demos | Hidden control flow; “what happened?” is often unclear. |
 | **replayt** | Explicit FSM + **schema-shaped** outputs + **local JSONL** + CLI (`inspect`, `replay`, `report`) | You write states and transitions; not a distributed workflow engine. |
 
+## 6. When a run fails (still inspectable)
+
+Invalid inputs produce **exit code `1`** and a full event trail—including `run_failed` with validation or error detail—so you can debug the same way as a happy path.
+
+```bash
+replayt run examples.e02_intake_normalization:wf --inputs-json '{"lead":{}}'
+# note run_id from output, then:
+replayt inspect <run_id>
+replayt replay <run_id>
+```
+
+You should see `status=failed` and structured error payload on the failing state. See [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md) for `run_failed` / `run_completed`.
+
+## 7. Smallest LLM-shaped step (API key required)
+
+After hello-world, this is the minimal “model output drives context” pattern (inside an existing `Workflow` with `OPENAI_API_KEY` set):
+
+```python
+from pydantic import BaseModel
+
+class Label(BaseModel):
+    label: str
+
+@wf.step("classify")
+def classify(ctx):
+    out = ctx.llm.parse(
+        Label,
+        messages=[{"role": "user", "content": "One-word label for: refund request"}],
+    )
+    ctx.set("label", out.model_dump())
+    return None
+```
+
+Run a full tutorial workflow with the same idea: **§6** in [`src/examples/README.md`](../src/examples/README.md) (`examples.e06_sales_call_brief`).
+
 ## Next steps
 
 - LLM-backed examples: [`src/examples/README.md`](../src/examples/README.md) (start at section 6+ or jump to **issue triage**).
+- Composition patterns: [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 - Event schema reference: [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md).
 - Scope / non-goals in depth: [`SCOPE.md`](SCOPE.md).
+- Vs other tools: [`COMPARISON.md`](COMPARISON.md).

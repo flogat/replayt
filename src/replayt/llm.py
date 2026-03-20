@@ -123,8 +123,6 @@ class OpenAICompatClient:
         extra_headers: dict[str, str] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        if not self.settings.api_key:
-            raise RuntimeError("OPENAI_API_KEY is not set")
         url = self.settings.base_url.rstrip("/") + "/chat/completions"
         eff_max = max_tokens if max_tokens is not None else self.settings.max_tokens
         payload: dict[str, Any] = {
@@ -136,12 +134,13 @@ class OpenAICompatClient:
             payload["max_tokens"] = eff_max
         if response_format is not None:
             payload["response_format"] = response_format
-        headers = {
-            "Authorization": f"Bearer {self.settings.api_key}",
+        headers: dict[str, str] = {
             "Content-Type": "application/json",
             **(self.settings.extra_headers or {}),
             **(extra_headers or {}),
         }
+        if self.settings.api_key:
+            headers["Authorization"] = f"Bearer {self.settings.api_key}"
         timeout = timeout_seconds if timeout_seconds is not None else self.settings.timeout_seconds
         max_attempts = max(self.settings.http_retries + 1, 1)
 

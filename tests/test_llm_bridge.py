@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import httpx
 import pytest
 from pydantic import BaseModel
 
@@ -141,3 +142,16 @@ def test_extract_json_object_ignores_arrays() -> None:
 
     with pytest.raises(ValueError, match="No JSON object"):
         _extract_json_object("[1, 2, 3]")
+
+
+def test_openai_compat_omits_authorization_without_api_key() -> None:
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
+    mock_resp.raise_for_status = MagicMock()
+
+    client = OpenAICompatClient(LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"))
+    with patch.object(httpx.Client, "post", return_value=mock_resp) as post:
+        client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    hdrs = post.call_args.kwargs["headers"]
+    assert "Authorization" not in hdrs

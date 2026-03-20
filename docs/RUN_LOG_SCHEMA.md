@@ -100,9 +100,11 @@ Events are append-only, one JSON object per line. All events share:
 - `final_state` (string | null)
 - `status` (string) — `completed` | `failed`
 
+**Failed runs:** The runner emits a `run_failed` event first (structured error detail), then a final `run_completed` with `status: "failed"`. Use `run_failed` for diagnostics; use `run_completed` for a single “run ended” marker across success and failure.
+
 ### `run_failed`
 
-- `error` (string)
+- `error` (object) — serialized exception: `type`, `module`, `message`, optional `traceback`
 - `state` (string | null)
 
 ## Logging modes

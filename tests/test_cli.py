@@ -171,6 +171,55 @@ def test_cli_init_scaffold(tmp_path: Path) -> None:
     assert r3.exit_code == 0
 
 
+def test_cli_report_has_no_external_cdn(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "rep_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("rep_mini")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    ctx.set("ok", True)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    run = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    report = runner.invoke(app, ["report", run_id, "--log-dir", str(tmp_path)])
+    assert report.exit_code == 0
+    assert "cdn.tailwindcss.com" not in report.stdout
+    assert "rp-body" in report.stdout
+
+
+def test_cli_run_timeout_subprocess_kills_slow_step(tmp_path: Path) -> None:
+    slow = tmp_path / "slow_flow.py"
+    slow.write_text(
+        """
+import time
+from replayt.workflow import Workflow
+
+wf = Workflow("slow")
+wf.set_initial("s")
+
+@wf.step("s")
+def s(ctx):
+    time.sleep(60)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    r = runner.invoke(app, ["run", str(slow), "--log-dir", str(tmp_path), "--timeout", "2", "--dry-run"])
+    assert r.exit_code == 1
+    assert "timed out" in (r.stderr or "").lower()
+
+
 def test_cli_stats_and_replay_html(tmp_path: Path) -> None:
     workflow_path = tmp_path / "stats_flow.py"
     workflow_path.write_text(
@@ -442,7 +491,8 @@ def start(ctx):
 
     result = runner.invoke(app, ["report", run_id, "--log-dir", str(tmp_path)])
     assert result.exit_code == 0
-    assert "tailwindcss" in result.stdout
+    assert "cdn.tailwindcss.com" not in result.stdout
+    assert "rp-body" in result.stdout
     assert "Run Report" in result.stdout
     assert run_id in result.stdout
     assert "report_test" in result.stdout
@@ -473,7 +523,8 @@ def start(ctx):
     assert result.exit_code == 0
     assert out_file.is_file()
     content = out_file.read_text(encoding="utf-8")
-    assert "tailwindcss" in content
+    assert "cdn.tailwindcss.com" not in content
+    assert "rp-body" in content
     assert run_id in content
 
 

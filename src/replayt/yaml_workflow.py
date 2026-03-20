@@ -149,8 +149,15 @@ def workflow_from_spec(spec: dict[str, Any]) -> Workflow:
                     cases = branch["cases"]
                     if not isinstance(cases, dict):
                         raise ValueError(f"step {step_name!r} branch cases must be a mapping")
+                    next_key: Any = None
                     if value in cases:
-                        return str(cases[value])
+                        next_key = cases[value]
+                    else:
+                        sk = str(value)
+                        if sk in cases:
+                            next_key = cases[sk]
+                    if next_key is not None:
+                        return str(next_key)
                     default_next = branch.get("default")
                     return str(default_next) if default_next not in (None, "") else None
 

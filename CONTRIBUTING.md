@@ -39,6 +39,6 @@ The workflow lives in `.github/workflows/publish.yml` and triggers on any tag ma
 ## Good first issues (ideas)
 
 - Improve CLI `inspect` / `replay` / `report` formatting (keep dependencies light).
-- Add or refresh an [asciinema](https://asciinema.org/) (or short screen recording) linked from the README.
+- Refresh [`docs/replayt-demo.cast`](docs/replayt-demo.cast) or add a published asciinema link in [`docs/DEMO.md`](docs/DEMO.md) / the README.
 - More unit tests for edge cases in persistence or approvals.
 - Documentation clarifications, [`docs/QUICKSTART.md`](docs/QUICKSTART.md) tweaks, and recipe snippets.

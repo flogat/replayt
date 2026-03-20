@@ -6,7 +6,7 @@ import importlib.util
 import json
 import os
 import re
-import signal
+import subprocess
 import sys
 from collections import Counter
 from collections.abc import Iterator
@@ -27,7 +27,7 @@ from replayt.yaml_workflow import load_workflow_yaml, workflow_from_spec
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
-_SUPPORTED_CONFIG_KEYS = {"log_dir", "log_mode", "sqlite", "provider", "model", "timeout"}
+_SUPPORTED_CONFIG_KEYS = {"log_dir", "log_mode", "sqlite", "provider", "model", "timeout", "strict_mirror"}
 
 
 def _load_project_config() -> tuple[dict[str, Any], str | None]:
@@ -119,13 +119,61 @@ def _load_target(target: str) -> Workflow:
     return obj
 
 
-def _make_store(log_dir: Path, sqlite: Path | None) -> JSONLStore | MultiStore:
+def _make_store(log_dir: Path, sqlite: Path | None, *, strict_mirror: bool = False) -> JSONLStore | MultiStore:
     log_dir.mkdir(parents=True, exist_ok=True)
     primary = JSONLStore(log_dir)
     if sqlite is None:
         return primary
     sqlite.parent.mkdir(parents=True, exist_ok=True)
-    return MultiStore(primary, SQLiteStore(sqlite))
+    return MultiStore(primary, SQLiteStore(sqlite), strict_mirror=strict_mirror)
+
+
+def _build_internal_run_argv(
+    *,
+    target: str,
+    run_id: str | None,
+    inputs_json: str | None,
+    log_dir: Path,
+    sqlite: Path | None,
+    log_mode: str,
+    tag: list[str] | None,
+    resume: bool,
+    dry_run: bool,
+    output: str,
+) -> list[str]:
+    """Argv for ``python -m replayt.cli.main`` (must not include ``--timeout`` — parent enforces that)."""
+
+    argv = ["run", target, "--log-dir", str(log_dir), "--log-mode", log_mode, "--output", output]
+    if run_id:
+        argv += ["--run-id", run_id]
+    if inputs_json is not None:
+        argv += ["--inputs-json", inputs_json]
+    if sqlite is not None:
+        argv += ["--sqlite", str(sqlite)]
+    if tag:
+        for t in tag:
+            argv += ["--tag", t]
+    if resume:
+        argv.append("--resume")
+    if dry_run:
+        argv.append("--dry-run")
+    return argv
+
+
+def _subprocess_env_child() -> dict[str, str]:
+    """Environment for isolated ``replayt run`` children (timeout). Ensures ``replayt`` is importable."""
+    env = {**os.environ, "REPLAYT_SUBPROCESS_RUN": "1"}
+    for p in sys.path:
+        if not p:
+            continue
+        try:
+            if Path(p, "replayt", "__init__.py").is_file():
+                prev = env.get("PYTHONPATH", "")
+                env["PYTHONPATH"] = f"{p}{os.pathsep}{prev}" if prev else p
+                break
+        except OSError:
+            continue
+    return env
 
 
 @contextmanager
@@ -312,7 +360,7 @@ def cmd_run(
     timeout: int | None = typer.Option(
         None,
         "--timeout",
-        help="Kill the run after this many seconds with exit code 1.",
+        help="Kill the run after this many seconds (exit 1). Uses an isolated subprocess on all platforms.",
     ),
     dry_run: bool = typer.Option(
         False, "--dry-run", help="Trace execution with placeholder LLM responses (no API calls)."
@@ -328,15 +376,46 @@ def cmd_run(
         typer.echo("When using --resume, you must pass --run-id", err=True)
         raise typer.Exit(code=2)
 
+    in_child = os.environ.get("REPLAYT_SUBPROCESS_RUN") == "1"
     cfg, _ = _get_project_config()
+    strict_mirror = bool(cfg.get("strict_mirror"))
+
     if log_dir == Path(".replayt/runs") and cfg.get("log_dir"):
         log_dir = Path(cfg["log_dir"])
     if sqlite is None and cfg.get("sqlite"):
         sqlite = Path(cfg["sqlite"])
     if log_mode == "redacted" and cfg.get("log_mode"):
         log_mode = cfg["log_mode"]
-    if timeout is None and cfg.get("timeout"):
+    if not in_child and timeout is None and cfg.get("timeout"):
         timeout = int(cfg["timeout"])
+    if in_child:
+        timeout = None
+
+    if not in_child and timeout is not None and timeout > 0:
+        argv = _build_internal_run_argv(
+            target=target,
+            run_id=run_id,
+            inputs_json=inputs_json,
+            log_dir=log_dir,
+            sqlite=sqlite,
+            log_mode=log_mode,
+            tag=tag,
+            resume=resume,
+            dry_run=dry_run,
+            output=output,
+        )
+        env = _subprocess_env_child()
+        try:
+            completed = subprocess.run(
+                [sys.executable, "-m", "replayt.cli.main", *argv],
+                env=env,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            typer.echo(f"Run timed out after {timeout}s", err=True)
+            raise typer.Exit(code=1)
+        rc = completed.returncode if completed.returncode is not None else 1
+        raise typer.Exit(code=rc)
 
     wf = _load_target(target)
     inputs: dict[str, Any] | None = None
@@ -353,7 +432,7 @@ def cmd_run(
             k, v = t.split("=", 1)
             tags_dict[k] = v
     lm = _parse_log_mode(log_mode)
-    store = _make_store(log_dir, sqlite)
+    store = _make_store(log_dir, sqlite, strict_mirror=strict_mirror)
     if dry_run:
         from replayt.testing import DryRunLLMClient
 
@@ -361,29 +440,12 @@ def cmd_run(
         runner = Runner(wf, store, log_mode=lm, llm_client=DryRunLLMClient())
     else:
         runner = Runner(wf, store, log_mode=lm)
-    if timeout is not None and timeout > 0:
-        if sys.platform != "win32":
-            def _timeout_handler(signum: int, frame: Any) -> None:
-                typer.echo(f"Run timed out after {timeout}s", err=True)
-                raise SystemExit(1)
-
-            signal.signal(signal.SIGALRM, _timeout_handler)
-            signal.alarm(timeout)
-        else:
-            import _thread
-            import threading
-
-            def _kill_after() -> None:
-                typer.echo(f"Run timed out after {timeout}s", err=True)
-                _thread.interrupt_main()
-
-            timer = threading.Timer(float(timeout), _kill_after)
-            timer.daemon = True
-            timer.start()
     try:
         result = runner.run(run_id=run_id, resume=resume, inputs=inputs, tags=tags_dict)
     except KeyboardInterrupt:
         raise typer.Exit(code=1)
+    finally:
+        runner.close()
     if output == "json":
         typer.echo(json.dumps(_run_result_payload(wf, result), indent=2, default=str))
     else:
@@ -549,12 +611,23 @@ def cmd_resume(
     sqlite: Path | None = typer.Option(None),
     log_mode: str = typer.Option("redacted", case_sensitive=False),
 ) -> None:
+    cfg, _ = _get_project_config()
+    strict_mirror = bool(cfg.get("strict_mirror"))
+    if log_dir == Path(".replayt/runs") and cfg.get("log_dir"):
+        log_dir = Path(cfg["log_dir"])
+    if sqlite is None and cfg.get("sqlite"):
+        sqlite = Path(cfg["sqlite"])
+    if log_mode == "redacted" and cfg.get("log_mode"):
+        log_mode = cfg["log_mode"]
     wf = _load_target(target)
     lm = _parse_log_mode(log_mode)
-    store = _make_store(log_dir, sqlite)
+    store = _make_store(log_dir, sqlite, strict_mirror=strict_mirror)
     resolve_approval_on_store(store, run_id, approval_id, approved=not reject)
     runner = Runner(wf, store, log_mode=lm)
-    result = runner.run(run_id=run_id, resume=True)
+    try:
+        result = runner.run(run_id=run_id, resume=True)
+    finally:
+        runner.close()
     typer.echo(f"run_id={result.run_id}")
     typer.echo(f"workflow={wf.name}@{wf.version}")
     typer.echo(f"status={result.status}")
@@ -1011,18 +1084,18 @@ def cmd_doctor() -> None:
     try:
         import httpx
 
-        reachable = False
-        if settings.api_key:
-            with httpx.Client(timeout=5.0) as http_client:
-                r = http_client.get(
-                    settings.base_url.rstrip("/") + "/models",
-                    headers={"Authorization": f"Bearer {settings.api_key}"},
-                )
-                reachable = r.status_code < 500
-        connectivity_detail = (
-            "reachable" if reachable else "skipped" if not settings.api_key else "unreachable"
-        )
-        checks.append(("provider_connectivity", reachable if settings.api_key else False, connectivity_detail))
+        with httpx.Client(timeout=5.0) as http_client:
+            headers: dict[str, str] = {}
+            if settings.api_key:
+                headers["Authorization"] = f"Bearer {settings.api_key}"
+            r = http_client.get(settings.base_url.rstrip("/") + "/models", headers=headers)
+        # Any sub-5xx response means something answered; 404 is common when /models is absent (chat may still work).
+        reachable = r.status_code < 500
+        detail = f"HTTP {r.status_code}"
+        if r.status_code == 404:
+            detail += " (/models not implemented — try a chat request)"
+        connectivity_detail = detail if reachable else f"{detail} (server error)"
+        checks.append(("provider_connectivity", reachable, connectivity_detail))
     except Exception as exc:  # noqa: BLE001
         checks.append(("provider_connectivity", False, str(exc)))
 
@@ -1124,31 +1197,31 @@ def cmd_report(
             duration = f"{secs / 60:.1f}m"
 
     status_classes = {
-        "completed": "bg-green-100 text-green-800",
-        "failed": "bg-red-100 text-red-800",
-        "paused": "bg-yellow-100 text-yellow-800",
+        "completed": "rp-badge-ok",
+        "failed": "rp-badge-err",
+        "paused": "rp-badge-pause",
     }
-    status_class = status_classes.get(status, "bg-slate-100 text-slate-800")
+    status_class = status_classes.get(status, "rp-badge-neutral")
 
     tags_html = ""
     if tags:
         tag_strs = ", ".join(f"{html.escape(k)}={html.escape(v)}" for k, v in tags.items())
-        tags_html = f'<p><span class="font-medium text-slate-500">Tags:</span> {tag_strs}</p>'
+        tags_html = f'<p><span class="rp-label">Tags:</span> {tag_strs}</p>'
 
     timeline_items = []
     for s in states:
-        dot_class = "bg-slate-400"
+        dot_class = "rp-dot-muted"
         if s["state"] == states[-1]["state"] and status == "completed":
-            dot_class = "bg-green-500"
+            dot_class = "rp-dot-ok"
         elif s["state"] == states[-1]["state"] and status == "failed":
-            dot_class = "bg-red-500"
+            dot_class = "rp-dot-err"
         timeline_items.append(
             TIMELINE_ITEM.format(state=html.escape(s["state"]), ts=html.escape(s["ts"]), dot_class=dot_class)
         )
     timeline_html = (
         "\n".join(timeline_items)
         if timeline_items
-        else '<li class="ml-6 text-sm text-slate-400">No states recorded</li>'
+        else '<li class="rp-tl-item"><p class="rp-muted">No states recorded</p></li>'
     )
 
     outputs_section = ""

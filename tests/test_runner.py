@@ -406,3 +406,69 @@ def test_runner_context_snapshot_survives_non_copyable_value(tmp_path: Path) -> 
     assert result.status == "paused"
     events = store.load_events(result.run_id)
     assert any(e["type"] == "context_snapshot" for e in events)
+
+
+def test_approval_outcomes_last_resolution_wins(tmp_path: Path) -> None:
+    wf = Workflow("ap_out")
+    wf.set_initial("x")
+
+    @wf.step("x")
+    def x(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    rid = "r1"
+    store.append_event(rid, ts="1", typ="run_started", payload={})
+    store.append_event(
+        rid, ts="2", typ="approval_resolved", payload={"approval_id": "ship", "approved": True}
+    )
+    store.append_event(
+        rid, ts="3", typ="approval_resolved", payload={"approval_id": "ship", "approved": False}
+    )
+    r = Runner(wf, store, log_mode=LogMode.redacted)
+    r._load_approval_state_from_events(store.load_events(rid))
+    assert r._approval_outcomes["ship"] is False
+    from replayt.runner import RunContext
+
+    ctx = RunContext(r)
+    assert ctx.is_rejected("ship")
+    assert not ctx.is_approved("ship")
+
+
+def test_resume_target_prefers_latest_chronological_resolution(tmp_path: Path) -> None:
+    wf = Workflow("resume_order")
+    wf.set_initial("start")
+
+    @wf.step("start")
+    def start(ctx) -> str | None:
+        return None
+
+    events = [
+        {"type": "approval_requested", "payload": {"approval_id": "a", "on_approve": "s1", "state": "g1"}},
+        {"type": "approval_requested", "payload": {"approval_id": "b", "on_approve": "s2", "state": "g2"}},
+        {"type": "approval_resolved", "payload": {"approval_id": "b", "approved": True}},
+        {"type": "approval_resolved", "payload": {"approval_id": "a", "approved": True}},
+    ]
+    r = Runner(wf, store=JSONLStore(tmp_path))
+    target, _paused = r._resume_target_from_events(events)
+    assert target == "s1"
+
+
+def test_resolve_approval_accepts_string_for_numeric_logged_id(tmp_path: Path) -> None:
+    wf = Workflow("numeric_id")
+    wf.set_initial("gate")
+
+    @wf.step("gate")
+    def gate(ctx) -> str | None:
+        ctx.request_approval(123, summary="ok?", on_approve="done")  # type: ignore[arg-type]
+
+    @wf.step("done")
+    def done(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    paused = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert paused.status == "paused"
+    resolve_approval_on_store(store, paused.run_id, "123", approved=True)
+    final = Runner(wf, store, log_mode=LogMode.redacted).run(run_id=paused.run_id, resume=True)
+    assert final.status == "completed"

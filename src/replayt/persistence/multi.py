@@ -17,6 +17,9 @@ class MultiStore:
     Mirror store failures are logged at WARNING level.  Pass *on_mirror_error*
     to receive a callback ``(operation, store, exception)`` for alerting or
     metrics.
+
+    With ``strict_mirror=True``, any mirror write failure is re-raised after logging
+    so the primary and mirrors stay consistent or the run fails loudly.
     """
 
     def __init__(
@@ -24,11 +27,13 @@ class MultiStore:
         primary: EventStore,
         *mirror: EventStore,
         on_mirror_error: MirrorErrorHandler | None = None,
+        strict_mirror: bool = False,
     ) -> None:
         self._primary = primary
         self._mirror = mirror
         self._all = (primary, *mirror)
         self._on_mirror_error = on_mirror_error
+        self._strict_mirror = strict_mirror
         self.mirror_error_count: int = 0
 
     def _handle_mirror_error(self, operation: str, store: EventStore, exc: Exception, run_id: str) -> None:
@@ -36,6 +41,8 @@ class MultiStore:
         _log.warning("Mirror store %s failed for run_id=%s", operation, run_id, exc_info=True)
         if self._on_mirror_error is not None:
             self._on_mirror_error(operation, store, exc)
+        if self._strict_mirror:
+            raise exc
 
     def append_event(self, run_id: str, *, ts: str, typ: str, payload: dict[str, Any]) -> dict[str, Any]:
         event = self._primary.append_event(run_id, ts=ts, typ=typ, payload=payload)

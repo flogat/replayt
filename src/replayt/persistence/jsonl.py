@@ -72,15 +72,33 @@ class JSONLStore:
         return path
 
     def _read_last_seq_locked(self, f) -> int:
-        f.seek(0)
-        last_seq = 0
-        for raw in f:
-            line = raw.strip()
-            if not line:
-                continue
-            event = json.loads(line)
-            last_seq = max(last_seq, int(event.get("seq", 0)))
-        return last_seq
+        """Return the last event seq by reading from EOF backward (O(tail)), not a full-file scan."""
+        f.seek(0, os.SEEK_END)
+        end = f.tell()
+        if end == 0:
+            return 0
+        read_size = min(65536, end)
+        start = end - read_size
+        while True:
+            f.seek(start)
+            block = f.read(end - start)
+            lines = [ln.strip() for ln in block.splitlines() if ln.strip()]
+            if lines:
+                try:
+                    event = json.loads(lines[-1])
+                    return int(event.get("seq", 0))
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    pass
+            if start == 0:
+                for line in reversed(lines[:-1] if len(lines) > 1 else []):
+                    try:
+                        event = json.loads(line)
+                        return int(event.get("seq", 0))
+                    except (json.JSONDecodeError, TypeError, ValueError):
+                        continue
+                return 0
+            read_size = min(read_size * 2, end)
+            start = end - read_size
 
     def append_event(self, run_id: str, *, ts: str, typ: str, payload: dict[str, Any]) -> dict[str, Any]:
         path = self._ensure_path(run_id)

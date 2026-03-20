@@ -1,0 +1,9 @@
+{"version": 2, "width": 100, "height": 18, "timestamp": 1710931200, "env": {"TERM": "xterm-256color", "SHELL": "/bin/bash"}}
+[0.0, "o", "$ replayt graph examples.e01_hello_world:wf\r\n"]
+[0.12, "o", "flowchart LR\r\n  greet --> done\r\n"]
+[0.28, "o", "\r\n$ replayt run examples.e01_hello_world:wf --inputs-json '{\"customer_name\":\"Sam\"}'\r\n"]
+[0.42, "o", "run_id=…  status=completed\r\n"]
+[0.58, "o", "\r\n$ replayt inspect <run_id>\r\n"]
+[0.72, "o", "(summary + events)\r\n"]
+[0.88, "o", "\r\n$ replayt replay <run_id>\r\n"]
+[1.02, "o", "(human-readable timeline — no API calls)\r\n"]

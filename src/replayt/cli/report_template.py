@@ -1,6 +1,64 @@
-"""Self-contained HTML report template for ``replayt report``."""
+"""Self-contained HTML report template for ``replayt report`` (no external CDN)."""
 
 from __future__ import annotations
+
+REPORT_CSS = """
+:root {{
+  --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
+  --slate-400: #94a3b8; --slate-500: #64748b; --slate-600: #475569; --slate-700: #334155;
+  --slate-800: #1e293b; --slate-900: #0f172a;
+  --green-100: #dcfce7; --green-500: #22c55e; --green-800: #166534;
+  --red-100: #fee2e2; --red-500: #ef4444; --red-800: #991b1b;
+  --yellow-100: #fef9c3; --yellow-800: #854d0e;
+}}
+body.rp-body {{ margin:0; min-height:100vh; background:var(--slate-50); color:var(--slate-900);
+  font-family:ui-sans-serif,system-ui,sans-serif; -webkit-font-smoothing:antialiased; }}
+.rp-main {{ max-width:56rem; margin:0 auto; padding:2.5rem 1rem; }}
+.rp-section {{ margin-bottom:2rem; }}
+.rp-h1 {{ font-size:1.5rem; font-weight:700; letter-spacing:-0.025em; margin:0 0 0.5rem; }}
+.rp-h2 {{ font-size:1.125rem; font-weight:600; margin:0 0 0.75rem; }}
+.rp-card {{ background:#fff; border:1px solid var(--slate-200); border-radius:0.5rem;
+  box-shadow:0 1px 2px rgba(15,23,42,0.06); padding:1.25rem; }}
+.rp-card-tight p {{ margin:0.15rem 0; font-size:0.875rem; }}
+.rp-label {{ font-weight:500; color:var(--slate-500); }}
+.rp-code {{ font-family:ui-monospace,monospace; color:var(--slate-800); font-size:0.9em; }}
+.rp-badge {{
+  display:inline-block; padding:0.125rem 0.5rem; border-radius:0.25rem; font-size:0.75rem; font-weight:600;
+}}
+.rp-badge-ok {{ background:var(--green-100); color:var(--green-800); }}
+.rp-badge-err {{ background:var(--red-100); color:var(--red-800); }}
+.rp-badge-pause {{ background:var(--yellow-100); color:var(--yellow-800); }}
+.rp-badge-neutral {{ background:var(--slate-100); color:var(--slate-800); }}
+.rp-timeline {{ list-style:none; margin:0; padding:0 0 0 0.75rem; border-left:2px solid var(--slate-300); }}
+.rp-tl-item {{ position:relative; margin-bottom:1rem; margin-left:0.5rem; }}
+.rp-tl-dot {{ position:absolute; left:-1.15rem; top:0.2rem; width:0.65rem; height:0.65rem;
+  border-radius:9999px; border:2px solid #fff; }}
+.rp-dot-muted {{ background:var(--slate-400); }}
+.rp-dot-ok {{ background:var(--green-500); }}
+.rp-dot-err {{ background:var(--red-500); }}
+.rp-tl-state {{ font-size:0.875rem; font-weight:500; color:var(--slate-700); margin:0; }}
+.rp-tl-ts {{ font-size:0.75rem; color:var(--slate-400); margin:0.15rem 0 0; }}
+.rp-muted {{ color:var(--slate-400); font-size:0.875rem; }}
+.rp-stack {{ display:flex; flex-direction:column; gap:0.75rem; }}
+details.rp-details summary {{
+  cursor:pointer; font-size:0.875rem; font-weight:500; color:var(--slate-700); list-style:none;
+}}
+details.rp-details summary::-webkit-details-marker {{ display:none; }}
+details.rp-details summary:hover {{ color:var(--slate-900); }}
+.rp-pre {{ margin-top:0.5rem; padding:0.75rem; background:var(--slate-50); border-radius:0.375rem;
+  font-size:0.75rem; color:var(--slate-600); border:1px solid var(--slate-100);
+  white-space:pre-wrap; word-break:break-all; }}
+.rp-divide > * + * {{ border-top:1px solid var(--slate-100); }}
+.rp-tc-item {{ padding:1rem; }}
+.rp-table {{ width:100%; text-align:left; font-size:0.875rem; border-collapse:collapse; }}
+.rp-table th, .rp-table td {{ padding:0.25rem 0; }}
+.rp-table th {{ font-weight:500; color:var(--slate-500); }}
+.rp-table .rp-num {{ text-align:right; font-family:ui-monospace,monospace; }}
+.rp-table thead tr {{ border-bottom:1px solid var(--slate-200); }}
+.rp-table tbody tr.rp-total {{ border-top:1px solid var(--slate-200); font-weight:600; }}
+.rp-foot {{ font-size:0.75rem; color:var(--slate-400); margin-top:3rem; }}
+.rp-seq {{ font-size:0.75rem; color:var(--slate-400); font-weight:400; }}
+"""
 
 REPORT_HTML = """\
 <!DOCTYPE html>
@@ -9,105 +67,91 @@ REPORT_HTML = """\
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
   <title>replayt report &mdash; {run_id}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
   <style>
-    details summary {{ cursor: pointer; }}
-    details summary::-webkit-details-marker {{ display: none; }}
-    pre {{ white-space: pre-wrap; word-break: break-all; }}
+""" + REPORT_CSS + """
   </style>
 </head>
-<body class="bg-slate-50 text-slate-900 antialiased min-h-screen">
-  <main class="max-w-4xl mx-auto px-4 py-10">
+<body class="rp-body">
+  <main class="rp-main">
 
-    <!-- Run Header -->
-    <section class="mb-8">
-      <h1 class="text-2xl font-bold tracking-tight mb-2">Run Report</h1>
-      <div class="bg-white border border-slate-200 rounded-lg shadow-sm p-5 space-y-1 text-sm">
-        <p><span class="font-medium text-slate-500">Run ID:</span> <code class="text-slate-800">{run_id}</code></p>
-        <p><span class="font-medium text-slate-500">Workflow:</span> {workflow_name}@{workflow_version}</p>
-        <p><span class="font-medium text-slate-500">Status:</span>
-          <span class="{status_class} inline-block px-2 py-0.5 rounded text-xs font-semibold">{status}</span></p>
-        <p><span class="font-medium text-slate-500">Duration:</span> {duration}</p>
+    <section class="rp-section">
+      <h1 class="rp-h1">Run Report</h1>
+      <div class="rp-card rp-card-tight">
+        <p><span class="rp-label">Run ID:</span> <code class="rp-code">{run_id}</code></p>
+        <p><span class="rp-label">Workflow:</span> {workflow_name}@{workflow_version}</p>
+        <p><span class="rp-label">Status:</span>
+          <span class="rp-badge {status_class}">{status}</span></p>
+        <p><span class="rp-label">Duration:</span> {duration}</p>
         {tags_html}
       </div>
     </section>
 
-    <!-- State Timeline -->
-    <section class="mb-8">
-      <h2 class="text-lg font-semibold mb-3">State Timeline</h2>
-      <div class="bg-white border border-slate-200 rounded-lg shadow-sm p-5">
-        <ol class="relative border-l-2 border-slate-300 ml-3 space-y-4">
+    <section class="rp-section">
+      <h2 class="rp-h2">State Timeline</h2>
+      <div class="rp-card">
+        <ol class="rp-timeline">
           {timeline_html}
         </ol>
       </div>
     </section>
 
-    <!-- Structured Outputs -->
     {outputs_section}
 
-    <!-- Tool Calls -->
     {tool_calls_section}
 
-    <!-- Token Usage -->
-    <section class="mb-8">
-      <h2 class="text-lg font-semibold mb-3">Token Usage</h2>
-      <div class="bg-white border border-slate-200 rounded-lg shadow-sm p-5 text-sm">
-        <table class="w-full text-left">
-          <thead><tr class="border-b border-slate-200 text-slate-500">
-            <th class="py-1 font-medium">Metric</th><th class="py-1 font-medium text-right">Value</th>
+    <section class="rp-section">
+      <h2 class="rp-h2">Token Usage</h2>
+      <div class="rp-card rp-card-tight">
+        <table class="rp-table">
+          <thead><tr>
+            <th>Metric</th><th class="rp-num">Value</th>
           </tr></thead>
           <tbody>
-            <tr><td class="py-1">Prompt tokens</td><td class="py-1 text-right font-mono">{prompt_tokens}</td></tr>
-            <tr><td class="py-1">Completion tokens</td>
-              <td class="py-1 text-right font-mono">{completion_tokens}</td></tr>
-            <tr class="border-t border-slate-200 font-semibold">
-              <td class="py-1">Total tokens</td>
-              <td class="py-1 text-right font-mono">{total_tokens}</td></tr>
+            <tr><td>Prompt tokens</td><td class="rp-num">{prompt_tokens}</td></tr>
+            <tr><td>Completion tokens</td><td class="rp-num">{completion_tokens}</td></tr>
+            <tr class="rp-total"><td>Total tokens</td><td class="rp-num">{total_tokens}</td></tr>
           </tbody>
         </table>
       </div>
     </section>
 
-    <footer class="text-xs text-slate-400 mt-12">Generated by replayt</footer>
+    <footer class="rp-foot">Generated by replayt</footer>
   </main>
 </body>
 </html>
 """
 
 TIMELINE_ITEM = """\
-<li class="ml-6">
-  <span class="absolute -left-2 w-4 h-4 rounded-full {dot_class} border-2 border-white"></span>
-  <p class="text-sm font-medium text-slate-700">{state}</p>
-  <p class="text-xs text-slate-400">{ts}</p>
+<li class="rp-tl-item">
+  <span class="rp-tl-dot {dot_class}"></span>
+  <p class="rp-tl-state">{state}</p>
+  <p class="rp-tl-ts">{ts}</p>
 </li>"""
 
 OUTPUTS_SECTION = """\
-    <section class="mb-8">
-      <h2 class="text-lg font-semibold mb-3">Structured Outputs</h2>
-      <div class="bg-white border border-slate-200 rounded-lg shadow-sm p-5 space-y-3">
+    <section class="rp-section">
+      <h2 class="rp-h2">Structured Outputs</h2>
+      <div class="rp-card rp-stack">
         {items}
       </div>
     </section>"""
 
 OUTPUT_ITEM = """\
-<details class="group">
-  <summary class="text-sm font-medium text-slate-700 hover:text-slate-900">{schema_name}</summary>
-  <pre class="mt-2 p-3 bg-slate-50 rounded text-xs text-slate-600 border border-slate-100">{data_json}</pre>
+<details class="rp-details group">
+  <summary>{schema_name}</summary>
+  <pre class="rp-pre">{data_json}</pre>
 </details>"""
 
 TOOL_CALLS_SECTION = """\
-    <section class="mb-8">
-      <h2 class="text-lg font-semibold mb-3">Tool Calls</h2>
-      <div class="bg-white border border-slate-200 rounded-lg shadow-sm divide-y divide-slate-100">
+    <section class="rp-section">
+      <h2 class="rp-h2">Tool Calls</h2>
+      <div class="rp-card rp-divide">
         {items}
       </div>
     </section>"""
 
 TOOL_CALL_ITEM = """\
-<details class="group p-4">
-  <summary class="text-sm font-medium text-slate-700 hover:text-slate-900">
-    {tool} <span class="text-xs text-slate-400">(seq {seq})</span></summary>
-  <div class="mt-2 space-y-2">
-    <pre class="p-3 bg-slate-50 rounded text-xs text-slate-600 border border-slate-100">{detail_json}</pre>
-  </div>
+<details class="rp-details rp-tc-item">
+  <summary>{tool} <span class="rp-seq">(seq {seq})</span></summary>
+  <pre class="rp-pre">{detail_json}</pre>
 </details>"""
