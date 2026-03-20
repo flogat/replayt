@@ -29,6 +29,8 @@ dependencies = [
 [project.optional-dependencies]
 yaml = ["PyYAML>=6.0"]
 dev = [
+  "build>=1.2.2",
+  "PyYAML>=6.0",
   "pytest>=8.0",
   "ruff>=0.6.0",
 ]
