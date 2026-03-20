@@ -34,3 +34,6 @@ class JSONLStore:
                     continue
                 out.append(json.loads(line))
         return out
+
+    def list_run_ids(self) -> list[str]:
+        return sorted(path.stem for path in self.base_dir.glob("*.jsonl"))

@@ -82,3 +82,22 @@ def test_fail_after_retries(tmp_path: Path) -> None:
     result = r.run()
     assert result.status == "failed"
     assert result.error
+
+
+def test_fails_on_undeclared_transition(tmp_path: Path) -> None:
+    wf = Workflow("edges")
+    wf.set_initial("start")
+    wf.note_transition("start", "done")
+
+    @wf.step("start")
+    def start(ctx) -> str:
+        return "surprise"
+
+    @wf.step("done")
+    def done(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert result.status == "failed"
+    assert "undeclared transition" in str(result.error)
