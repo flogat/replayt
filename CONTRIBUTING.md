@@ -6,9 +6,12 @@
 python -m venv .venv
 source .venv/bin/activate  # Windows: .venv\Scripts\activate
 pip install -e ".[dev]"
+python -m build
 pytest
 ruff check src tests
 ```
+
+The `dev` extra includes the YAML dependency and package build tooling so local checks match CI more closely.
 
 ## Scope
 
