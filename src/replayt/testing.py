@@ -19,31 +19,54 @@ class DryRunLLMClient(OpenAICompatClient):
     def __init__(self) -> None:
         super().__init__(LLMSettings(api_key="dry-run"))
 
-    @staticmethod
-    def _minimal_json_from_schema(schema: dict[str, Any]) -> dict[str, Any]:
-        """Generate a minimal valid JSON object from a JSON Schema."""
+    @classmethod
+    def _minimal_json_from_schema(
+        cls, schema: dict[str, Any], *, _defs: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Generate a minimal valid JSON object from a JSON Schema, including nested ``$ref``."""
+        if _defs is None:
+            _defs = schema.get("$defs", schema.get("definitions", {}))
         props = schema.get("properties", {})
         required = set(schema.get("required", []))
         result: dict[str, Any] = {}
         for key, prop in props.items():
             if key not in required:
                 continue
-            typ = prop.get("type", "string")
-            if typ == "string":
-                result[key] = ""
-            elif typ == "integer":
-                result[key] = 0
-            elif typ == "number":
-                result[key] = 0
-            elif typ == "boolean":
-                result[key] = False
-            elif typ == "array":
-                result[key] = []
-            elif typ == "object":
-                result[key] = {}
-            else:
-                result[key] = ""
+            result[key] = cls._minimal_value(prop, _defs)
         return result
+
+    @classmethod
+    def _minimal_value(cls, prop: dict[str, Any], defs: dict[str, Any]) -> Any:
+        if "$ref" in prop:
+            ref_path = prop["$ref"]
+            ref_name = ref_path.rsplit("/", 1)[-1]
+            ref_schema = defs.get(ref_name, {})
+            return cls._minimal_json_from_schema(ref_schema, _defs=defs)
+        if "allOf" in prop:
+            merged: dict[str, Any] = {}
+            for sub in prop["allOf"]:
+                merged.update(cls._minimal_value(sub, defs) if sub.get("$ref") or sub.get("properties") else {})
+            return merged
+        if "anyOf" in prop or "oneOf" in prop:
+            variants = prop.get("anyOf") or prop.get("oneOf", [])
+            if variants:
+                return cls._minimal_value(variants[0], defs)
+        typ = prop.get("type", "string")
+        if typ == "string":
+            return prop.get("enum", [""])[0] if "enum" in prop else ""
+        if typ == "integer":
+            return 0
+        if typ == "number":
+            return 0
+        if typ == "boolean":
+            return False
+        if typ == "array":
+            return []
+        if typ == "object":
+            if "properties" in prop:
+                return cls._minimal_json_from_schema(prop, _defs=defs)
+            return {}
+        return ""
 
     def chat_completions(
         self,

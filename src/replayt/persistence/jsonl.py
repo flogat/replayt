@@ -15,29 +15,35 @@ if os.name == "nt":  # pragma: no cover
     import msvcrt
 
     @contextmanager
-    def _lock_file(f) -> Iterator[None]:
+    def _lock_file(f, *, shared: bool = False) -> Iterator[None]:
+        """Mutex-style lock using a single byte at offset 0.
+
+        ``msvcrt.locking`` operates on a byte range from the current position.
+        Locking just 1 byte at position 0 avoids issues where appended bytes
+        fall outside the originally-locked range.
+        """
         f.seek(0)
-        length = max(f.seek(0, os.SEEK_END), 1)
-        f.seek(0)
-        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, length)
+        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
         try:
             yield
         finally:
-            f.flush()
-            os.fsync(f.fileno())
+            if not shared:
+                f.flush()
+                os.fsync(f.fileno())
             f.seek(0)
-            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, length)
+            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
 else:
     import fcntl
 
     @contextmanager
-    def _lock_file(f) -> Iterator[None]:
-        fcntl.flock(f.fileno(), fcntl.LOCK_EX)
+    def _lock_file(f, *, shared: bool = False) -> Iterator[None]:
+        fcntl.flock(f.fileno(), fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
         try:
             yield
         finally:
-            f.flush()
-            os.fsync(f.fileno())
+            if not shared:
+                f.flush()
+                os.fsync(f.fileno())
             fcntl.flock(f.fileno(), fcntl.LOCK_UN)
 
 
@@ -61,7 +67,8 @@ class JSONLStore:
     def _ensure_path(self, run_id: str) -> Path:
         path = self._path(run_id)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.touch(exist_ok=True)
+        if not path.exists() or path.stat().st_size == 0:
+            path.write_bytes(b"\n")
         return path
 
     def _read_last_seq_locked(self, f) -> int:
@@ -104,16 +111,29 @@ class JSONLStore:
         if not path.is_file():
             return []
         out: list[dict[str, Any]] = []
-        with path.open(encoding="utf-8") as f:
-            for lineno, line in enumerate(f, start=1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(json.loads(line))
-                except json.JSONDecodeError as e:
-                    raise RuntimeError(f"Corrupted JSONL event log for run_id={run_id!r} at line {lineno}") from e
+        with path.open("r+", encoding="utf-8") as f:
+            with _lock_file(f, shared=True):
+                f.seek(0)
+                for lineno, line in enumerate(f, start=1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        out.append(json.loads(line))
+                    except json.JSONDecodeError as e:
+                        raise RuntimeError(
+                            f"Corrupted JSONL event log for run_id={run_id!r} at line {lineno}"
+                        ) from e
         return out
 
     def list_run_ids(self) -> list[str]:
         return sorted(path.stem for path in self.base_dir.glob("*.jsonl"))
+
+    def delete_run(self, run_id: str) -> int:
+        """Delete the JSONL file for *run_id*. Returns the freed size in bytes."""
+        path = self._path(run_id)
+        if not path.is_file():
+            return 0
+        size = path.stat().st_size
+        path.unlink()
+        return size

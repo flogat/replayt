@@ -151,7 +151,10 @@ class OpenAICompatClient:
                 r = self._client.post(url, json=payload, headers=headers, timeout=timeout)
                 if r.status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts - 1:
                     retry_after = r.headers.get("retry-after")
-                    delay = float(retry_after) if retry_after and retry_after.isdigit() else _RETRY_BASE_DELAY
+                    try:
+                        delay = float(retry_after) if retry_after else _RETRY_BASE_DELAY
+                    except (ValueError, TypeError):
+                        delay = _RETRY_BASE_DELAY
                     delay = min(delay * (2**attempt), _RETRY_MAX_DELAY)
                     time.sleep(delay)
                     continue

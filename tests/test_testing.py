@@ -97,3 +97,41 @@ def test_dry_run_client_in_workflow(tmp_path: Path) -> None:
     runner = Runner(wf, store, llm_client=client)
     r = runner.run(inputs={})
     assert r.status == "completed"
+
+
+def test_dry_run_client_handles_nested_ref_schema() -> None:
+    client = DryRunLLMClient()
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "NestedSchema",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string"},
+                    "address": {"$ref": "#/$defs/Address"},
+                },
+                "required": ["name", "address"],
+                "$defs": {
+                    "Address": {
+                        "type": "object",
+                        "properties": {
+                            "city": {"type": "string"},
+                            "zip": {"type": "integer"},
+                        },
+                        "required": ["city", "zip"],
+                    }
+                },
+            },
+        },
+    }
+    result = client.chat_completions(
+        messages=[{"role": "user", "content": "test"}],
+        response_format=response_format,
+    )
+    import json
+
+    content = json.loads(result["choices"][0]["message"]["content"])
+    assert content["name"] == ""
+    assert content["address"]["city"] == ""
+    assert content["address"]["zip"] == 0

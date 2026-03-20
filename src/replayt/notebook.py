@@ -19,16 +19,22 @@ except ImportError:
     _ipython_display = None  # type: ignore[assignment]
 
 
+def _m_id(state: str) -> str:
+    safe = "".join(ch if ch.isalnum() else "_" for ch in state)
+    return f"s_{safe}"
+
+
 def _build_mermaid_source(wf: Workflow) -> str:
     lines = ["graph TD"]
     for name in wf.step_names():
         label = name.replace('"', "#quot;")
+        nid = _m_id(name)
         if name == wf.initial_state:
-            lines.append(f'    {name}["{label} (start)"]')
+            lines.append(f'    {nid}["{label} (start)"]')
         else:
-            lines.append(f'    {name}["{label}"]')
+            lines.append(f'    {nid}["{label}"]')
     for src, dst in wf.edges():
-        lines.append(f"    {src} --> {dst}")
+        lines.append(f"    {_m_id(src)} --> {_m_id(dst)}")
     return "\n".join(lines)
 
 

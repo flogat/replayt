@@ -110,3 +110,34 @@ def test_llm_bridge_parse_raises_for_missing_json_object() -> None:
     with patch.object(client, "chat_completions", return_value={"choices": [{"message": {"content": "no json"}}]}):
         with pytest.raises(ValueError):
             bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
+
+
+def test_extract_json_object_empty_string() -> None:
+    from replayt.llm import _extract_json_object
+
+    with pytest.raises(ValueError, match="No JSON object"):
+        _extract_json_object("")
+
+
+def test_extract_json_object_whitespace_only() -> None:
+    from replayt.llm import _extract_json_object
+
+    with pytest.raises(ValueError, match="No JSON object"):
+        _extract_json_object("   \n\t  ")
+
+
+def test_extract_json_object_nested() -> None:
+    from replayt.llm import _extract_json_object
+
+    text = 'before {"outer": {"inner": 1}} after'
+    result = _extract_json_object(text)
+    import json
+
+    assert json.loads(result) == {"outer": {"inner": 1}}
+
+
+def test_extract_json_object_ignores_arrays() -> None:
+    from replayt.llm import _extract_json_object
+
+    with pytest.raises(ValueError, match="No JSON object"):
+        _extract_json_object("[1, 2, 3]")

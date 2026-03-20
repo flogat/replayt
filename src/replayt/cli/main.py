@@ -9,6 +9,8 @@ import re
 import signal
 import sys
 from collections import Counter
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -16,7 +18,7 @@ from typing import Any, Literal
 import typer
 
 from replayt.graph_export import workflow_to_mermaid
-from replayt.llm import LLMSettings, OpenAICompatClient
+from replayt.llm import LLMSettings
 from replayt.persistence import JSONLStore, MultiStore, SQLiteStore
 from replayt.runner import Runner, RunResult, resolve_approval_on_store
 from replayt.types import LogMode
@@ -126,10 +128,16 @@ def _make_store(log_dir: Path, sqlite: Path | None) -> JSONLStore | MultiStore:
     return MultiStore(primary, SQLiteStore(sqlite))
 
 
-def _read_store(log_dir: Path, sqlite: Path | None) -> JSONLStore | SQLiteStore:
+@contextmanager
+def _read_store(log_dir: Path, sqlite: Path | None) -> Iterator[JSONLStore | SQLiteStore]:
     if sqlite is not None:
-        return SQLiteStore(sqlite)
-    return JSONLStore(log_dir)
+        store = SQLiteStore(sqlite)
+        try:
+            yield store
+        finally:
+            store.close()
+    else:
+        yield JSONLStore(log_dir)
 
 
 def _event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
@@ -362,16 +370,20 @@ def cmd_run(
             signal.signal(signal.SIGALRM, _timeout_handler)
             signal.alarm(timeout)
         else:
+            import _thread
             import threading
 
             def _kill_after() -> None:
                 typer.echo(f"Run timed out after {timeout}s", err=True)
-                os._exit(1)
+                _thread.interrupt_main()
 
             timer = threading.Timer(float(timeout), _kill_after)
             timer.daemon = True
             timer.start()
-    result = runner.run(run_id=run_id, resume=resume, inputs=inputs, tags=tags_dict)
+    try:
+        result = runner.run(run_id=run_id, resume=resume, inputs=inputs, tags=tags_dict)
+    except KeyboardInterrupt:
+        raise typer.Exit(code=1)
     if output == "json":
         typer.echo(json.dumps(_run_result_payload(wf, result), indent=2, default=str))
     else:
@@ -399,8 +411,8 @@ def cmd_inspect(
         help="text (default) or json.",
     ),
 ) -> None:
-    store = _read_store(log_dir, sqlite)
-    events = store.load_events(run_id)
+    with _read_store(log_dir, sqlite) as store:
+        events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r} in {log_dir}", err=True)
         raise typer.Exit(code=2)
@@ -449,7 +461,10 @@ def _replay_timeline_lines(events: list[dict[str, Any]]) -> list[str]:
             "tool_call",
             "tool_result",
         }:
-            line += f"  {json.dumps(payload, ensure_ascii=False, default=str)[:500]}"
+            raw = json.dumps(payload, ensure_ascii=False, default=str)
+            if len(raw) > 500:
+                raw = raw[:497] + "..."
+            line += f"  {raw}"
         lines.append(line)
     return lines
 
@@ -506,8 +521,8 @@ def cmd_replay(
 ) -> None:
     """Print a human-readable timeline from the recorded run (does not call model APIs)."""
 
-    store = _read_store(log_dir, sqlite)
-    events = store.load_events(run_id)
+    with _read_store(log_dir, sqlite) as store:
+        events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r}", err=True)
         raise typer.Exit(code=2)
@@ -632,23 +647,24 @@ def cmd_runs(
     """List recent local runs from JSONL logs."""
 
     tag_filters = _parse_tag_filters(tag)
-    store = _read_store(log_dir, sqlite)
-    run_ids = sorted(store.list_run_ids(), reverse=True)
-    shown = 0
-    for run_id in run_ids:
-        if shown >= limit:
-            break
-        events = store.load_events(run_id)
-        summary = _event_summary(events)
-        if tag_filters and not _tags_match(summary.get("tags") or {}, tag_filters):
-            continue
-        shown += 1
+    with _read_store(log_dir, sqlite) as store:
+        run_ids = sorted(store.list_run_ids(), reverse=True)
+        runs_data: list[tuple[str, dict[str, Any]]] = []
+        for run_id in run_ids:
+            if len(runs_data) >= limit:
+                break
+            events = store.load_events(run_id)
+            summary = _event_summary(events)
+            if tag_filters and not _tags_match(summary.get("tags") or {}, tag_filters):
+                continue
+            runs_data.append((run_id, summary))
+    for run_id, summary in runs_data:
         typer.echo(
             f"{run_id}  {summary['status']}  "
             f"{summary['workflow_name']}@{summary['workflow_version']}  "
             f"{summary['last_ts']}"
         )
-    if shown == 0:
+    if not runs_data:
         typer.echo(f"No runs found in {log_dir}")
 
 
@@ -656,7 +672,9 @@ def _parse_iso_ts(ts: str | None) -> datetime | None:
     if not ts:
         return None
     try:
-        s = str(ts).replace("Z", "+00:00")
+        s = str(ts)
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
         return datetime.fromisoformat(s)
     except ValueError:
         return None
@@ -678,8 +696,6 @@ def cmd_stats(
     """Summarize local run logs: counts, LLM latency averages, token usage, common failure states."""
 
     tag_filters = _parse_tag_filters(tag)
-    store = _read_store(log_dir, sqlite)
-    run_ids = store.list_run_ids()
     now = datetime.now(timezone.utc)
     cutoff = None
     if days is not None:
@@ -697,8 +713,11 @@ def cmd_stats(
     total_completion_tokens = 0
     total_all_tokens = 0
 
-    for rid in run_ids:
-        events = store.load_events(rid)
+    with _read_store(log_dir, sqlite) as store:
+        run_ids = store.list_run_ids()
+        all_run_events = [(rid, store.load_events(rid)) for rid in run_ids]
+
+    for rid, events in all_run_events:
         if not events:
             continue
         summ = _event_summary(events)
@@ -826,9 +845,9 @@ def cmd_diff(
 ) -> None:
     """Compare two runs side by side: states, outputs, tool calls, status, latency."""
 
-    store = _read_store(log_dir, sqlite)
-    events_a = store.load_events(run_a)
-    events_b = store.load_events(run_b)
+    with _read_store(log_dir, sqlite) as store:
+        events_a = store.load_events(run_a)
+        events_b = store.load_events(run_b)
     if not events_a:
         typer.echo(f"No events for run_id={run_a!r}", err=True)
         raise typer.Exit(code=2)
@@ -916,6 +935,7 @@ def _parse_duration(value: str) -> int | None:
 def cmd_gc(
     older_than: str = typer.Option(..., "--older-than", help="Delete runs older than this duration (e.g. 90d, 24h)."),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    sqlite: Path | None = typer.Option(None, help="Optional SQLite file to also garbage-collect."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview what would be deleted."),
 ) -> None:
     """Garbage-collect old run logs by last-event timestamp."""
@@ -926,30 +946,32 @@ def cmd_gc(
     from datetime import timedelta
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
-    store = JSONLStore(log_dir)
-    run_ids = store.list_run_ids()
+    jsonl_store = JSONLStore(log_dir)
+    sqlite_store = SQLiteStore(sqlite) if sqlite is not None else None
+    run_ids = jsonl_store.list_run_ids()
     deleted = 0
-    freed_bytes = 0
     for rid in run_ids:
-        events = store.load_events(rid)
+        events = jsonl_store.load_events(rid)
         if not events:
             continue
         last_ts_raw = events[-1].get("ts")
         last_ts = _parse_iso_ts(last_ts_raw)
         if last_ts is None or last_ts >= cutoff:
             continue
-        path = store._path(rid)
-        size = path.stat().st_size if path.is_file() else 0
         if dry_run:
-            typer.echo(f"[dry-run] would delete {rid} ({size} bytes, last_event={last_ts_raw})")
+            typer.echo(f"[dry-run] would delete {rid} (last_event={last_ts_raw})")
         else:
-            path.unlink(missing_ok=True)
-            typer.echo(f"deleted {rid} ({size} bytes)")
+            jsonl_store.delete_run(rid)
+            if sqlite_store is not None:
+                sqlite_store.delete_run(rid)
+            typer.echo(f"deleted {rid}")
         deleted += 1
-        freed_bytes += size
+
+    if sqlite_store is not None:
+        sqlite_store.close()
 
     verb = "would delete" if dry_run else "deleted"
-    typer.echo(f"\n{verb} {deleted} run(s), {freed_bytes} bytes freed")
+    typer.echo(f"\n{verb} {deleted} run(s)")
 
 
 @app.command("doctor")
@@ -989,7 +1011,6 @@ def cmd_doctor() -> None:
     try:
         import httpx
 
-        client = OpenAICompatClient(settings)
         reachable = False
         if settings.api_key:
             with httpx.Client(timeout=5.0) as http_client:
@@ -1002,7 +1023,6 @@ def cmd_doctor() -> None:
             "reachable" if reachable else "skipped" if not settings.api_key else "unreachable"
         )
         checks.append(("provider_connectivity", reachable if settings.api_key else False, connectivity_detail))
-        _ = client
     except Exception as exc:  # noqa: BLE001
         checks.append(("provider_connectivity", False, str(exc)))
 
@@ -1029,8 +1049,8 @@ def cmd_report(
         TOOL_CALLS_SECTION,
     )
 
-    store = _read_store(log_dir, sqlite)
-    events = store.load_events(run_id)
+    with _read_store(log_dir, sqlite) as store:
+        events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r}", err=True)
         raise typer.Exit(code=2)

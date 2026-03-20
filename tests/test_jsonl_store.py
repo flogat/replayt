@@ -42,3 +42,19 @@ def test_jsonl_store_raises_for_corruption(tmp_path: Path) -> None:
     store = JSONLStore(tmp_path)
     with pytest.raises(RuntimeError, match="Corrupted JSONL"):
         store.load_events("bad")
+
+
+def test_jsonl_delete_run(tmp_path: Path) -> None:
+    store = JSONLStore(tmp_path)
+    store.append_event("r1", ts="t1", typ="run_started", payload={})
+    assert len(store.load_events("r1")) == 1
+    freed = store.delete_run("r1")
+    assert freed > 0
+    assert store.load_events("r1") == []
+    assert "r1" not in store.list_run_ids()
+
+
+def test_jsonl_delete_run_missing(tmp_path: Path) -> None:
+    store = JSONLStore(tmp_path)
+    freed = store.delete_run("nonexistent")
+    assert freed == 0

@@ -303,3 +303,106 @@ def test_runner_context_manager_closes_client(tmp_path: Path) -> None:
         result = r.run()
     assert result.status == "completed"
     assert r._llm_client._http is None
+
+
+def test_max_steps_prevents_infinite_loop(tmp_path: Path) -> None:
+    wf = Workflow("loop")
+    wf.set_initial("spin")
+
+    @wf.step("spin")
+    def spin(ctx) -> str:
+        return "spin"
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted, max_steps=5).run()
+    assert result.status == "failed"
+    assert "max_steps" in str(result.error)
+
+
+def test_expects_rejects_none_when_typed(tmp_path: Path) -> None:
+    """Setting a key to None should fail validation when a concrete type is expected."""
+    wf = Workflow("none_check")
+    wf.set_initial("guarded")
+
+    @wf.step("guarded", expects={"name": str})
+    def guarded(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run(inputs={"name": None})
+    assert result.status == "failed"
+    assert "expected str" in str(result.error)
+    assert "NoneType" in str(result.error)
+
+
+def test_expects_allows_none_when_generic(tmp_path: Path) -> None:
+    """expects=["key"] (list form) uses type=object, which should accept any value including None."""
+    wf = Workflow("none_ok")
+    wf.set_initial("loose")
+
+    @wf.step("loose", expects=["name"])
+    def loose(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run(inputs={"name": None})
+    assert result.status == "completed"
+
+
+def test_runner_reuse_does_not_leak_approval_state(tmp_path: Path) -> None:
+    """H1: Approval sets from a paused run must not leak into a subsequent fresh run."""
+
+    wf = Workflow("reuse")
+    wf.set_initial("gate")
+    wf.note_transition("gate", "done")
+
+    @wf.step("gate")
+    def gate(ctx) -> str | None:
+        if ctx.is_approved("go"):
+            return "done"
+        ctx.request_approval("go", summary="proceed?", on_approve="done")
+
+    @wf.step("done")
+    def done(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    runner = Runner(wf, store, log_mode=LogMode.redacted)
+
+    paused = runner.run()
+    assert paused.status == "paused"
+
+    from replayt.runner import resolve_approval_on_store
+
+    resolve_approval_on_store(store, paused.run_id, "go", approved=True)
+    resumed = runner.run(run_id=paused.run_id, resume=True)
+    assert resumed.status == "completed"
+
+    fresh = runner.run()
+    assert fresh.status == "paused", "Fresh run should NOT see stale approval from previous run"
+
+
+def test_runner_context_snapshot_survives_non_copyable_value(tmp_path: Path) -> None:
+    """M6: Shallow-copy fallback when deepcopy fails on non-copyable context values."""
+
+    wf = Workflow("non_copy")
+    wf.set_initial("gate")
+
+    class _NoCopy:
+        def __deepcopy__(self, memo):
+            raise TypeError("cannot deepcopy")
+
+    @wf.step("gate")
+    def gate(ctx) -> str | None:
+        ctx.set("widget", _NoCopy())
+        ctx.request_approval("check", summary="ok?", on_approve="done")
+
+    @wf.step("done")
+    def done(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert result.status == "paused"
+    events = store.load_events(result.run_id)
+    assert any(e["type"] == "context_snapshot" for e in events)

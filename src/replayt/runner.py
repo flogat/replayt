@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import copy
 import html as _html
+import json
+import logging
 import time
 import traceback
 import uuid
@@ -15,6 +17,8 @@ from replayt.persistence.base import EventStore
 from replayt.tools import ToolRegistry
 from replayt.types import LogMode
 from replayt.workflow import Workflow
+
+_log = logging.getLogger("replayt.runner")
 
 
 def _utcnow_iso() -> str:
@@ -30,6 +34,20 @@ def _serialize_error(exc: Exception, *, include_traceback: bool = False) -> dict
     if include_traceback:
         payload["traceback"] = "".join(traceback.format_exception(exc)).rstrip()
     return payload
+
+
+def _validate_context_serializable(data: dict[str, Any]) -> None:
+    """Warn about context values that will be silently degraded by JSON serialization."""
+    for key, value in data.items():
+        try:
+            json.dumps(value)
+        except (TypeError, ValueError):
+            _log.warning(
+                "Context key %r has non-JSON-serializable value of type %s; "
+                "it will be converted via str() during persistence and may lose fidelity on resume",
+                key,
+                type(value).__name__,
+            )
 
 
 @dataclass
@@ -127,6 +145,16 @@ class RunContext:
 
 
 class Runner:
+    """Execute a workflow against a store, emitting structured events.
+
+    .. warning::
+        ``Runner`` is **not thread-safe**. Each concurrent run must use its own
+        ``Runner`` instance because per-run state (``run_id``, ``_current_state``,
+        approval sets) is stored on the instance and mutated during ``run()``.
+    """
+
+    _DEFAULT_MAX_STEPS = 200
+
     def __init__(
         self,
         workflow: Workflow,
@@ -136,11 +164,13 @@ class Runner:
         log_mode: LogMode = LogMode.redacted,
         llm_client: OpenAICompatClient | None = None,
         include_tracebacks: bool = False,
+        max_steps: int | None = None,
     ) -> None:
         self.workflow = workflow
         self.store = store
         self.log_mode = log_mode
         self.include_tracebacks = include_tracebacks
+        self.max_steps = max_steps if max_steps is not None else self._DEFAULT_MAX_STEPS
         self._owns_client = llm_client is None
         self._llm_client = llm_client or OpenAICompatClient(llm_settings or LLMSettings.from_env())
         self.run_id: str = ""
@@ -230,6 +260,8 @@ class Runner:
             raise RuntimeError("Workflow.initial_state is not set (call set_initial)")
 
         self.run_id = run_id or str(uuid.uuid4())
+        self._resolved_approved.clear()
+        self._resolved_rejected.clear()
         if resume and not run_id:
             raise ValueError("run_id is required when resume=True")
         events = self.store.load_events(self.run_id) if resume else []
@@ -280,8 +312,18 @@ class Runner:
             ctx.data.update(inputs)
 
         state: str | None = start_state
+        steps_taken = 0
         try:
             while state is not None:
+                steps_taken += 1
+                if steps_taken > self.max_steps:
+                    err_msg = (
+                        f"Run exceeded max_steps={self.max_steps} "
+                        f"(last state: {state!r}). Possible infinite loop."
+                    )
+                    err_detail = {"type": "RunFailed", "message": err_msg}
+                    self._emit_payload("run_failed", {"error": err_detail, "state": state})
+                    raise RunFailed(err_msg)
                 self._current_state = state
                 handler = self.workflow.get_handler(state)
                 policy = self.workflow.retry_policy_for(state)
@@ -292,13 +334,15 @@ class Runner:
                 if expects:
                     violations: list[str] = []
                     for key, expected_type in expects.items():
-                        value = ctx.data.get(key)
-                        if value is None and key not in ctx.data:
+                        if key not in ctx.data:
                             violations.append(f"missing key {key!r}")
-                        elif expected_type is not object and value is not None and not isinstance(value, expected_type):
-                            violations.append(
-                                f"key {key!r}: expected {expected_type.__name__}, got {type(value).__name__}"
-                            )
+                        elif expected_type is not object:
+                            value = ctx.data[key]
+                            if not isinstance(value, expected_type):
+                                violations.append(
+                                    f"key {key!r}: expected {expected_type.__name__}, "
+                                    f"got {type(value).__name__}"
+                                )
                     if violations:
                         schema_err = ContextSchemaError(state, violations)
                         err_detail = _serialize_error(
@@ -321,9 +365,19 @@ class Runner:
                         last_err = None
                         break
                     except ApprovalPending as approval:
+                        _validate_context_serializable(ctx.data)
+                        try:
+                            snapshot_data = copy.deepcopy(ctx.data)
+                        except Exception:  # noqa: BLE001
+                            _log.warning(
+                                "deepcopy failed for context snapshot in state %r; "
+                                "falling back to shallow copy (non-copyable values may share references)",
+                                state,
+                            )
+                            snapshot_data = dict(ctx.data)
                         self._emit_payload(
                             "context_snapshot",
-                            {"state": state, "data": copy.deepcopy(ctx.data)},
+                            {"state": state, "data": snapshot_data},
                         )
                         self._emit_payload(
                             "run_paused",

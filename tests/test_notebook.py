@@ -36,9 +36,9 @@ class TestDisplayGraph:
         wf = _make_workflow()
         src = _build_mermaid_source(wf)
         assert "graph TD" in src
-        assert "start" in src
-        assert "end" in src
-        assert "start --> end" in src
+        assert "s_start" in src
+        assert "s_end" in src
+        assert "s_start --> s_end" in src
 
     def test_initial_state_labelled(self) -> None:
         wf = _make_workflow()
