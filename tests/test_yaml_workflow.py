@@ -104,3 +104,4 @@ def test_yaml_workflow_approval_resume(tmp_path: Path) -> None:
     resolve_approval_on_store(store, paused.run_id, "publish", approved=True)
     resumed = Runner(wf, store).run(run_id=paused.run_id, resume=True)
     assert resumed.status == "completed"
+

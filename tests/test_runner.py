@@ -6,6 +6,7 @@ from replayt.persistence import JSONLStore
 from replayt.runner import Runner, resolve_approval_on_store
 from replayt.types import LogMode, RetryPolicy
 from replayt.workflow import Workflow
+from replayt.yaml_workflow import workflow_from_spec
 
 
 def test_linear_run(tmp_path: Path) -> None:
@@ -78,6 +79,37 @@ def test_approval_resume_skips_replaying_side_effects_with_resume_target(tmp_pat
     gate_entries = [e for e in events if e["type"] == "state_entered" and e["payload"].get("state") == "gate"]
     assert len(gate_entries) == 1
     assert any(e["type"] == "approval_applied" for e in events)
+
+
+
+def test_yaml_approval_resume_without_explicit_targets_completes(tmp_path: Path) -> None:
+    wf = workflow_from_spec(
+        {
+            "name": "yaml-approval-no-target",
+            "initial": "gate",
+            "steps": {
+                "gate": {
+                    "approval": {
+                        "id": "publish",
+                        "summary": "Approve release?",
+                    }
+                },
+            },
+        }
+    )
+
+    store = JSONLStore(tmp_path)
+    paused = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert paused.status == "paused"
+
+    resolve_approval_on_store(store, paused.run_id, "publish", approved=True)
+
+    resumed = Runner(wf, store, log_mode=LogMode.redacted).run(run_id=paused.run_id, resume=True)
+    assert resumed.status == "completed"
+
+    events = store.load_events(paused.run_id)
+    approval_requests = [e for e in events if e["type"] == "approval_requested"]
+    assert len(approval_requests) == 1
 
 
 def test_retry_then_success(tmp_path: Path) -> None:
