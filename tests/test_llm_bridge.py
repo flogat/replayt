@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+from pydantic import BaseModel
+
 from replayt.llm import LLMBridge, LLMSettings, OpenAICompatClient
 from replayt.types import LogMode
+
+
+class Answer(BaseModel):
+    value: int
 
 
 def test_llm_bridge_with_settings_merges_into_effective_and_request() -> None:
@@ -64,3 +71,42 @@ def test_llm_bridge_structured_only_skips_content_preview() -> None:
     resp = next(p for t, p in events if t == "llm_response")
     assert "content_preview" not in resp
     assert "content" not in resp
+
+
+def test_llm_bridge_parse_extracts_first_valid_json_object() -> None:
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=lambda *_args, **_kwargs: None,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "parse",
+    )
+    canned = {
+        "choices": [
+            {
+                "message": {
+                    "content": 'Intro text\n```json\n{"value": 7}\n```\ntrailing noise {not json}',
+                }
+            }
+        ],
+        "usage": {},
+    }
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        out = bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
+
+    assert out.value == 7
+
+
+def test_llm_bridge_parse_raises_for_missing_json_object() -> None:
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=lambda *_args, **_kwargs: None,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "parse",
+    )
+
+    with patch.object(client, "chat_completions", return_value={"choices": [{"message": {"content": "no json"}}]}):
+        with pytest.raises(ValueError):
+            bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])

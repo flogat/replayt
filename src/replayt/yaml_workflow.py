@@ -64,14 +64,14 @@ def workflow_from_spec(spec: dict[str, Any]) -> Workflow:
                     if not isinstance(approval, dict) or "id" not in approval:
                         raise ValueError(f"step {step_name!r} approval must include an id")
                     approval_id = str(approval["id"])
-                    if ctx.is_approved(approval_id):
-                        return str(approval.get("on_approve", step_cfg.get("next", ""))) or None
-                    if ctx.is_rejected(approval_id):
-                        return str(approval.get("on_reject", "")) or None
+                    on_approve = approval.get("on_approve", step_cfg.get("next", ""))
+                    on_reject = approval.get("on_reject", "")
                     ctx.request_approval(
                         approval_id,
                         summary=str(approval.get("summary", f"Approve step {step_name}?")),
                         details=approval.get("details") or {},
+                        on_approve=str(on_approve) if on_approve not in (None, "") else None,
+                        on_reject=str(on_reject) if on_reject not in (None, "") else None,
                     )
 
                 branch = step_cfg.get("branch")

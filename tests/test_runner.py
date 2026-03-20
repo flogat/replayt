@@ -36,9 +36,12 @@ def test_approval_resume(tmp_path: Path) -> None:
 
     @wf.step("gate")
     def gate(ctx) -> str | None:
-        if ctx.is_approved("go"):
-            return None
-        ctx.request_approval("go", summary="proceed?")
+        ctx.request_approval("go", summary="proceed?", on_approve="done")
+
+    @wf.step("done")
+    def done(ctx) -> str | None:
+        ctx.set("done", True)
+        return None
 
     store = JSONLStore(tmp_path)
     r = Runner(wf, store, log_mode=LogMode.redacted)
@@ -48,6 +51,33 @@ def test_approval_resume(tmp_path: Path) -> None:
     r2 = Runner(wf, store, log_mode=LogMode.redacted)
     c = r2.run(run_id=p.run_id, resume=True)
     assert c.status == "completed"
+
+
+def test_approval_resume_skips_replaying_side_effects_with_resume_target(tmp_path: Path) -> None:
+    wf = Workflow("ap_side_effect")
+    wf.set_initial("gate")
+    wf.note_transition("gate", "done")
+
+    @wf.step("gate")
+    def gate(ctx) -> str | None:
+        ctx.set("writes", int(ctx.get("writes", 0)) + 1)
+        ctx.request_approval("go", summary="proceed?", on_approve="done")
+
+    @wf.step("done")
+    def done(ctx) -> str | None:
+        assert ctx.get("writes") == 1
+        return None
+
+    store = JSONLStore(tmp_path)
+    paused = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert paused.status == "paused"
+    resolve_approval_on_store(store, paused.run_id, "go", approved=True)
+    completed = Runner(wf, store, log_mode=LogMode.redacted).run(run_id=paused.run_id, resume=True)
+    assert completed.status == "completed"
+    events = store.load_events(paused.run_id)
+    gate_entries = [e for e in events if e["type"] == "state_entered" and e["payload"].get("state") == "gate"]
+    assert len(gate_entries) == 1
+    assert any(e["type"] == "approval_applied" for e in events)
 
 
 def test_retry_then_success(tmp_path: Path) -> None:
@@ -66,7 +96,8 @@ def test_retry_then_success(tmp_path: Path) -> None:
     r = Runner(wf, store, log_mode=LogMode.redacted)
     result = r.run()
     assert result.status == "completed"
-    assert any(e["type"] == "retry_scheduled" for e in store.load_events(result.run_id))
+    retry_event = next(e for e in store.load_events(result.run_id) if e["type"] == "retry_scheduled")
+    assert retry_event["payload"]["error"]["type"] == "RuntimeError"
 
 
 def test_fail_after_retries(tmp_path: Path) -> None:
@@ -82,6 +113,8 @@ def test_fail_after_retries(tmp_path: Path) -> None:
     result = r.run()
     assert result.status == "failed"
     assert result.error
+    failed_event = next(e for e in store.load_events(result.run_id) if e["type"] == "run_failed")
+    assert failed_event["payload"]["error"]["type"] == "RuntimeError"
 
 
 def test_fails_on_undeclared_transition(tmp_path: Path) -> None:
