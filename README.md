@@ -187,12 +187,23 @@ A new user should be able to understand the architecture quickly and feel that t
 
 ### Install
 
+Create a virtual environment, install replayt, then verify with `replayt doctor`:
+
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
+source .venv/bin/activate  # POSIX
+# .venv\Scripts\activate     # Windows cmd.exe
+# .venv\Scripts\Activate.ps1 # Windows PowerShell
+pip install -e ".[dev]"    # contributors: tests, ruff, PyYAML
+# pip install -e ".[yaml]"   # minimal editable + YAML workflows only
+# pip install replayt        # when published: add [yaml] if you need YAML targets
 export OPENAI_API_KEY=...  # required only for workflows that call a model
+replayt doctor
 ```
+
+Optional dependencies (see [`pyproject.toml`](pyproject.toml)): **`[yaml]`** adds PyYAML for `.yaml` / `.yml` workflow targets; **`[dev]`** adds pytest, ruff, and YAML support for working on the repo.
+
+If you keep secrets in a `.env` file, load them your own way before running replayt (for example `export $(grep -v '^#' .env | xargs)`, [direnv](https://direnv.net/) with `.envrc`, or `python-dotenv` in a wrapper script). replayt does not read `.env` on its own—environment order stays explicit and auditable.
 
 ### Run a Python workflow
 
@@ -226,6 +237,47 @@ replayt run workflow.py --inputs-json '{"ticket":"hello"}'
 ```bash
 replayt run workflow.yaml --inputs-json '{"route":"approve"}'
 ```
+
+---
+
+## Recipe: configure the LLM client (base URL, model, timeouts)
+
+replayt uses a small OpenAI-compatible HTTP client. You can steer it in two layers: **process defaults** and **per-call overrides**.
+
+**Environment (CLI and Python if you omit `llm_settings`):**
+
+- `OPENAI_API_KEY` — required for live model calls
+- `OPENAI_BASE_URL` — defaults to `https://api.openai.com/v1` (compatible proxies and local gateways set this)
+- `REPLAYT_MODEL` — default model name (falls back to `gpt-4o-mini`)
+
+**`Runner` in Python** — pass `llm_settings` for a non-default base URL, timeout, or headers without changing global env:
+
+```python
+import os
+from replayt import LogMode, Runner, Workflow
+from replayt.llm import LLMSettings
+from replayt.persistence import JSONLStore
+from pathlib import Path
+
+wf = Workflow("demo", version="1")  # define steps on wf …
+
+runner = Runner(
+    wf,
+    JSONLStore(Path(".replayt/runs")),
+    log_mode=LogMode.redacted,
+    llm_settings=LLMSettings(
+        api_key=os.environ["OPENAI_API_KEY"],
+        base_url="https://api.example.com/v1",
+        model="gpt-4o-mini",
+        timeout_seconds=90.0,
+        extra_headers={"X-My-Gateway": "team-b"},
+    ),
+)
+```
+
+**Per-call** — tighten one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., timeout_seconds=..., max_tokens=..., extra_headers={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events.
+
+For timeouts, retries, or betas exposed only through the official `openai` SDK, keep replayt’s graph and approvals as-is and call the SDK **inside a single step** (see **Pattern: OpenAI Python SDK inside a step** in [`src/examples/README.md`](src/examples/README.md)).
 
 ---
 
@@ -449,6 +501,8 @@ Bad language for replayt:
 
 The tone should be anti-hype and pro-discipline.
 
+Browsing runs, building approval UIs, or wiring internal dashboards should treat **JSONL and SQLite files you own** as the source of truth. replayt remains the **engine**; your app owns auth, routing, and UX.
+
 ---
 
 ## When replayt is the right choice
@@ -470,6 +524,17 @@ Use something else when:
 
 ---
 
+## Running replayt as a bounded process
+
+replayt is a **library and CLI for finite runs**, not a long-lived cluster orchestrator. In production-style setups:
+
+- Prefer **one OS process (or container)** per run: invoke `replayt run …` or `Runner.run(...)` once, then exit.
+- Alternatively, use a **queue worker** that dequeues a job, calls `Runner.run(..., run_id=…)` exactly once per message, then exits or acks—see **Pattern: queue worker** in [`src/examples/README.md`](src/examples/README.md).
+
+Put **retries across jobs**, concurrency limits, and backpressure in your scheduler (Celery, Airflow, K8s Jobs, SQS consumers), not inside replayt core.
+
+---
+
 ## Requests we will not take in core (and what to do instead)
 
 replayt stays small on purpose. These are common asks that **do not belong in the core library**; compose them in **your** app or ops stack.
@@ -479,13 +544,17 @@ replayt stays small on purpose. These are common asks that **do not belong in th
 | **Hosted approval UI, multi-user queues, team RBAC** | That is a product surface, not a runtime primitive. | Build a tiny local **approval bridge**: read paused runs from JSONL/SQLite, render a UI, append `approval_resolved` (same event shape as `replayt resume`). See **Pattern: approval bridge** in [`src/examples/README.md`](src/examples/README.md). |
 | **OpenTelemetry traces, metrics, fancy dashboards** | replayt is not an observability platform. | Treat JSONL as the **source of truth**; ship lines to Vector, Loki, Splunk, or S3 with your existing pipeline. Example Vector skeleton (conceptual): `source file` → `sink http`/`sink console`; point `include` at `.replayt/runs/*.jsonl`. |
 | **Built-in RAG / memory / vector DB** | Scope creep into an “AI platform.” | Put retrieval **inside a typed tool** or a plain Python function your step calls; return a Pydantic model, log `tool_result`. |
-| **LangChain / LangGraph / “agent framework” integration** | Hides control flow; competes with our explicit FSM story. | If you must: call that stack **inside one step’s handler**; keep transitions and approvals in replayt. Prefer **no** framework in the hot path. |
-| **Multi-tenant isolation, enterprise secrets managers** | Deployment and policy vary per org. | **One tenant → one log directory** (or SQLite file): e.g. `.replayt/runs/customer_a/`. Load secrets in your process wrapper or shell; export `OPENAI_API_KEY` before `replayt run`. |
+| **LangChain / LangGraph / “agent framework” integration** | Hides control flow; competes with our explicit FSM story. | If you must: call that stack **inside one step’s handler**; keep transitions and approvals in replayt. Confine the framework to **one step** and normalize to **one** Pydantic exit shape before transitioning. Prefer **no** framework in the hot path. |
+| **Multi-tenant isolation, enterprise secrets managers** | Deployment and policy vary per org. | **One tenant → one log directory** (or SQLite file): e.g. `.replayt/runs/customer_a/` on an **encrypted volume** if policy requires encryption at rest. Load secrets in your process wrapper or shell; export `OPENAI_API_KEY` before `replayt run`. Combine with `LogMode.redacted` or `structured_only` to limit sensitive payloads in logs (see examples README). |
 | **Batch orchestration (Spark, Celery, Airflow as “the runner”)** | replayt is not a distributed engine. | **Outer loop** in your scheduler: for each row/job, `Runner.run(..., inputs=..., run_id=...)` with a unique `run_id`; use separate log dirs per job if needed. See **Pattern: batch driver** in examples README. |
-| **Streaming tokens as first-class events** | Complicates replay semantics and event volume. | Stream inside your code if required; log **final** structured output (or a summary event you emit yourself in application code). |
+| **Streaming tokens as first-class events** | Complicates replay semantics and event volume. | Stream inside your code if required; log **final** structured output (or a summary event you emit yourself in application code). Do **not** let the model silently rewrite the graph—changing control flow stays **human- or code-initiated** (`replayt resume`, explicit transitions, or a new run). |
+| **Built-in eval suite (`replayt eval`), leaderboards, golden datasets** | replayt is a workflow runner, not an eval product (see *What replayt is not*). | Drive **`Runner.run`** from **pytest** (or any harness) with frozen inputs; assert on final context or `structured_output` events in JSONL; use **`replayt replay`** for human-readable postmortems. See **Pattern: golden path test** in [`src/examples/README.md`](src/examples/README.md). |
+| **Warehouse-native sinks (Snowflake, BigQuery) and bundled dbt models** | replayt is not an observability or analytics platform. | Treat JSONL as the source of truth: **`duckdb` + `read_json_auto`**, **`jq`**, or your existing log shipper (see the Vector sketch in the OpenTelemetry row). See **Pattern: DuckDB ad-hoc analytics** in [`src/examples/README.md`](src/examples/README.md). |
+| **Workflow plugin marketplace, dynamic `pip install` of steps at runtime** | **Tiny mental model** and explicit code imports; dynamic loading hides behavior. | Distribute shared workflows as **normal Python packages** (`from my_org_workflows import wf`); pin versions in `requirements.txt`. See **Pattern: reusable workflow package** in [`src/examples/README.md`](src/examples/README.md). |
+| **Official Kubernetes operator, sidecar, or “always-on” replayt daemon** | replayt is not a distributed process engine. | Use **one Job Pod or task per run**, or a **queue worker** that calls `Runner.run` once per message (examples README). |
 | **Guaranteed bitwise replay of LLM outputs across providers** | Not achievable in general. | Use **timeline replay** (`replayt replay`) for audit; for tests, **mock** the client or freeze fixtures; pin provider + model in metadata. |
 
-For **per-call LLm settings** (model, temperature, `max_tokens`, timeout, extra headers) without a fork, use `ctx.llm.with_settings(...)` so overrides are explicit and show up under `effective` on `llm_request` events.
+For **per-call LLM settings** (model, temperature, `max_tokens`, timeout, extra headers) without a fork, use `ctx.llm.with_settings(...)` so overrides are explicit and show up under `effective` on `llm_request` events.
 
 ---
 
@@ -496,6 +565,8 @@ python -m build
 pytest
 ruff check src tests
 ```
+
+A minimal CI job mirrors that: install with `pip install -e ".[dev]"`, run `pytest`, then `ruff check src tests`.
 
 More detail lives in [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
