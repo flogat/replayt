@@ -5,6 +5,8 @@ import sqlite3
 from pathlib import Path
 from typing import Any
 
+from replayt.persistence.jsonl import _validate_run_id
+
 
 class SQLiteStore:
     def __init__(self, db_path: Path) -> None:
@@ -32,6 +34,7 @@ class SQLiteStore:
             cx.commit()
 
     def append(self, run_id: str, event: dict[str, Any]) -> None:
+        run_id = _validate_run_id(run_id)
         seq = int(event["seq"])
         typ = str(event["type"])
         ts = str(event["ts"])
@@ -44,6 +47,7 @@ class SQLiteStore:
             cx.commit()
 
     def load_events(self, run_id: str) -> list[dict[str, Any]]:
+        run_id = _validate_run_id(run_id)
         with self._connect() as cx:
             rows = cx.execute(
                 "SELECT seq, type, ts, payload_json FROM events WHERE run_id = ? ORDER BY seq",

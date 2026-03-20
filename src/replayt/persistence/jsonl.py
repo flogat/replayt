@@ -1,8 +1,17 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 from typing import Any
+
+_RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+
+def _validate_run_id(run_id: str) -> str:
+    if not _RUN_ID_RE.fullmatch(run_id):
+        raise ValueError("run_id must be 1-128 chars and contain only letters, numbers, dot, underscore, or hyphen")
+    return run_id
 
 
 class JSONLStore:
@@ -13,7 +22,8 @@ class JSONLStore:
         self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, run_id: str) -> Path:
-        return self.base_dir / f"{run_id}.jsonl"
+        safe_run_id = _validate_run_id(run_id)
+        return self.base_dir / f"{safe_run_id}.jsonl"
 
     def append(self, run_id: str, event: dict[str, Any]) -> None:
         path = self._path(run_id)
