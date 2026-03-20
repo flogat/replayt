@@ -282,7 +282,16 @@ def classify(ctx):
 ```
 
 replayt logs the request, response metadata, and validated structured output as explicit run events.
-See [src/examples/README.md](src/examples/README.md) for a progressive tutorial set with 10 real-life workflows, from a two-step hello-world run to tool use, retries, approvals, and structured LLM output.
+
+## Documentation map
+
+Start here when you want the repo's major guides in one place:
+
+- [Main README](README.md) — overview, quickstart, examples, and CLI reference
+- [Docs index](docs/README.md) — consolidated documentation for schemas, demos, style notes, and architecture artifacts
+- [Examples README](src/examples/README.md) — runnable workflows, approval patterns, and integration composition ideas
+
+See [src/examples/README.md](src/examples/README.md) for a progressive tutorial set with 12 real-life workflows, from a two-step hello-world run to tool use, retries, approvals, and structured LLM output.
 
 ---
 
@@ -421,7 +430,7 @@ Run events are append-only and local-first. A typical run log captures:
 - approval requests and resolutions
 - final status
 
-See [`docs/RUN_LOG_SCHEMA.md`](docs/RUN_LOG_SCHEMA.md) for the event schema.
+See [`docs/RUN_LOG_SCHEMA.md`](docs/RUN_LOG_SCHEMA.md) for the event schema, [`docs/README.md`](docs/README.md) for the consolidated docs index, and [`src/examples/README.md`](src/examples/README.md) for the runnable workflow guide.
 
 ---
 
