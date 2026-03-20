@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -18,10 +17,17 @@ T = TypeVar("T", bound=BaseModel)
 
 def _extract_json_object(text: str) -> str:
     text = text.strip()
-    m = re.search(r"\{[\s\S]*\}", text)
-    if not m:
-        raise ValueError("No JSON object found in model response")
-    return m.group(0)
+    decoder = json.JSONDecoder()
+    for idx, ch in enumerate(text):
+        if ch != "{":
+            continue
+        try:
+            obj, end = decoder.raw_decode(text[idx:])
+        except ValueError:
+            continue
+        if isinstance(obj, dict):
+            return text[idx : idx + end]
+    raise ValueError("No JSON object found in model response")
 
 
 @dataclass
