@@ -83,7 +83,7 @@ print(result.run_id, result.status)
 
 ## Examples
 
-See [src/examples/README.md](src/examples/README.md) for runnable issue triage, refund policy, and publishing preflight flows.
+See [src/examples/README.md](src/examples/README.md) for a progressive tutorial set with 10 real-life workflows, from a two-step hello-world run to tool use, retries, approvals, and structured LLM output.
 
 ## Optional YAML spec
 
