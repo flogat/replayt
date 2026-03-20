@@ -9,10 +9,11 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 class Workflow:
-    """Register named steps (state handlers). Each handler returns the next state name or None to end."""
+    """Finite-state workflow definition with explicit handlers and optional metadata."""
 
-    def __init__(self, name: str) -> None:
+    def __init__(self, name: str, *, version: str = "1") -> None:
         self.name = name
+        self.version = version
         self.initial_state: str | None = None
         self._steps: dict[str, Callable[..., Any]] = {}
         self._retries: dict[str, RetryPolicy] = {}
@@ -42,9 +43,18 @@ class Workflow:
         return sorted(self._steps.keys())
 
     def note_transition(self, from_state: str, to_state: str) -> None:
-        """Optional documentation edge for `replayt graph` (transitions are otherwise dynamic in code)."""
+        """Optional documentation edge for `replayt graph` or validation."""
 
-        self._edges.append((from_state, to_state))
+        edge = (from_state, to_state)
+        if edge not in self._edges:
+            self._edges.append(edge)
 
     def edges(self) -> list[tuple[str, str]]:
         return list(self._edges)
+
+    def allows_transition(self, from_state: str, to_state: str | None) -> bool:
+        if to_state in (None, ""):
+            return True
+        if not self._edges:
+            return True
+        return (from_state, to_state) in self._edges
