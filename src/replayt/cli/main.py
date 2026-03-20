@@ -3,12 +3,15 @@ from __future__ import annotations
 import hashlib
 import html
 import importlib
+import importlib.resources
 import importlib.util
+import io
 import json
 import os
 import re
 import subprocess
 import sys
+import tarfile
 from collections import Counter
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -18,6 +21,7 @@ from typing import Any, Literal
 
 import typer
 
+from replayt.export_run import events_to_jsonl_lines
 from replayt.graph_export import workflow_to_mermaid
 from replayt.llm import LLMSettings
 from replayt.persistence import JSONLStore, MultiStore, SQLiteStore
@@ -73,6 +77,37 @@ def _get_project_config() -> tuple[dict[str, Any], str | None]:
     return _PROJECT_CONFIG, _PROJECT_CONFIG_PATH
 
 
+_DEFAULT_LOG_DIR = Path(".replayt/runs")
+
+
+def _sanitize_log_subdir(raw: str) -> str:
+    s = raw.strip()
+    if not s:
+        raise typer.BadParameter("log_subdir must be non-empty")
+    if os.path.sep in s or (os.altsep and os.altsep in s):
+        raise typer.BadParameter("log_subdir must be a single path segment (no slashes)")
+    if s.startswith(".") or s in (".", ".."):
+        raise typer.BadParameter("log_subdir cannot start with '.'")
+    return s
+
+
+def _resolve_log_dir(cli_log_dir: Path, log_subdir: str | None = None) -> Path:
+    """Apply ``[tool.replayt]`` / ``REPLAYT_LOG_DIR`` defaults and optional tenant subdir."""
+
+    cfg, _ = _get_project_config()
+    base = cli_log_dir
+    if cli_log_dir == _DEFAULT_LOG_DIR:
+        if cfg.get("log_dir"):
+            base = Path(str(cfg["log_dir"]))
+        else:
+            env_ld = os.environ.get("REPLAYT_LOG_DIR")
+            if env_ld:
+                base = Path(env_ld)
+    if log_subdir is not None:
+        base = base / _sanitize_log_subdir(log_subdir)
+    return base
+
+
 def _parse_log_mode(log_mode: str) -> LogMode:
     key = log_mode.strip().lower()
     if key == "redacted":
@@ -104,6 +139,8 @@ def _validate_workflow(wf: Workflow) -> list[str]:
     if not wf.initial_state:
         errors.append("initial state is not set (call set_initial)")
     declared = set(wf.step_names())
+    if wf.initial_state and wf.initial_state not in declared:
+        errors.append(f"initial state {wf.initial_state!r} is not a declared @wf.step")
     edges = wf.edges()
     for src, dst in edges:
         if dst not in declared:
@@ -204,6 +241,7 @@ def _build_internal_run_argv(
     resume: bool,
     dry_run: bool,
     output: str,
+    metadata_json: str | None = None,
 ) -> list[str]:
     """Argv for ``python -m replayt.cli.main`` (must not include ``--timeout`` — parent enforces that)."""
 
@@ -217,6 +255,8 @@ def _build_internal_run_argv(
     if tag:
         for t in tag:
             argv += ["--tag", t]
+    if metadata_json is not None:
+        argv += ["--metadata-json", metadata_json]
     if resume:
         argv.append("--resume")
     if dry_run:
@@ -264,6 +304,7 @@ def _event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "approvals": 0,
         "last_ts": None,
         "tags": {},
+        "run_metadata": {},
     }
     for event in events:
         summary["last_ts"] = event.get("ts")
@@ -273,6 +314,7 @@ def _event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
             summary["workflow_name"] = payload.get("workflow_name")
             summary["workflow_version"] = payload.get("workflow_version")
             summary["tags"] = payload.get("tags") or {}
+            summary["run_metadata"] = payload.get("run_metadata") or {}
         elif typ == "state_entered":
             summary["state_count"] += 1
         elif typ == "transition":
@@ -370,6 +412,26 @@ OPENAI_API_KEY=
 # REPLAYT_PROVIDER=openai
 """
 
+INIT_GITIGNORE_LINES = [".replayt/", ".env", ".venv/", "__pycache__/"]
+
+
+def _merge_gitignore(directory: Path) -> None:
+    """Ensure common local-only paths are ignored (append if .gitignore exists)."""
+
+    path = directory / ".gitignore"
+    if not path.exists():
+        path.write_text("\n".join(INIT_GITIGNORE_LINES) + "\n", encoding="utf-8")
+        typer.echo(f"Wrote {path}")
+        return
+    lines = path.read_text(encoding="utf-8").splitlines()
+    have = set(lines)
+    to_add = [ln for ln in INIT_GITIGNORE_LINES if ln not in have]
+    if not to_add:
+        return
+    extra = "\n\n# replayt init\n" + "\n".join(to_add) + "\n"
+    path.write_text(path.read_text(encoding="utf-8").rstrip() + extra, encoding="utf-8")
+    typer.echo(f"Updated {path} ({', '.join(to_add)})")
+
 
 @app.command("init")
 def cmd_init(
@@ -397,10 +459,14 @@ def cmd_init(
             raise typer.Exit(code=1)
     wf_file.write_text(content, encoding="utf-8")
     env_file.write_text(INIT_ENV_EXAMPLE, encoding="utf-8")
+    _merge_gitignore(path)
     typer.echo(f"Wrote {wf_file} (template={template})")
     typer.echo(f"Wrote {env_file}")
-    typer.echo("Next: python -m venv .venv && activate, pip install replayt, export OPENAI_API_KEY=...")
-    typer.echo(f"Run: replayt run {wf_file} --inputs-json '{{}}'")
+    typer.echo("Next steps:")
+    typer.echo("  1) python -m venv .venv && activate   # then: pip install replayt")
+    typer.echo("  2) replayt doctor                     # see docs/QUICKSTART.md if anything is WARN")
+    typer.echo("  3) export OPENAI_API_KEY=...           # only for live LLM examples")
+    typer.echo(f"  4) replayt run {wf_file} --inputs-json '{{}}'")
 
 
 @app.command("run")
@@ -413,6 +479,11 @@ def cmd_run(
         help="Optional JSON object merged into the run context.",
     ),
     log_dir: Path = typer.Option(Path(".replayt/runs"), help="Directory for JSONL run logs."),
+    log_subdir: str | None = typer.Option(
+        None,
+        "--log-subdir",
+        help="Single path segment appended to resolved log dir (tenant isolation); see REPLAYT_LOG_DIR.",
+    ),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file mirrored alongside JSONL."),
     log_mode: str = typer.Option(
         "redacted",
@@ -422,6 +493,11 @@ def cmd_run(
         ),
     ),
     tag: list[str] | None = typer.Option(None, "--tag", help="Tag as key=value (repeatable)."),
+    metadata_json: str | None = typer.Option(
+        None,
+        "--metadata-json",
+        help="JSON object on run_started as run_metadata (string values filterable via replayt runs --run-meta).",
+    ),
     resume: bool = typer.Option(False, help="Resume a paused run (requires --run-id)."),
     timeout: int | None = typer.Option(
         None,
@@ -451,8 +527,7 @@ def cmd_run(
     cfg, _ = _get_project_config()
     strict_mirror = bool(cfg.get("strict_mirror"))
 
-    if log_dir == Path(".replayt/runs") and cfg.get("log_dir"):
-        log_dir = Path(cfg["log_dir"])
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
     if sqlite is None and cfg.get("sqlite"):
         sqlite = Path(cfg["sqlite"])
     if log_mode == "redacted" and cfg.get("log_mode"):
@@ -462,16 +537,22 @@ def cmd_run(
     if in_child:
         timeout = None
 
+    wf = _load_target(target)
+
     if dry_check:
         if resume:
             typer.echo("--dry-check cannot be used with --resume", err=True)
             raise typer.Exit(code=2)
-        wf = _load_target(target)
         errors = _validate_workflow(wf)
         if inputs_json is not None:
             parsed = json.loads(inputs_json)
             if not isinstance(parsed, dict):
                 raise typer.BadParameter("--inputs-json must be a JSON object")
+        if metadata_json is not None:
+            parsed_m = json.loads(metadata_json)
+            if not isinstance(parsed_m, dict):
+                raise typer.BadParameter("--metadata-json must be a JSON object")
+            json.dumps(parsed_m)
         if errors:
             typer.echo(f"INVALID: {wf.name}@{wf.version}", err=True)
             for err in errors:
@@ -492,6 +573,13 @@ def cmd_run(
         )
         return
 
+    errors = _validate_workflow(wf)
+    if errors:
+        typer.echo(f"INVALID: {wf.name}@{wf.version}", err=True)
+        for err in errors:
+            typer.echo(f"  - {err}", err=True)
+        raise typer.Exit(code=1)
+
     if not in_child and timeout is not None and timeout > 0:
         argv = _build_internal_run_argv(
             target=target,
@@ -504,6 +592,7 @@ def cmd_run(
             resume=resume,
             dry_run=dry_run,
             output=output,
+            metadata_json=metadata_json,
         )
         env = _subprocess_env_child()
         try:
@@ -518,7 +607,6 @@ def cmd_run(
         rc = completed.returncode if completed.returncode is not None else 1
         raise typer.Exit(code=rc)
 
-    wf = _load_target(target)
     inputs: dict[str, Any] | None = None
     if inputs_json is not None:
         inputs = json.loads(inputs_json)
@@ -532,6 +620,16 @@ def cmd_run(
                 raise typer.BadParameter(f"Tag must be key=value, got: {t!r}")
             k, v = t.split("=", 1)
             tags_dict[k] = v
+    run_meta: dict[str, Any] | None = None
+    if metadata_json is not None:
+        parsed_m = json.loads(metadata_json)
+        if not isinstance(parsed_m, dict):
+            raise typer.BadParameter("--metadata-json must be a JSON object")
+        try:
+            json.dumps(parsed_m)
+        except (TypeError, ValueError) as exc:
+            raise typer.BadParameter("--metadata-json must be JSON-serializable") from exc
+        run_meta = parsed_m
     lm = _parse_log_mode(log_mode)
     store = _make_store(log_dir, sqlite, strict_mirror=strict_mirror)
     if dry_run:
@@ -542,7 +640,13 @@ def cmd_run(
     else:
         runner = Runner(wf, store, log_mode=lm)
     try:
-        result = runner.run(run_id=run_id, resume=resume, inputs=inputs, tags=tags_dict)
+        result = runner.run(
+            run_id=run_id,
+            resume=resume,
+            inputs=inputs,
+            tags=tags_dict,
+            run_metadata=run_meta,
+        )
     except KeyboardInterrupt:
         raise typer.Exit(code=1)
     finally:
@@ -593,9 +697,11 @@ def cmd_try(
         run_id=run_id,
         inputs_json=json.dumps({"customer_name": customer_name}),
         log_dir=log_dir,
+        log_subdir=None,
         sqlite=sqlite,
         log_mode=log_mode,
         tag=tag,
+        metadata_json=None,
         resume=False,
         timeout=timeout,
         dry_run=dry_run,
@@ -657,9 +763,11 @@ def cmd_ci(
         run_id=run_id,
         inputs_json=inputs_json,
         log_dir=log_dir,
+        log_subdir=None,
         sqlite=sqlite,
         log_mode=log_mode,
         tag=tag,
+        metadata_json=None,
         resume=resume,
         timeout=timeout,
         dry_run=dry_run,
@@ -672,6 +780,7 @@ def cmd_ci(
 def cmd_inspect(
     run_id: str = typer.Argument(...),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     as_json: bool = typer.Option(
         False,
@@ -684,6 +793,7 @@ def cmd_inspect(
         help="text (default) or json.",
     ),
 ) -> None:
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
     with _read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
@@ -779,6 +889,7 @@ def _replay_html(run_id: str, events: list[dict[str, Any]]) -> str:
 def cmd_replay(
     run_id: str = typer.Argument(...),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     format: Literal["text", "html"] = typer.Option(
         "text",
@@ -794,6 +905,7 @@ def cmd_replay(
 ) -> None:
     """Print a human-readable timeline from the recorded run (does not call model APIs)."""
 
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
     with _read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
@@ -819,13 +931,13 @@ def cmd_resume(
     approval_id: str = typer.Option(..., "--approval", help="Approval id to resolve."),
     reject: bool = typer.Option(False, "--reject", help="Reject instead of approve."),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None),
     log_mode: str = typer.Option("redacted", case_sensitive=False),
 ) -> None:
     cfg, _ = _get_project_config()
     strict_mirror = bool(cfg.get("strict_mirror"))
-    if log_dir == Path(".replayt/runs") and cfg.get("log_dir"):
-        log_dir = Path(cfg["log_dir"])
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
     if sqlite is None and cfg.get("sqlite"):
         sqlite = Path(cfg["sqlite"])
     if log_mode == "redacted" and cfg.get("log_mode"):
@@ -890,16 +1002,40 @@ def _tags_match(run_tags: dict[str, str], filters: dict[str, str]) -> bool:
     return all(run_tags.get(k) == v for k, v in filters.items())
 
 
+def _parse_meta_filters(raw: list[str] | None) -> dict[str, str]:
+    if not raw:
+        return {}
+    out: dict[str, str] = {}
+    for t in raw:
+        if "=" not in t:
+            raise typer.BadParameter(f"run-meta filter must be key=value, got: {t!r}")
+        k, v = t.split("=", 1)
+        out[k] = v
+    return out
+
+
+def _run_meta_filters_match(run_meta: dict[str, Any], filters: dict[str, str]) -> bool:
+    return all(k in run_meta and str(run_meta[k]) == v for k, v in filters.items())
+
+
 @app.command("runs")
 def cmd_runs(
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     limit: int = typer.Option(20, min=1, max=200),
     tag: list[str] | None = typer.Option(None, "--tag", help="Filter by tag key=value (repeatable)."),
+    run_meta: list[str] | None = typer.Option(
+        None,
+        "--run-meta",
+        help="Filter by run_metadata key=value (string match; repeatable).",
+    ),
 ) -> None:
     """List recent local runs from JSONL logs."""
 
     tag_filters = _parse_tag_filters(tag)
+    meta_filters = _parse_meta_filters(run_meta)
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
     with _read_store(log_dir, sqlite) as store:
         run_ids = sorted(store.list_run_ids(), reverse=True)
         runs_data: list[tuple[str, dict[str, Any]]] = []
@@ -909,6 +1045,8 @@ def cmd_runs(
             events = store.load_events(run_id)
             summary = _event_summary(events)
             if tag_filters and not _tags_match(summary.get("tags") or {}, tag_filters):
+                continue
+            if meta_filters and not _run_meta_filters_match(summary.get("run_metadata") or {}, meta_filters):
                 continue
             runs_data.append((run_id, summary))
     for run_id, summary in runs_data:
@@ -936,6 +1074,7 @@ def _parse_iso_ts(ts: str | None) -> datetime | None:
 @app.command("stats")
 def cmd_stats(
     log_dir: Path = typer.Option(Path(".replayt/runs"), help="Directory of JSONL run logs."),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     days: int | None = typer.Option(
         None,
@@ -950,11 +1089,14 @@ def cmd_stats(
         help="Load at most this many runs (by run_id descending) to limit memory use on large log dirs.",
     ),
     tag: list[str] | None = typer.Option(None, "--tag", help="Filter by tag key=value (repeatable)."),
+    run_meta: list[str] | None = typer.Option(None, "--run-meta", help="Filter by run_metadata key=value."),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """Summarize local run logs: counts, LLM latency averages, token usage, common failure states."""
 
     tag_filters = _parse_tag_filters(tag)
+    meta_filters = _parse_meta_filters(run_meta)
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
     now = datetime.now(timezone.utc)
     cutoff = None
     if days is not None:
@@ -987,6 +1129,8 @@ def cmd_stats(
         if cutoff is not None and last_event_ts is not None and last_event_ts < cutoff:
             continue
         if tag_filters and not _tags_match(summ.get("tags") or {}, tag_filters):
+            continue
+        if meta_filters and not _run_meta_filters_match(summ.get("run_metadata") or {}, meta_filters):
             continue
         total += 1
         st = str(summ.get("status", "unknown"))
@@ -1104,11 +1248,13 @@ def cmd_diff(
     run_a: str = typer.Argument(..., metavar="RUN_A"),
     run_b: str = typer.Argument(..., metavar="RUN_B"),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o"),
 ) -> None:
     """Compare two runs side by side: states, outputs, tool calls, status, latency."""
 
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
     with _read_store(log_dir, sqlite) as store:
         events_a = store.load_events(run_a)
         events_b = store.load_events(run_b)
@@ -1199,6 +1345,7 @@ def _parse_duration(value: str) -> int | None:
 def cmd_gc(
     older_than: str = typer.Option(..., "--older-than", help="Delete runs older than this duration (e.g. 90d, 24h)."),
     log_dir: Path = typer.Option(Path(".replayt/runs")),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to also garbage-collect."),
     dry_run: bool = typer.Option(False, "--dry-run", help="Preview what would be deleted."),
 ) -> None:
@@ -1210,6 +1357,7 @@ def cmd_gc(
     from datetime import timedelta
 
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
     jsonl_store = JSONLStore(log_dir)
     sqlite_store = SQLiteStore(sqlite) if sqlite is not None else None
     run_ids = jsonl_store.list_run_ids()
@@ -1242,6 +1390,7 @@ def cmd_gc(
 def cmd_seal(
     run_id: str = typer.Argument(..., help="Run id (JSONL file basename without .jsonl)."),
     log_dir: Path = typer.Option(Path(".replayt/runs"), "--log-dir"),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
     out: Path | None = typer.Option(
         None,
         "--out",
@@ -1251,9 +1400,7 @@ def cmd_seal(
 ) -> None:
     """Write a SHA-256 manifest for a JSONL run log (best-effort audit helper; not cryptographic proof)."""
 
-    cfg, _ = _get_project_config()
-    if log_dir == Path(".replayt/runs") and cfg.get("log_dir"):
-        log_dir = Path(cfg["log_dir"])
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
 
     path = log_dir / f"{run_id}.jsonl"
     if not path.is_file():
@@ -1354,15 +1501,24 @@ def cmd_doctor(
         except Exception as exc:  # noqa: BLE001
             checks.append(("provider_connectivity", False, str(exc)))
 
+    hints = {
+        "openai_api_key": "export OPENAI_API_KEY=… (see docs/QUICKSTART.md)",
+        "yaml_extra": "pip install 'replayt[yaml]' for .yaml workflow targets",
+        "project_config": "optional [tool.replayt] — docs/CONFIG.md",
+        "provider_connectivity": "try replayt doctor --skip-connectivity; check OPENAI_BASE_URL",
+    }
     for name, ok, detail in checks:
         icon = "OK" if ok else "WARN"
         typer.echo(f"[{icon}] {name}: {detail}")
+        if not ok and name in hints:
+            typer.echo(f"       → {hints[name]}")
 
 
 @app.command("report")
 def cmd_report(
     run_id: str = typer.Argument(..., help="Run ID to generate report for"),
     log_dir: Path = typer.Option(Path(".replayt/runs"), "--log-dir"),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, "--sqlite"),
     out: str | None = typer.Option(None, "--out", help="Output file path (default: stdout)"),
     style: Literal["default", "stakeholder"] = typer.Option(
@@ -1385,6 +1541,7 @@ def cmd_report(
         TOOL_CALLS_SECTION,
     )
 
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
     with _read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
@@ -1395,6 +1552,7 @@ def cmd_report(
     workflow_version = ""
     status = "unknown"
     tags: dict[str, str] = {}
+    run_metadata: dict[str, Any] = {}
     states: list[dict[str, str]] = []
     outputs: list[dict[str, Any]] = []
     tool_calls: list[dict[str, Any]] = []
@@ -1418,6 +1576,7 @@ def cmd_report(
             workflow_name = str(payload.get("workflow_name", ""))
             workflow_version = str(payload.get("workflow_version", ""))
             tags = payload.get("tags") or {}
+            run_metadata = payload.get("run_metadata") or {}
         elif typ == "state_entered":
             states.append({"state": str(payload.get("state", "")), "ts": ts})
         elif typ == "structured_output":
@@ -1483,6 +1642,12 @@ def cmd_report(
     if tags:
         tag_strs = ", ".join(f"{html.escape(k)}={html.escape(v)}" for k, v in tags.items())
         tags_html = f'<p><span class="rp-label">Tags:</span> {tag_strs}</p>'
+    meta_html = ""
+    if run_metadata:
+        meta_html = (
+            '<p><span class="rp-label">Run metadata:</span> '
+            f'<code class="rp-code">{html.escape(json.dumps(run_metadata, default=str)[:4000])}</code></p>'
+        )
 
     timeline_items = []
     for s in states:
@@ -1568,6 +1733,7 @@ def cmd_report(
         status_class=status_class,
         duration=html.escape(duration),
         tags_html=tags_html,
+        meta_html=meta_html,
         approvals_section=approvals_section,
         timeline_html=timeline_html,
         outputs_section=outputs_section,
@@ -1582,6 +1748,97 @@ def cmd_report(
         typer.echo(f"Wrote report to {out_path}")
     else:
         typer.echo(report)
+
+
+@app.command("report-diff")
+def cmd_report_diff(
+    run_a: str = typer.Argument(..., metavar="RUN_A"),
+    run_b: str = typer.Argument(..., metavar="RUN_B"),
+    log_dir: Path = typer.Option(Path(".replayt/runs"), "--log-dir"),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
+    sqlite: Path | None = typer.Option(None, "--sqlite"),
+    out: str | None = typer.Option(None, "--out", help="Write HTML here (default: stdout)."),
+) -> None:
+    """HTML side-by-side comparison of two runs from local JSONL (no model calls)."""
+
+    from replayt.cli.report_template import build_report_diff_html, collect_report_context
+
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
+    with _read_store(log_dir, sqlite) as store:
+        events_a = store.load_events(run_a)
+        events_b = store.load_events(run_b)
+    if not events_a:
+        typer.echo(f"No events for run_id={run_a!r}", err=True)
+        raise typer.Exit(code=2)
+    if not events_b:
+        typer.echo(f"No events for run_id={run_b!r}", err=True)
+        raise typer.Exit(code=2)
+    ctx_a = collect_report_context(events_a)
+    ctx_b = collect_report_context(events_b)
+    doc = build_report_diff_html(run_a, run_b, ctx_a, ctx_b)
+    if out:
+        out_path = Path(out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(doc, encoding="utf-8")
+        typer.echo(f"Wrote {out_path}")
+    else:
+        typer.echo(doc)
+
+
+@app.command("export-run")
+def cmd_export_run(
+    run_id: str = typer.Argument(...),
+    out: Path = typer.Option(..., "--out", help="Output path (.tar.gz)."),
+    log_dir: Path = typer.Option(Path(".replayt/runs"), "--log-dir"),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
+    sqlite: Path | None = typer.Option(None, "--sqlite"),
+    export_mode: str = typer.Option(
+        "redacted",
+        "--export-mode",
+        case_sensitive=False,
+        help="Sanitize copy: redacted | full | structured_only",
+    ),
+) -> None:
+    """Write a shareable .tar.gz: sanitized events.jsonl + manifest.json."""
+
+    log_dir = _resolve_log_dir(log_dir, log_subdir)
+    lm = _parse_log_mode(export_mode)
+    with _read_store(log_dir, sqlite) as store:
+        events = store.load_events(run_id)
+    if not events:
+        typer.echo(f"No events for run_id={run_id!r}", err=True)
+        raise typer.Exit(code=2)
+
+    lines = events_to_jsonl_lines(events, lm)
+    bundle = b"".join(lines)
+    digest = hashlib.sha256(bundle).hexdigest()
+    manifest: dict[str, Any] = {
+        "schema": "replayt.export_bundle.v1",
+        "run_id": run_id,
+        "export_mode": export_mode,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "line_count": len(lines),
+        "events_jsonl_sha256": digest,
+        "note": "Sanitized copy for sharing; not necessarily byte-identical to on-disk JSONL.",
+    }
+    man_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    with tarfile.open(out, "w:gz") as tf:
+        ti = tarfile.TarInfo(name=f"{run_id}/events.jsonl")
+        ti.size = len(bundle)
+        tf.addfile(ti, io.BytesIO(bundle))
+        ti2 = tarfile.TarInfo(name=f"{run_id}/manifest.json")
+        ti2.size = len(man_bytes)
+        tf.addfile(ti2, io.BytesIO(man_bytes))
+    typer.echo(f"wrote {out.resolve()} ({len(lines)} events, sha256={digest[:16]}...)")
+
+
+@app.command("log-schema")
+def cmd_log_schema() -> None:
+    """Print the bundled JSON Schema for one JSONL event object (stdout, machine-readable)."""
+
+    path = importlib.resources.files("replayt").joinpath("schemas/run_log_event_line.schema.json")
+    typer.echo(path.read_text(encoding="utf-8"))
 
 
 def main() -> None:

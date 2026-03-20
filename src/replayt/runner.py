@@ -272,6 +272,7 @@ class Runner:
         run_id: str | None = None,
         resume: bool = False,
         tags: dict[str, str] | None = None,
+        run_metadata: dict[str, Any] | None = None,
     ) -> RunResult:
         if not self.workflow.initial_state:
             raise RuntimeError("Workflow.initial_state is not set (call set_initial)")
@@ -310,6 +311,8 @@ class Runner:
                 started_payload["workflow_meta"] = self.workflow.meta
             if tags:
                 started_payload["tags"] = tags
+            if run_metadata:
+                started_payload["run_metadata"] = run_metadata
             self._emit_payload("run_started", started_payload)
         elif paused_from_state is not None and start_state != paused_from_state:
             self._emit_payload(

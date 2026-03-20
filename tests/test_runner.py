@@ -11,6 +11,23 @@ from replayt.workflow import Workflow
 from replayt.yaml_workflow import workflow_from_spec
 
 
+def test_runner_run_metadata_on_run_started(tmp_path: Path) -> None:
+    wf = Workflow("meta_wf")
+    wf.set_initial("s")
+
+    @wf.step("s")
+    def s(ctx):
+        return None
+
+    store = JSONLStore(tmp_path)
+    r = Runner(wf, store, log_mode=LogMode.redacted)
+    res = r.run(run_metadata={"experiment": "A", "n": 1})
+    assert res.status == "completed"
+    ev = store.load_events(res.run_id)
+    started = next(e for e in ev if e["type"] == "run_started")
+    assert started["payload"]["run_metadata"] == {"experiment": "A", "n": 1}
+
+
 def test_runner_before_after_step_hooks(tmp_path: Path) -> None:
     wf = Workflow("hooks_wf")
     wf.set_initial("a")

@@ -1,14 +1,14 @@
 # CLI reference
 
-All commands support Typer’s `--help`. Most read/write commands accept `--log-dir` and optional `--sqlite` unless noted; defaults match [`CONFIG.md`](CONFIG.md) when you use project config.
+All commands support Typer’s `--help`. Most read/write commands accept `--log-dir`, optional `--log-subdir`, and optional `--sqlite` unless noted; defaults match [`CONFIG.md`](CONFIG.md) when you use project config (and `REPLAYT_LOG_DIR` when the CLI default log root applies).
 
 ## `replayt init [--path DIR] [--force]`
 
-Write `workflow.py` and `.env.example`. Refuses to overwrite unless `--force`.
+Write `workflow.py`, `.env.example`, and a `.gitignore` snippet (`.replayt/`, `.env`, …). Refuses to overwrite unless `--force`.
 
 ## `replayt run TARGET`
 
-Run a workflow from a module reference, Python file, or YAML file. Common flags: `--output text|json`, `--log-mode …`, `--resume`, `--tag key=value` (repeatable), `--timeout SECONDS`, `--inputs-json …`, `--dry-run` (placeholder LLM), `--dry-check` (validate graph + JSON inputs only; no run, no API calls).
+Run a workflow from a module reference, Python file, or YAML file. Common flags: `--output text|json`, `--log-mode …`, `--resume`, `--tag key=value` (repeatable), `--metadata-json '{…}'` (stored on `run_started` as `run_metadata`), `--log-subdir NAME` (one segment under the resolved log root), `--timeout SECONDS`, `--inputs-json …`, `--dry-run` (placeholder LLM), `--dry-check` (validate graph + JSON inputs only; no run, no API calls). Graph validation runs before every real execution (not only `--dry-check`).
 
 **Exit codes:** `0` completed, `1` failed, `2` paused (approval required).
 
@@ -38,6 +38,18 @@ Recorded execution timeline **without** calling model APIs. `--format html` emit
 
 Self-contained HTML report (summary, states, structured outputs, tool calls, token usage, approvals when present). `--style default|stakeholder` — **stakeholder** hides tool-call and token sections and leads with run + approval context. `--out PATH` writes a file; omit `--out` for stdout.
 
+## `replayt report-diff RUN_A RUN_B`
+
+Side-by-side HTML comparison of two runs (workflow, status, state chain, structured outputs, approval counts). `--out PATH` recommended; stdout is valid HTML.
+
+## `replayt export-run RUN_ID --out bundle.tar.gz`
+
+Write a tarball: sanitized `events.jsonl` (`--export-mode redacted|full|structured_only`) plus `manifest.json`. See [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md).
+
+## `replayt log-schema`
+
+Print the bundled JSON Schema for one JSONL event line (stdout)—useful for CI or codegen.
+
 ## `replayt resume TARGET RUN_ID --approval ID`
 
 Resolve an approval gate and continue a paused run. Same exit codes as `run`. Use `--reject` to reject the approval.
@@ -48,7 +60,7 @@ Print a Mermaid graph of the workflow to stdout.
 
 ## `replayt validate TARGET`
 
-Validate workflow graph without calling an LLM: initial state set, transition targets exist, no orphan states, handlers present. Exit `0` if valid, `1` if not. CI-friendly.
+Validate workflow graph without calling an LLM: initial state set and must name a declared `@wf.step`, transition targets exist, no orphan states (when `note_transition` edges are present), handlers present. Exit `0` if valid, `1` if not. CI-friendly.
 
 ## `replayt diff RUN_A RUN_B`
 
@@ -64,9 +76,9 @@ Delete JSONL run logs older than a duration (`90d`, `24h`, …). `--dry-run` to 
 
 ## `replayt runs`
 
-List recent local runs. `--tag key=value` (repeatable) to filter.
+List recent local runs. `--tag key=value` (repeatable) to filter. `--run-meta key=value` (repeatable) filters on `run_started.run_metadata` (string equality).
 
-## `replayt stats [--days N] [--tag key=value] [--output text|json]`
+## `replayt stats [--days N] [--tag key=value] [--run-meta key=value] [--output text|json]`
 
 Aggregate counts, average `llm_response` latency, token usage, top failure states, event time range.
 

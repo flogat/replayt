@@ -11,6 +11,40 @@ replayt is a **library and CLI for finite runs**, not a long-lived cluster orche
 
 Put **retries across jobs**, concurrency limits, and backpressure in your scheduler (Celery, Airflow, K8s Jobs, SQS consumers), not inside replayt core.
 
+### Kubernetes Job (one run per Pod)
+
+replayt is not a cluster operator; a **Job** that runs once and exits is the usual pattern. Mount a **PersistentVolumeClaim** (or use an object-store upload step after the Job finishes) for `.replayt` logs if you need retention across Pod restarts.
+
+```yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: replayt-once
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: replayt
+          image: python:3.12-slim
+          command: ["bash", "-lc"]
+          args:
+            - pip install replayt && replayt run your.module:wf --log-dir /data/runs --inputs-json '{}'
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef: { name: llm-secrets, key: OPENAI_API_KEY }
+          volumeMounts:
+            - name: runs
+              mountPath: /data/runs
+      volumes:
+        - name: runs
+          persistentVolumeClaim:
+            claimName: replayt-runs-pvc
+```
+
+Preflight with `replayt doctor` in an init container or a separate CI job if you want connectivity checks without running the workflow.
+
 ## Logs and sensitive data
 
 - Default log directory is under `.replayt/runs/` (override with `--log-dir` or config—see [`CONFIG.md`](CONFIG.md)).

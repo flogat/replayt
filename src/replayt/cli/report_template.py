@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import html
+import json
+from typing import Any
+
 REPORT_CSS = """
 :root {{
   --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
@@ -83,6 +87,7 @@ REPORT_HTML = """\
           <span class="rp-badge {status_class}">{status}</span></p>
         <p><span class="rp-label">Duration:</span> {duration}</p>
         {tags_html}
+        {meta_html}
       </div>
     </section>
 
@@ -176,3 +181,207 @@ APPROVAL_ITEM = """\
   <p><span class="rp-label">Summary:</span> {summary}</p>
   <p><span class="rp-label">Outcome:</span> <strong>{outcome}</strong></p>
 </div>"""
+
+
+def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Parse events into the same shape ``cmd_report`` uses (for single-run and diff reports)."""
+
+    workflow_name = ""
+    workflow_version = ""
+    status = "unknown"
+    tags: dict[str, str] = {}
+    run_metadata: dict[str, Any] = {}
+    states: list[dict[str, str]] = []
+    outputs: list[dict[str, Any]] = []
+    tool_calls: list[dict[str, Any]] = []
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    first_ts: str | None = None
+    last_ts: str | None = None
+    approval_requests: dict[str, dict[str, Any]] = {}
+    approval_last: dict[str, bool] = {}
+
+    for e in events:
+        ts = e.get("ts", "")
+        if first_ts is None:
+            first_ts = ts
+        last_ts = ts
+        typ = e.get("type")
+        payload = e.get("payload") or {}
+
+        if typ == "run_started":
+            workflow_name = str(payload.get("workflow_name", ""))
+            workflow_version = str(payload.get("workflow_version", ""))
+            tags = payload.get("tags") or {}
+            run_metadata = payload.get("run_metadata") or {}
+        elif typ == "state_entered":
+            states.append({"state": str(payload.get("state", "")), "ts": ts})
+        elif typ == "structured_output":
+            outputs.append({"schema_name": payload.get("schema_name", ""), "data": payload.get("data")})
+        elif typ == "tool_call":
+            tool_calls.append({
+                "tool": payload.get("name", ""), "seq": e.get("seq", ""), "args": payload.get("arguments"),
+            })
+        elif typ == "tool_result":
+            tool_calls.append({
+                "tool": payload.get("name", "result"),
+                "seq": e.get("seq", ""),
+                "args": payload.get("result"),
+            })
+        elif typ == "llm_response":
+            usage = payload.get("usage") or {}
+            pt = usage.get("prompt_tokens")
+            ct = usage.get("completion_tokens")
+            tt = usage.get("total_tokens")
+            if isinstance(pt, int):
+                prompt_tokens += pt
+            if isinstance(ct, int):
+                completion_tokens += ct
+            if isinstance(tt, int):
+                total_tokens += tt
+        elif typ == "run_completed":
+            status = str(payload.get("status", status))
+        elif typ == "run_paused":
+            status = "paused"
+        elif typ == "run_failed":
+            status = "failed"
+        elif typ == "approval_requested":
+            aid = payload.get("approval_id")
+            if aid is not None:
+                approval_requests[str(aid)] = {
+                    "summary": payload.get("summary", ""),
+                    "state": payload.get("state", ""),
+                }
+        elif typ == "approval_resolved":
+            aid = payload.get("approval_id")
+            if aid is not None:
+                approval_last[str(aid)] = bool(payload.get("approved"))
+
+    return {
+        "workflow_name": workflow_name,
+        "workflow_version": workflow_version,
+        "status": status,
+        "tags": tags,
+        "run_metadata": run_metadata,
+        "states": states,
+        "outputs": outputs,
+        "tool_calls": tool_calls,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "first_ts": first_ts,
+        "last_ts": last_ts,
+        "approval_requests": approval_requests,
+        "approval_last": approval_last,
+    }
+
+
+def _outputs_signature(outputs: list[dict[str, Any]]) -> dict[str, Any]:
+    return {str(o.get("schema_name", "")): o.get("data") for o in outputs}
+
+
+REPORT_DIFF_HTML = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>replayt report diff</title>
+  <style>
+""" + REPORT_CSS + """
+.rp-grid {{ display:grid; grid-template-columns:1fr 1fr; gap:1rem; }}
+@media (max-width:48rem) {{ .rp-grid {{ grid-template-columns:1fr; }} }}
+.rp-diff-row {{ font-size:0.875rem; margin:0.25rem 0; }}
+.rp-changed {{ color:var(--red-800); font-weight:600; }}
+  </style>
+</head>
+<body class="rp-body">
+  <main class="rp-main">
+    <section class="rp-section">
+      <h1 class="rp-h1">Run comparison</h1>
+      <p class="rp-muted">Side-by-side summary from recorded JSONL (no model calls).</p>
+    </section>
+    <section class="rp-section rp-grid">
+      <div class="rp-card rp-card-tight">
+        <h2 class="rp-h2">Run A</h2>
+        <p><span class="rp-label">ID:</span> <code class="rp-code">{run_a}</code></p>
+        <p><span class="rp-label">Workflow:</span> {wa_name}@{wa_ver}</p>
+        <p><span class="rp-label">Status:</span> {wa_status}</p>
+        <p><span class="rp-label">States:</span> {wa_states}</p>
+      </div>
+      <div class="rp-card rp-card-tight">
+        <h2 class="rp-h2">Run B</h2>
+        <p><span class="rp-label">ID:</span> <code class="rp-code">{run_b}</code></p>
+        <p><span class="rp-label">Workflow:</span> {wb_name}@{wb_ver}</p>
+        <p><span class="rp-label">Status:</span> {wb_status}</p>
+        <p><span class="rp-label">States:</span> {wb_states}</p>
+      </div>
+    </section>
+    <section class="rp-section">
+      <h2 class="rp-h2">Structured outputs</h2>
+      <div class="rp-card">
+        {outputs_diff_rows}
+      </div>
+    </section>
+    <section class="rp-section">
+      <h2 class="rp-h2">Approvals</h2>
+      <div class="rp-card rp-card-tight">
+        {approvals_diff}
+      </div>
+    </section>
+    <footer class="rp-foot">Generated by replayt</footer>
+  </main>
+</body>
+</html>"""
+
+
+def build_report_diff_html(
+    run_a: str,
+    run_b: str,
+    ctx_a: dict[str, Any],
+    ctx_b: dict[str, Any],
+) -> str:
+    def state_chain(states: list[dict[str, str]]) -> str:
+        return " → ".join(s["state"] for s in states) if states else "(none)"
+
+    sa = _outputs_signature(ctx_a["outputs"])
+    sb = _outputs_signature(ctx_b["outputs"])
+    keys = sorted(set(sa) | set(sb))
+    rows: list[str] = []
+    for k in keys:
+        va, vb = sa.get(k), sb.get(k)
+        same = va == vb
+        cls = "rp-diff-row" if same else "rp-diff-row rp-changed"
+        rows.append(
+            f'<p class="{cls}"><span class="rp-label">{html.escape(k)}:</span> '
+            f"{'match' if same else 'different'}</p>"
+            + (
+                ""
+                if same
+                else f'<pre class="rp-pre">A: {html.escape(json.dumps(va, indent=2, default=str)[:1200])}\n\n'
+                f'B: {html.escape(json.dumps(vb, indent=2, default=str)[:1200])}</pre>'
+            )
+        )
+    if not rows:
+        rows.append('<p class="rp-muted">No structured_output events in either run.</p>')
+
+    ar, br = ctx_a["approval_requests"], ctx_b["approval_requests"]
+    appr = "A approvals: " + str(len(ar)) + " — B approvals: " + str(len(br))
+    if ar != br:
+        appr += " (counts or ids differ — open single-run reports for detail)"
+
+    return REPORT_DIFF_HTML.format(
+        run_a=html.escape(run_a),
+        run_b=html.escape(run_b),
+        wa_name=html.escape(str(ctx_a["workflow_name"])),
+        wa_ver=html.escape(str(ctx_a["workflow_version"])),
+        wa_status=html.escape(str(ctx_a["status"])),
+        wa_states=html.escape(state_chain(ctx_a["states"])),
+        wb_name=html.escape(str(ctx_b["workflow_name"])),
+        wb_ver=html.escape(str(ctx_b["workflow_version"])),
+        wb_status=html.escape(str(ctx_b["status"])),
+        wb_states=html.escape(state_chain(ctx_b["states"])),
+        outputs_diff_rows="\n".join(rows),
+        approvals_diff=html.escape(appr),
+    )

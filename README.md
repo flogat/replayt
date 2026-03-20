@@ -248,7 +248,7 @@ When things go wrong, the run log is the debugging tool:
 
 Command reference: **[docs/CLI.md](docs/CLI.md)**. Everyday flow: `run` → `inspect` / `replay` / `report` → optional `resume` after approvals. **`TARGET`** is `module:variable`, `workflow.py`, or `workflow.yaml` / `.yml`.
 
-Extras: **`replayt try`** runs the packaged hello-world tutorial; **`replayt ci`** is the same as `run` with a CI-oriented banner; **`replayt run … --dry-check`** validates the graph and `--inputs-json` without executing; **`replayt report --style stakeholder`** trims tool/token sections for sharing; **`replayt seal`** writes a SHA-256 manifest for a JSONL run (audit helper). In Python, optional **`Runner(..., before_step=..., after_step=...)`** supports explicit in-process hooks (notifications, trace IDs) without a second workflow engine.
+Extras: **`replayt try`** runs the packaged hello-world tutorial; **`replayt ci`** is the same as `run` with a CI-oriented banner; **`replayt run … --dry-check`** validates the graph and `--inputs-json` without executing; **`replayt report --style stakeholder`** trims tool/token sections for sharing; **`replayt report-diff`** compares two runs in HTML; **`replayt export-run`** writes a redacted **`.tar.gz`** for sharing; **`replayt log-schema`** prints the bundled JSON Schema for one JSONL line; **`replayt seal`** writes a SHA-256 manifest for a JSONL run (audit helper). In Python, optional **`Runner(..., before_step=..., after_step=...)`** supports explicit in-process hooks (notifications, trace IDs) without a second workflow engine.
 
 Project defaults (log dir, provider preset, timeout, …): **[docs/CONFIG.md](docs/CONFIG.md)**.
 

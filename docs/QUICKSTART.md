@@ -13,6 +13,12 @@ pip install replayt
 replayt doctor
 ```
 
+**One-shot smoke test** (if you use [uv](https://github.com/astral-sh/uv): no prior venv needed):
+
+```bash
+uv run --with replayt replayt try
+```
+
 **From a clone (contributors):**
 
 ```bash

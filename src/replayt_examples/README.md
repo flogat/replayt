@@ -79,6 +79,41 @@ replayt seal <run_id>
 
 For **in-process** trace IDs or policy logging, use **`Runner(..., before_step=..., after_step=...)`** in Python (see **Pattern: webhook / lifecycle callbacks** for outer-wrapper alternatives).
 
+### LangGraph (and similar frameworks) — **composition**, not core
+
+replayt will not ship LangGraph inside the runner; that would hide control flow and fight the explicit FSM model (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). **Recommended shape:** run LangGraph **inside one `@wf.step`**, then transition replayt based on **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, or tools—not every planner tick.
+
+Install graph libraries in **your** project only:
+
+```bash
+pip install langgraph langchain-core
+```
+
+Illustrative pattern (adapt imports and graph build to your codebase):
+
+```python
+from pydantic import BaseModel
+
+class AgentChunkOut(BaseModel):
+    answer: str
+    route: str
+
+@wf.step("with_langgraph")
+def with_langgraph(ctx):
+    from langgraph.graph import StateGraph  # type: ignore[import-untyped]
+
+    # graph = ... build StateGraph, .compile(), etc.
+    # result = graph.invoke({"messages": ctx.get("messages", [])})
+    result = {"answer": "stub", "route": "done"}  # replace with real invoke()
+    out = AgentChunkOut.model_validate(
+        {"answer": str(result.get("answer", ""))[:4000], "route": str(result.get("route", "done"))}
+    )
+    ctx.set("last_agent", out.model_dump())
+    return out.route if out.route in {"done", "retry"} else "done"
+```
+
+Human gates stay replayt-native: **`ctx.request_approval`** or the **Pattern: approval bridge** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)**.
+
 ## 1. Hello world — `replayt_examples.e01_hello_world`
 
 Start here if you want the absolute minimum replayt workflow.

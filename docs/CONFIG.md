@@ -38,3 +38,9 @@ strict_mirror = false
 ```
 
 Environment variables and explicit CLI flags still override these defaults when you pass them.
+
+## `REPLAYT_LOG_DIR`
+
+If set, used as the default JSONL root when you omit `--log-dir` (i.e. when the CLI would otherwise use `.replayt/runs`). `[tool.replayt] log_dir` in project config still wins over this env var when you use the default `--log-dir` placeholder.
+
+Use **`--log-subdir NAME`** (a single path segment, no slashes) to append a tenant- or job-specific subdirectory under the resolved root—handy for **one tenant → one log directory** layouts (see [`PRODUCTION.md`](PRODUCTION.md)).

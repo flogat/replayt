@@ -19,6 +19,7 @@ Events are append-only, one JSON object per line. All events share:
 - `initial_state` (string)
 - `inputs` (object, optional) — may be redacted
 - `tags` (object, optional) — string key/value pairs from CLI `--tag`
+- `run_metadata` (object, optional) — JSON-serializable bag from CLI `--metadata-json` or `Runner.run(..., run_metadata={...})` (experiment ids, prompt versions, etc.); filter listings with `replayt runs --run-meta key=value` (string equality on `str(value)`).
 - `workflow_meta` (object, optional) — JSON-serializable bag from `Workflow(..., meta={...})` (e.g. package id, git SHA)
 
 ### `state_entered`
@@ -118,6 +119,10 @@ Events are append-only, one JSON object per line. All events share:
 ## SQLite
 
 Optional SQLite store mirrors the same events in table `events(run_id, seq, type, payload_json, ts)`.
+
+## Export bundle (`replayt export-run`)
+
+Not a raw JSONL file on disk: the CLI can write a **`.tar.gz`** containing `events.jsonl` (optionally sanitized to match `redacted` / `structured_only` / `full` export semantics) plus `manifest.json` with `schema: "replayt.export_bundle.v1"` and `events_jsonl_sha256`. Use this when sharing runs outside the original log directory.
 
 ## Seal sidecar (`replayt seal`)
 

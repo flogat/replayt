@@ -166,6 +166,9 @@ def test_cli_init_scaffold(tmp_path: Path) -> None:
     assert r.exit_code == 0
     assert (tmp_path / "workflow.py").is_file()
     assert (tmp_path / ".env.example").is_file()
+    gi = tmp_path / ".gitignore"
+    assert gi.is_file()
+    assert ".replayt/" in gi.read_text(encoding="utf-8")
     r2 = runner.invoke(app, ["init", "--path", str(tmp_path)])
     assert r2.exit_code == 1
     r3 = runner.invoke(app, ["init", "--path", str(tmp_path), "--force"])
@@ -779,4 +782,162 @@ def use_tool(ctx):
     result = runner.invoke(app, ["report", run_id, "--log-dir", str(tmp_path)])
     assert result.exit_code == 0
     assert "add" in result.stdout
+
+
+def test_cli_validate_rejects_invalid_initial_state(tmp_path: Path) -> None:
+    wf_path = tmp_path / "bad_init.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("bad_init")
+wf.set_initial("does_not_exist")
+
+@wf.step("start")
+def start(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    r = runner.invoke(app, ["validate", str(wf_path)])
+    assert r.exit_code == 1
+    assert "initial state" in (r.stdout + r.stderr)
+
+
+def test_cli_run_preflight_invalid_initial(tmp_path: Path) -> None:
+    wf_path = tmp_path / "bad_init2.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("bad_init2")
+wf.set_initial("nope")
+
+@wf.step("other")
+def other(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    r = runner.invoke(app, ["run", str(wf_path), "--log-dir", str(tmp_path)])
+    assert r.exit_code == 1
+    assert "INVALID" in (r.stdout + r.stderr)
+
+
+def test_cli_export_run_tarball(tmp_path: Path) -> None:
+    import tarfile
+
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"Sam"}',
+            "--metadata-json",
+            '{"experiment":"a"}',
+        ],
+    )
+    assert run.exit_code == 0
+    rid = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    tar_path = tmp_path / "bundle.tar.gz"
+    ex = runner.invoke(
+        app,
+        ["export-run", rid, "--log-dir", str(tmp_path), "--out", str(tar_path), "--export-mode", "redacted"],
+    )
+    assert ex.exit_code == 0
+    with tarfile.open(tar_path, "r:gz") as tf:
+        names = tf.getnames()
+        assert any(n.endswith("events.jsonl") for n in names)
+        member = [n for n in names if n.endswith("events.jsonl")][0]
+        data = tf.extractfile(member).read().decode()
+    first = json.loads(data.splitlines()[0])
+    assert first["type"] == "run_started"
+    assert first["payload"].get("inputs") == {}
+    assert first["payload"].get("run_metadata") == {"experiment": "a"}
+
+
+def test_cli_runs_filter_run_meta(tmp_path: Path) -> None:
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"Sam"}',
+            "--metadata-json",
+            '{"branch":"main"}',
+        ],
+    )
+    assert run.exit_code == 0
+    rid = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    r2 = runner.invoke(
+        app, ["runs", "--log-dir", str(tmp_path), "--run-meta", "branch=main", "--limit", "5"]
+    )
+    assert r2.exit_code == 0
+    assert rid in r2.stdout
+
+
+def test_cli_log_schema_stdout() -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["log-schema"])
+    assert r.exit_code == 0
+    assert "replayt JSONL event line" in r.stdout
+    assert "$schema" in r.stdout
+
+
+def test_cli_report_diff_html(tmp_path: Path) -> None:
+    wf = tmp_path / "rd.py"
+    wf.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("rd")
+wf.set_initial("s")
+
+@wf.step("s")
+def s(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    ra = runner.invoke(app, ["run", str(wf), "--log-dir", str(tmp_path)])
+    rb = runner.invoke(app, ["run", str(wf), "--log-dir", str(tmp_path)])
+    assert ra.exit_code == 0 and rb.exit_code == 0
+    id_a = next(line.split("=", 1)[1] for line in ra.stdout.splitlines() if line.startswith("run_id="))
+    id_b = next(line.split("=", 1)[1] for line in rb.stdout.splitlines() if line.startswith("run_id="))
+    out = tmp_path / "diff.html"
+    r = runner.invoke(app, ["report-diff", id_a, id_b, "--log-dir", str(tmp_path), "--out", str(out)])
+    assert r.exit_code == 0
+    html = out.read_text(encoding="utf-8")
+    assert "Run comparison" in html
+    assert id_a in html and id_b in html
+
+
+def test_replayt_log_dir_env_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    log_root = tmp_path / "fromenv"
+    log_root.mkdir()
+    monkeypatch.setenv("REPLAYT_LOG_DIR", str(log_root))
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--inputs-json",
+            '{"customer_name":"Sam"}',
+        ],
+    )
+    assert r.exit_code == 0
+    rid = next(line.split("=", 1)[1] for line in r.stdout.splitlines() if line.startswith("run_id="))
+    assert (log_root / f"{rid}.jsonl").is_file()
 
