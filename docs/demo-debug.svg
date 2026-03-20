@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="540" viewBox="0 0 820 540">
+  <style>
+    @keyframes fadeIn  { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: translateY(0) } }
+
+    .bg        { fill: #0f172a }
+    .title-bar { fill: #1e293b }
+    .dot-r     { fill: #f87171 }
+    .dot-y     { fill: #facc15 }
+    .dot-g     { fill: #4ade80 }
+    .title-txt { fill: #94a3b8; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; text-anchor: middle }
+    text       { font-family: ui-monospace, 'Cascadia Code', 'Fira Code', Menlo, monospace; font-size: 13px }
+    .prompt    { fill: #38bdf8 }
+    .cmd       { fill: #f1f5f9 }
+    .out       { fill: #cbd5e1 }
+    .dim       { fill: #94a3b8 }
+    .val       { fill: #c4b5fd }
+    .ok        { fill: #4ade80 }
+    .err       { fill: #f87171 }
+    .id        { fill: #fbbf24 }
+    .ev-type   { fill: #38bdf8 }
+    .ev-json   { fill: #94a3b8 }
+    .sep       { stroke: #475569; stroke-width: 1; stroke-dasharray: 4,4 }
+    .label-bg  { rx: 4; ry: 4 }
+    .label-txt { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase }
+    .note      { fill: #64748b; font-style: italic }
+    .footer    { fill: #64748b }
+    .hl-bg     { fill: #f8717122; rx: 3; ry: 3 }
+  </style>
+
+  <defs>
+    <clipPath id="d-clip1"><rect x="48" y="66" width="0" height="20">
+      <animate attributeName="width" from="0" to="740" begin="0.6s" dur="2.0s" fill="freeze"/>
+    </rect></clipPath>
+    <clipPath id="d-clip2"><rect x="48" y="244" width="0" height="20">
+      <animate attributeName="width" from="0" to="300" begin="7.0s" dur="0.8s" fill="freeze"/>
+    </rect></clipPath>
+    <clipPath id="d-clip3"><rect x="48" y="420" width="0" height="20">
+      <animate attributeName="width" from="0" to="300" begin="14.0s" dur="0.8s" fill="freeze"/>
+    </rect></clipPath>
+  </defs>
+
+  <!-- Terminal chrome -->
+  <rect class="bg" width="820" height="540" rx="10" ry="10"/>
+  <rect class="title-bar" width="820" height="38" rx="10" ry="10"/>
+  <rect class="title-bar" width="820" height="20" y="18"/>
+  <circle class="dot-r" cx="20" cy="19" r="6"/>
+  <circle class="dot-y" cx="40" cy="19" r="6"/>
+  <circle class="dot-g" cx="60" cy="19" r="6"/>
+  <text class="title-txt" x="410" y="24">when things go wrong &#8212; debugging a failed run</text>
+
+  <!-- =========== STEP 1: run (fails) =========== -->
+
+  <g opacity="0" style="animation: slideIn 0.3s 0.1s forwards">
+    <rect class="label-bg" x="30" y="48" width="38" height="18" fill="#0ea5e9" opacity="0.18"/>
+    <text class="label-txt" x="49" y="61" fill="#38bdf8" text-anchor="middle">RUN</text>
+  </g>
+
+  <text class="prompt" x="32" y="80">$</text>
+  <g clip-path="url(#d-clip1)">
+    <text class="cmd" x="48" y="80">replayt run examples.refund_policy:wf --inputs-json '{"ticket":"REFUND-404","amount":9999}'</text>
+  </g>
+
+  <g opacity="0" style="animation: fadeIn 0.3s 3.4s forwards">
+    <text x="32" y="108">
+      <tspan class="out">run_id=</tspan><tspan class="id">2e9874a2-345c-4c0a-96f2-814b24e0ebb2</tspan>
+    </text>
+    <text x="32" y="126">
+      <tspan class="out">workflow=</tspan><tspan class="val">support_refund_policy@1</tspan>
+    </text>
+    <text x="32" y="144">
+      <tspan class="out">status=</tspan><tspan class="err">failed</tspan>
+    </text>
+    <text x="32" y="162">
+      <tspan class="out">error=</tspan><tspan class="err">context requires ticket: str and order: object (see examples README)</tspan>
+    </text>
+  </g>
+
+  <g opacity="0" style="animation: fadeIn 0.3s 4.2s forwards">
+    <text class="note" x="32" y="190">exit code 1 &#8212; but the full history is already on disk</text>
+  </g>
+
+  <line x1="32" y1="210" x2="788" y2="210" class="sep" opacity="0" style="animation: fadeIn 0.2s 5.4s forwards"/>
+
+  <!-- =========== STEP 2: inspect =========== -->
+
+  <g opacity="0" style="animation: slideIn 0.3s 5.8s forwards">
+    <rect class="label-bg" x="30" y="218" width="66" height="18" fill="#a78bfa" opacity="0.18"/>
+    <text class="label-txt" x="63" y="231" fill="#c4b5fd" text-anchor="middle">INSPECT</text>
+  </g>
+
+  <text class="prompt" x="32" y="258" opacity="0" style="animation: fadeIn 0.1s 6.6s forwards">$</text>
+  <g clip-path="url(#d-clip2)">
+    <text class="cmd" x="48" y="258">replayt inspect 2e9874a2-345c...</text>
+  </g>
+
+  <g opacity="0" style="animation: fadeIn 0.3s 8.4s forwards">
+    <text x="32" y="286">
+      <tspan class="out">run_id=</tspan><tspan class="id">2e9874a2...</tspan>
+      <tspan class="out"> workflow=</tspan><tspan class="val">support_refund_policy@1</tspan>
+      <tspan class="out"> status=</tspan><tspan class="err">failed</tspan>
+    </text>
+    <text class="out" x="32" y="304">events=6 states=1 transitions=0 llm_calls=0 tool_calls=0 approvals=0</text>
+    <text x="32" y="328">
+      <tspan class="dim">0001  </tspan><tspan class="ev-type">run_started</tspan>
+    </text>
+    <text x="32" y="346">
+      <tspan class="dim">0002  </tspan><tspan class="ev-type">state_entered</tspan>
+    </text>
+    <text x="32" y="364">
+      <tspan class="dim">0003  </tspan><tspan class="ev-type">retry_scheduled</tspan>
+    </text>
+    <text x="32" y="382">
+      <tspan class="dim">0004  </tspan><tspan class="ev-type">retry_scheduled</tspan>
+    </text>
+    <!-- highlighted failure -->
+    <rect class="hl-bg" x="28" y="389" width="760" height="18"/>
+    <text x="32" y="400">
+      <tspan class="dim">0005  </tspan><tspan class="err">run_failed</tspan><tspan class="note">  &#8592; pinpoints the exact failure</tspan>
+    </text>
+  </g>
+
+  <line x1="32" y1="416" x2="788" y2="416" class="sep" opacity="0" style="animation: fadeIn 0.2s 10.6s forwards"/>
+
+  <!-- =========== STEP 3: replay =========== -->
+
+  <g opacity="0" style="animation: slideIn 0.3s 11.0s forwards">
+    <rect class="label-bg" x="30" y="420" width="56" height="18" fill="#4ade80" opacity="0.18"/>
+    <text class="label-txt" x="58" y="433" fill="#4ade80" text-anchor="middle">REPLAY</text>
+  </g>
+
+  <text class="prompt" x="32" y="448" opacity="0" style="animation: fadeIn 0.1s 13.0s forwards">$</text>
+  <g clip-path="url(#d-clip3)">
+    <text class="cmd" x="48" y="448">replayt replay 2e9874a2-345c...</text>
+  </g>
+
+  <g opacity="0" style="animation: fadeIn 0.3s 15.4s forwards">
+    <text x="32" y="476">
+      <tspan class="dim">0002  </tspan><tspan class="ev-type">state_entered  </tspan><tspan class="ev-json">{"state": "ingest"}</tspan>
+    </text>
+    <rect class="hl-bg" x="28" y="487" width="760" height="18"/>
+    <text x="32" y="498">
+      <tspan class="dim">0005  </tspan><tspan class="err">run_failed  </tspan><tspan class="ev-json">{"error": {"type": "ValueError", "message": "context requires ticket:...</tspan>
+    </text>
+  </g>
+
+  <!-- footer -->
+  <g opacity="0" style="animation: fadeIn 0.4s 16.6s forwards">
+    <text x="32" y="528">
+      <tspan class="footer">black-box agents say "error" &#8212; replayt tells you </tspan><tspan class="err" font-weight="bold">exactly where and why</tspan>
+    </text>
+  </g>
+</svg>

@@ -11,6 +11,10 @@ Each section below tries to answer four questions:
 
 If you are new to replayt, read the examples in order. They move from a two-step deterministic workflow to LLM-backed classification, typed tools, retries, and approval gates. By the time you reach the later examples, you should be comfortable opening the corresponding Python file, reading the state handlers, and mapping that code to the events you see in `inspect` and `replay`.
 
+<p align="center">
+  <img src="../../docs/demo-why.svg" alt="typical agent framework vs replayt" width="820"/>
+</p>
+
 ## How to use this tutorial README
 
 A productive rhythm is:
@@ -393,6 +397,10 @@ This tutorial example shows how replayt keeps even high-pressure operational flo
 
 ## 10. GitHub issue triage — `examples.issue_triage`
 
+<p align="center">
+  <img src="../../docs/demo.svg" alt="replayt demo: run, inspect, replay on issue triage" width="820"/>
+</p>
+
 This example shows how deterministic validation and LLM classification can work together.
 
 ### What the code does
@@ -427,6 +435,10 @@ For this particular issue, a bug-style classification and engineering-oriented r
 
 ## 11. Refund policy workflow — `examples.refund_policy`
 
+<p align="center">
+  <img src="../../docs/demo-debug.svg" alt="replayt debugging a failed refund_policy run" width="820"/>
+</p>
+
 This example shows a constrained customer-support decision with structured LLM output.
 
 ### What the code does
@@ -460,6 +472,10 @@ The model still has discretion, but it must answer inside a bounded schema. Afte
 Because the order was delivered only 3 days ago and the ticket reports damage, a refund-friendly action is plausible under the stated policy. The most important tutorial takeaway is that the output remains structured and reviewable rather than hidden inside prose.
 
 ## 12. Publishing preflight with approval gate — `examples.publishing_preflight`
+
+<p align="center">
+  <img src="../../docs/demo-approval.svg" alt="replayt approval gate: pause, review, resume" width="820"/>
+</p>
 
 This example combines structured LLM review with a human publication decision.
 

@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="520" viewBox="0 0 820 520">
+  <style>
+    .bg        { fill: #0f172a }
+    .title-bar { fill: #1e293b }
+    .dot-r     { fill: #f87171 }
+    .dot-y     { fill: #facc15 }
+    .dot-g     { fill: #4ade80 }
+    .title-txt { fill: #94a3b8; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; text-anchor: middle }
+    text       { font-family: ui-monospace, 'Cascadia Code', 'Fira Code', Menlo, monospace; font-size: 13px }
+    .heading   { fill: #f1f5f9; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 15px; font-weight: 600 }
+    .sub       { fill: #cbd5e1; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 12px }
+
+    .box-bad   { fill: #1e293b; stroke: #475569; stroke-width: 1; rx: 6; ry: 6 }
+    .box-good  { fill: #1e293b; stroke: #475569; stroke-width: 1; rx: 6; ry: 6 }
+    .flow-bad  { fill: #f87171 }
+    .flow-q    { fill: #fb923c }
+    .flow-dim  { fill: #64748b }
+    .flow-good { fill: #4ade80 }
+    .flow-step { fill: #38bdf8 }
+    .flow-lbl  { fill: #94a3b8; font-size: 11px }
+    .flow-txt  { fill: #cbd5e1 }
+    .x-mark    { fill: #f87171; font-weight: bold }
+    .check     { fill: #4ade80; font-weight: bold }
+    .bullet    { fill: #cbd5e1 }
+    .bullet-dim { fill: #94a3b8 }
+    .divider   { stroke: #334155; stroke-width: 1 }
+    .arrow     { fill: none; stroke: #475569; stroke-width: 1.5 }
+    .arrow-bad { fill: none; stroke: #f8717166; stroke-width: 1.5; stroke-dasharray: 4,3 }
+    .arrow-ok  { fill: none; stroke: #4ade80; stroke-width: 1.5 }
+    .label-bg  { rx: 4; ry: 4 }
+  </style>
+
+  <!-- Terminal chrome -->
+  <rect class="bg" width="820" height="520" rx="10" ry="10"/>
+  <rect class="title-bar" width="820" height="38" rx="10" ry="10"/>
+  <rect class="title-bar" width="820" height="20" y="18"/>
+  <circle class="dot-r" cx="20" cy="19" r="6"/>
+  <circle class="dot-y" cx="40" cy="19" r="6"/>
+  <circle class="dot-g" cx="60" cy="19" r="6"/>
+  <text class="title-txt" x="410" y="24">what happens when your LLM workflow runs?</text>
+
+  <!-- Center divider -->
+  <line x1="410" y1="56" x2="410" y2="510" class="divider"/>
+
+  <!-- ========== LEFT COLUMN: typical agent ========== -->
+
+  <rect class="label-bg" x="30" y="52" width="190" height="20" fill="#f87171" opacity="0.12"/>
+  <text class="heading" x="36" y="67" fill="#f87171">typical agent framework</text>
+
+  <!-- Flow: input -->
+  <text class="flow-txt" x="52" y="104">input</text>
+  <line x1="76" y1="110" x2="76" y2="124" class="arrow-bad"/>
+
+  <!-- Flow: agent planner -->
+  <rect x="36" y="126" width="180" height="26" rx="4" ry="4" fill="#1e293b" stroke="#f8717144" stroke-width="1"/>
+  <text class="flow-txt" x="52" y="144">agent planner</text>
+  <text class="flow-q" x="190" y="144">???</text>
+  <line x1="126" y1="152" x2="126" y2="166" class="arrow-bad"/>
+
+  <!-- Flow: hidden retry loop -->
+  <rect x="36" y="168" width="180" height="26" rx="4" ry="4" fill="#1e293b" stroke="#f8717144" stroke-width="1"/>
+  <text class="flow-txt" x="52" y="186">hidden retry loop</text>
+  <text class="flow-q" x="190" y="186">???</text>
+  <!-- loop arrow -->
+  <path d="M 216,175 L 230,175 L 230,195 L 216,195" class="arrow-bad"/>
+  <line x1="126" y1="194" x2="126" y2="208" class="arrow-bad"/>
+
+  <!-- Flow: sub-agent -->
+  <rect x="36" y="210" width="180" height="26" rx="4" ry="4" fill="#1e293b" stroke="#f8717144" stroke-width="1"/>
+  <text class="flow-txt" x="52" y="228">sub-agent</text>
+  <text class="flow-q" x="190" y="228">???</text>
+  <line x1="126" y1="236" x2="126" y2="250" class="arrow-bad"/>
+
+  <!-- Flow: output -->
+  <text class="flow-dim" x="52" y="266">output</text>
+  <text class="flow-dim" x="108" y="266">(maybe)</text>
+
+  <!-- The question -->
+  <text class="flow-bad" x="36" y="306">"what happened?"</text>
+  <text class="flow-dim" x="36" y="324">no idea. check the logs?</text>
+  <text class="flow-dim" x="36" y="342">what logs?</text>
+
+  <!-- Failure bullets -->
+  <text x="36" y="382"><tspan class="x-mark">&#10007;</tspan><tspan class="bullet-dim">  can't inspect the run</tspan></text>
+  <text x="36" y="404"><tspan class="x-mark">&#10007;</tspan><tspan class="bullet-dim">  can't replay it offline</tspan></text>
+  <text x="36" y="426"><tspan class="x-mark">&#10007;</tspan><tspan class="bullet-dim">  hidden control flow</tspan></text>
+  <text x="36" y="448"><tspan class="x-mark">&#10007;</tspan><tspan class="bullet-dim">  fuzzy unvalidated outputs</tspan></text>
+  <text x="36" y="470"><tspan class="x-mark">&#10007;</tspan><tspan class="bullet-dim">  no approval story</tspan></text>
+  <text x="36" y="492"><tspan class="x-mark">&#10007;</tspan><tspan class="bullet-dim">  retries invisible</tspan></text>
+
+  <!-- ========== RIGHT COLUMN: replayt ========== -->
+
+  <rect class="label-bg" x="430" y="52" width="72" height="20" fill="#4ade80" opacity="0.12"/>
+  <text class="heading" x="436" y="67" fill="#4ade80">replayt</text>
+
+  <!-- Flow: input -->
+  <text class="flow-txt" x="452" y="104">input</text>
+  <line x1="476" y1="110" x2="476" y2="124" class="arrow-ok"/>
+
+  <!-- Flow: validate -->
+  <rect x="436" y="126" width="200" height="26" rx="4" ry="4" fill="#1e293b" stroke="#4ade8044" stroke-width="1"/>
+  <text class="flow-step" x="452" y="144">validate</text>
+  <text class="flow-lbl" x="520" y="144">check inputs</text>
+  <line x1="536" y1="152" x2="536" y2="166" class="arrow-ok"/>
+
+  <!-- Flow: classify -->
+  <rect x="436" y="168" width="200" height="26" rx="4" ry="4" fill="#1e293b" stroke="#4ade8044" stroke-width="1"/>
+  <text class="flow-step" x="452" y="186">classify</text>
+  <text class="flow-lbl" x="520" y="186">LLM + Pydantic</text>
+  <line x1="536" y1="194" x2="536" y2="208" class="arrow-ok"/>
+
+  <!-- Flow: respond -->
+  <rect x="436" y="210" width="200" height="26" rx="4" ry="4" fill="#1e293b" stroke="#4ade8044" stroke-width="1"/>
+  <text class="flow-step" x="452" y="228">respond</text>
+  <text class="flow-lbl" x="520" y="228">template reply</text>
+  <line x1="536" y1="236" x2="536" y2="250" class="arrow-ok"/>
+
+  <!-- Flow: done -->
+  <text class="flow-good" x="452" y="266">done</text>
+  <text class="flow-lbl" x="490" y="266">status=completed</text>
+
+  <!-- The answer -->
+  <text class="flow-good" x="436" y="306">replayt inspect 3e9cb4d2...</text>
+  <text class="flow-txt" x="436" y="324">16 events, 4 states, every</text>
+  <text class="flow-txt" x="436" y="342">step in local JSONL.</text>
+
+  <!-- Success bullets -->
+  <text x="436" y="382"><tspan class="check">&#10003;</tspan><tspan class="bullet">  inspect any run after the fact</tspan></text>
+  <text x="436" y="404"><tspan class="check">&#10003;</tspan><tspan class="bullet">  replay offline, no LLM calls</tspan></text>
+  <text x="436" y="426"><tspan class="check">&#10003;</tspan><tspan class="bullet">  explicit states + transitions</tspan></text>
+  <text x="436" y="448"><tspan class="check">&#10003;</tspan><tspan class="bullet">  Pydantic-validated schemas</tspan></text>
+  <text x="436" y="470"><tspan class="check">&#10003;</tspan><tspan class="bullet">  first-class approval gates</tspan></text>
+  <text x="436" y="492"><tspan class="check">&#10003;</tspan><tspan class="bullet">  every retry recorded</tspan></text>
+</svg>

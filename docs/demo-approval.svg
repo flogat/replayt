@@ -1,0 +1,119 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="480" viewBox="0 0 820 480">
+  <style>
+    @keyframes fadeIn  { from { opacity: 0 } to { opacity: 1 } }
+    @keyframes slideIn { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: translateY(0) } }
+
+    .bg        { fill: #0f172a }
+    .title-bar { fill: #1e293b }
+    .dot-r     { fill: #f87171 }
+    .dot-y     { fill: #facc15 }
+    .dot-g     { fill: #4ade80 }
+    .title-txt { fill: #94a3b8; font-family: ui-sans-serif, system-ui, sans-serif; font-size: 13px; text-anchor: middle }
+    text       { font-family: ui-monospace, 'Cascadia Code', 'Fira Code', Menlo, monospace; font-size: 13px }
+    .prompt    { fill: #38bdf8 }
+    .cmd       { fill: #f1f5f9 }
+    .out       { fill: #cbd5e1 }
+    .dim       { fill: #94a3b8 }
+    .val       { fill: #c4b5fd }
+    .ok        { fill: #4ade80 }
+    .warn      { fill: #fbbf24 }
+    .id        { fill: #fbbf24 }
+    .ev-type   { fill: #38bdf8 }
+    .sep       { stroke: #475569; stroke-width: 1; stroke-dasharray: 4,4 }
+    .label-bg  { rx: 4; ry: 4 }
+    .label-txt { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase }
+    .note      { fill: #64748b; font-style: italic }
+    .footer    { fill: #64748b }
+  </style>
+
+  <defs>
+    <clipPath id="a-clip1"><rect x="48" y="66" width="0" height="20">
+      <animate attributeName="width" from="0" to="740" begin="0.6s" dur="2.0s" fill="freeze"/>
+    </rect></clipPath>
+    <clipPath id="a-clip2"><rect x="48" y="238" width="0" height="20">
+      <animate attributeName="width" from="0" to="740" begin="8.0s" dur="1.8s" fill="freeze"/>
+    </rect></clipPath>
+  </defs>
+
+  <!-- Terminal chrome -->
+  <rect class="bg" width="820" height="480" rx="10" ry="10"/>
+  <rect class="title-bar" width="820" height="38" rx="10" ry="10"/>
+  <rect class="title-bar" width="820" height="20" y="18"/>
+  <circle class="dot-r" cx="20" cy="19" r="6"/>
+  <circle class="dot-y" cx="40" cy="19" r="6"/>
+  <circle class="dot-g" cx="60" cy="19" r="6"/>
+  <text class="title-txt" x="410" y="24">approval gates &#8212; pause, review, resume</text>
+
+  <!-- =========== STEP 1: run (pauses) =========== -->
+
+  <g opacity="0" style="animation: slideIn 0.3s 0.1s forwards">
+    <rect class="label-bg" x="30" y="48" width="38" height="18" fill="#0ea5e9" opacity="0.18"/>
+    <text class="label-txt" x="49" y="61" fill="#38bdf8" text-anchor="middle">RUN</text>
+  </g>
+
+  <text class="prompt" x="32" y="80">$</text>
+  <g clip-path="url(#a-clip1)">
+    <text class="cmd" x="48" y="80">replayt run examples.publishing_preflight:wf --inputs-json '{"draft":"Launch blog post v2"}'</text>
+  </g>
+
+  <g opacity="0" style="animation: fadeIn 0.3s 3.4s forwards">
+    <text x="32" y="108">
+      <tspan class="out">run_id=</tspan><tspan class="id">eaed1150-ed08-4a51-bed2-299344e45577</tspan>
+    </text>
+    <text x="32" y="126">
+      <tspan class="out">workflow=</tspan><tspan class="val">content_publishing_preflight@1</tspan>
+    </text>
+    <text x="32" y="144">
+      <tspan class="out">status=</tspan><tspan class="warn">paused</tspan>
+    </text>
+  </g>
+
+  <g opacity="0" style="animation: fadeIn 0.3s 4.2s forwards">
+    <text class="note" x="32" y="172">workflow paused at approval gate &#8212; exit code 2</text>
+    <text class="note" x="32" y="190">the run is safe on disk; resume whenever you're ready</text>
+  </g>
+
+  <line x1="32" y1="212" x2="788" y2="212" class="sep" opacity="0" style="animation: fadeIn 0.2s 5.6s forwards"/>
+
+  <!-- =========== STEP 2: resume (approves) =========== -->
+
+  <g opacity="0" style="animation: slideIn 0.3s 6.4s forwards">
+    <rect class="label-bg" x="30" y="222" width="60" height="18" fill="#4ade80" opacity="0.18"/>
+    <text class="label-txt" x="60" y="235" fill="#4ade80" text-anchor="middle">RESUME</text>
+  </g>
+
+  <text class="prompt" x="32" y="252" opacity="0" style="animation: fadeIn 0.1s 7.6s forwards">$</text>
+  <g clip-path="url(#a-clip2)">
+    <text class="cmd" x="48" y="252">replayt resume examples.publishing_preflight:wf eaed1150-ed08... --approval publish</text>
+  </g>
+
+  <g opacity="0" style="animation: fadeIn 0.3s 10.4s forwards">
+    <text x="32" y="280">
+      <tspan class="out">run_id=</tspan><tspan class="id">eaed1150-ed08-4a51-bed2-299344e45577</tspan>
+    </text>
+    <text x="32" y="298">
+      <tspan class="out">workflow=</tspan><tspan class="val">content_publishing_preflight@1</tspan>
+    </text>
+    <text x="32" y="316">
+      <tspan class="out">status=</tspan><tspan class="ok">completed</tspan>
+    </text>
+  </g>
+
+  <g opacity="0" style="animation: fadeIn 0.3s 11.2s forwards">
+    <text class="note" x="32" y="344">approved and completed &#8212; the full run is one auditable history</text>
+  </g>
+
+  <line x1="32" y1="364" x2="788" y2="364" class="sep" opacity="0" style="animation: fadeIn 0.2s 12.0s forwards"/>
+
+  <!-- =========== Explanation =========== -->
+
+  <g opacity="0" style="animation: fadeIn 0.4s 12.8s forwards">
+    <text class="out" x="32" y="390">the approval gate is part of the workflow graph, not bolted on.</text>
+    <text class="out" x="32" y="410">the paused run persists in JSONL &#8212; resume minutes or days later.</text>
+    <text class="out" x="32" y="430">inspect and replay show the approval event alongside every other step.</text>
+
+    <text x="32" y="462">
+      <tspan class="footer">most frameworks treat approvals as an afterthought &#8212; replayt makes them </tspan><tspan class="ok" font-weight="bold">first-class</tspan>
+    </text>
+  </g>
+</svg>
