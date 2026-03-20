@@ -166,12 +166,14 @@ A new user should be able to understand the architecture quickly and feel that t
 
 ### CLI
 
-- `replayt run TARGET`
-- `replayt inspect RUN_ID`
-- `replayt replay RUN_ID`
-- `replayt resume TARGET RUN_ID --approval ID`
+- `replayt init` — scaffold `workflow.py` + `.env.example`
+- `replayt run TARGET` — `--output json` for machine-readable result; exit **0** completed, **1** failed, **2** paused
+- `replayt inspect RUN_ID` — `--output json` (or legacy `--json`) for summary + events
+- `replayt replay RUN_ID` — `--format html` for a shareable Tailwind HTML timeline (`--out path`)
+- `replayt resume TARGET RUN_ID --approval ID` — same exit codes as `run`
 - `replayt graph TARGET`
 - `replayt runs`
+- `replayt stats` — aggregate counts and LLM latency from local JSONL logs
 - `replayt doctor`
 
 `TARGET` can be any of:
@@ -204,6 +206,13 @@ replayt doctor
 Optional dependencies (see [`pyproject.toml`](pyproject.toml)): **`[yaml]`** adds PyYAML for `.yaml` / `.yml` workflow targets; **`[dev]`** adds pytest, ruff, and YAML support for working on the repo.
 
 If you keep secrets in a `.env` file, load them your own way before running replayt (for example `export $(grep -v '^#' .env | xargs)`, [direnv](https://direnv.net/) with `.envrc`, or `python-dotenv` in a wrapper script). replayt does not read `.env` on its own—environment order stays explicit and auditable.
+
+### Scaffold a minimal project
+
+```bash
+replayt init --path .
+replayt run workflow.py --inputs-json '{}'
+```
 
 ### Run a Python workflow
 
@@ -247,8 +256,20 @@ replayt uses a small OpenAI-compatible HTTP client. You can steer it in two laye
 **Environment (CLI and Python if you omit `llm_settings`):**
 
 - `OPENAI_API_KEY` — required for live model calls
-- `OPENAI_BASE_URL` — defaults to `https://api.openai.com/v1` (compatible proxies and local gateways set this)
-- `REPLAYT_MODEL` — default model name (falls back to `gpt-4o-mini`)
+- `OPENAI_BASE_URL` — if unset, defaults to the **`REPLAYT_PROVIDER`** preset base URL, else `https://api.openai.com/v1`
+- `REPLAYT_MODEL` — if unset, defaults to the **`REPLAYT_PROVIDER`** preset model, else `gpt-4o-mini`
+- `REPLAYT_PROVIDER` — optional preset name: `openai` (default behavior), `ollama`, `groq`, `together`, `openrouter`, `anthropic` (native Anthropic hosts often need an OpenAI-compatible gateway—see [`src/examples/README.md`](src/examples/README.md))
+
+**Python defaults** — pick a preset without memorizing URLs:
+
+```python
+import os
+
+from replayt.llm import LLMSettings
+
+LLMSettings.for_provider("ollama")  # local Ollama OpenAI-compat
+LLMSettings.for_provider("groq", api_key=os.environ["GROQ_API_KEY"])
+```
 
 **`Runner` in Python** — pass `llm_settings` for a non-default base URL, timeout, or headers without changing global env:
 
@@ -278,6 +299,24 @@ runner = Runner(
 **Per-call** — tighten one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., timeout_seconds=..., max_tokens=..., extra_headers={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events.
 
 For timeouts, retries, or betas exposed only through the official `openai` SDK, keep replayt’s graph and approvals as-is and call the SDK **inside a single step** (see **Pattern: OpenAI Python SDK inside a step** in [`src/examples/README.md`](src/examples/README.md)).
+
+---
+
+## Recipe: replayt in CI
+
+Use **`--output json`** and shell on **exit status** (0 = completed, 1 = failed, 2 = paused / needs approval):
+
+```bash
+set -euo pipefail
+export OPENAI_API_KEY="${OPENAI_API_KEY:?}"
+OUT="$(replayt run mypkg.workflow:wf \
+  --inputs-json "{\"id\":\"${GITHUB_RUN_ID}\"}" \
+  --output json)"
+echo "$OUT"
+echo "$OUT" | jq -e '.status == "completed"' >/dev/null
+```
+
+For **no API key** in CI, tests should use **`MockLLMClient`** / **`run_with_mock`** (`from replayt.testing import MockLLMClient, run_with_mock`) or mock `httpx`; keep smoke workflows that hit a real provider optional.
 
 ---
 
@@ -443,23 +482,29 @@ See [`src/examples/README.md`](src/examples/README.md) for runnable commands.
 
 ## CLI reference
 
+### `replayt init [--path DIR] [--force]`
+Write `workflow.py` and `.env.example`. Refuses to overwrite unless `--force`.
+
 ### `replayt run TARGET`
-Run a workflow from a module reference, Python file, or YAML file.
+Run a workflow from a module reference, Python file, or YAML file. Flags: `--output text|json`, `--log-mode …`, `--resume`, etc. **Exit codes:** `0` completed, `1` failed, `2` paused.
 
 ### `replayt inspect RUN_ID`
-Show a summary and event list for a run.
+Show a summary and event list for a run. `--output json` (or `--json`) prints `{"summary": …, "events": …}`.
 
 ### `replayt replay RUN_ID`
-Show the recorded execution timeline without calling any model APIs.
+Show the recorded execution timeline without calling any model APIs. `--format html` emits a self-contained HTML page (Tailwind CDN); `--out PATH` writes to a file.
 
 ### `replayt resume TARGET RUN_ID --approval ID`
-Resolve an approval gate and continue a paused run.
+Resolve an approval gate and continue a paused run. Same exit codes as `run`.
 
 ### `replayt graph TARGET`
 Print a Mermaid graph of the workflow.
 
 ### `replayt runs`
 List recent local runs from the JSONL log directory.
+
+### `replayt stats [--days N] [--output text|json]`
+Summarize local logs: status counts, average `llm_response` latency, top failure states, event time range.
 
 ### `replayt doctor`
 Check your local install, environment variables, optional YAML support, and default provider connectivity.

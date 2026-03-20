@@ -69,7 +69,7 @@ def done(ctx):
 
     runner = CliRunner()
     run = runner.invoke(app, ["run", "approval_flow:wf", "--log-dir", str(tmp_path)])
-    assert run.exit_code == 0
+    assert run.exit_code == 2  # paused (approval pending)
     assert "status=paused" in run.stdout
     run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
 
@@ -124,6 +124,83 @@ steps:
     result = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
     assert result.exit_code == 0
     assert "workflow=yaml-mini@3" in result.stdout
+
+
+def test_cli_run_json_output_and_pause_exit(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "json_out_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("json_out")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    ctx.set("x", 1)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(workflow_path),
+            "--log-dir",
+            str(tmp_path),
+            "--output",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    assert '"status": "completed"' in result.stdout
+    assert '"run_id"' in result.stdout
+
+
+def test_cli_init_scaffold(tmp_path: Path) -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["init", "--path", str(tmp_path)])
+    assert r.exit_code == 0
+    assert (tmp_path / "workflow.py").is_file()
+    assert (tmp_path / ".env.example").is_file()
+    r2 = runner.invoke(app, ["init", "--path", str(tmp_path)])
+    assert r2.exit_code == 1
+    r3 = runner.invoke(app, ["init", "--path", str(tmp_path), "--force"])
+    assert r3.exit_code == 0
+
+
+def test_cli_stats_and_replay_html(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "stats_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("stats_mini")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    ctx.set("ok", True)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    run = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+    assert run.exit_code == 0
+    stats = runner.invoke(app, ["stats", "--log-dir", str(tmp_path), "--output", "json"])
+    assert stats.exit_code == 0
+    assert '"runs_included"' in stats.stdout
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    html_out = runner.invoke(
+        app,
+        ["replay", run_id, "--log-dir", str(tmp_path), "--format", "html"],
+    )
+    assert html_out.exit_code == 0
+    assert "tailwindcss.com" in html_out.stdout
+    assert run_id in html_out.stdout
 
 
 def test_cli_runs_and_doctor(tmp_path: Path) -> None:

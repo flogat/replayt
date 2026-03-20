@@ -6,7 +6,7 @@ import re
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, ClassVar, TypeVar
 
 import httpx
 from pydantic import BaseModel
@@ -33,12 +33,52 @@ class LLMSettings:
     max_tokens: int | None = None
     extra_headers: dict[str, str] = field(default_factory=dict)
 
+    _provider_presets: ClassVar[dict[str, tuple[str, str]]] = {
+        "openai": ("https://api.openai.com/v1", "gpt-4o-mini"),
+        "ollama": ("http://127.0.0.1:11434/v1", "llama3.2"),
+        "groq": ("https://api.groq.com/openai/v1", "llama-3.1-8b-instant"),
+        "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.1-8B-Instruct-Turbo"),
+        "openrouter": ("https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
+        # Native Anthropic HTTP API is not OpenAI-compatible; use a gateway or SDK-in-step (see examples README).
+        "anthropic": (
+            "https://api.anthropic.com/v1",
+            "claude-3-5-sonnet-20241022",
+        ),
+    }
+
+    @classmethod
+    def for_provider(cls, name: str, *, api_key: str | None = None, model: str | None = None) -> LLMSettings:
+        """Build settings from a named OpenAI-*compatible* preset (URLs only; some vendors need a compat proxy).
+
+        Presets: ``openai``, ``ollama``, ``groq``, ``together``, ``openrouter``, ``anthropic`` (set
+        ``OPENAI_BASE_URL`` to your Anthropic OpenAI-compat gateway if the default host does not speak
+        ``/chat/completions``).
+        """
+
+        key = name.strip().lower()
+        if key not in cls._provider_presets:
+            allowed = ", ".join(sorted(cls._provider_presets.keys()))
+            raise ValueError(f"Unknown provider {name!r}; expected one of: {allowed}")
+        base_url, default_model = cls._provider_presets[key]
+        return cls(
+            api_key=api_key,
+            base_url=base_url,
+            model=model or default_model,
+        )
+
     @classmethod
     def from_env(cls) -> LLMSettings:
+        provider = os.environ.get("REPLAYT_PROVIDER", "").strip().lower()
+        preset_base = "https://api.openai.com/v1"
+        preset_model = "gpt-4o-mini"
+        if provider:
+            preset = cls.for_provider(provider)
+            preset_base = preset.base_url
+            preset_model = preset.model
         return cls(
             api_key=os.environ.get("OPENAI_API_KEY"),
-            base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
-            model=os.environ.get("REPLAYT_MODEL", "gpt-4o-mini"),
+            base_url=os.environ.get("OPENAI_BASE_URL", preset_base),
+            model=os.environ.get("REPLAYT_MODEL", preset_model),
         )
 
 
