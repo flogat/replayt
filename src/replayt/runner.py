@@ -163,6 +163,7 @@ class Runner:
                 "run_started",
                 {
                     "workflow_name": self.workflow.name,
+                    "workflow_version": self.workflow.version,
                     "initial_state": self.workflow.initial_state,
                     "inputs": inputs or {},
                 },
@@ -187,6 +188,11 @@ class Runner:
                 for attempt in range(1, policy.max_attempts + 1):
                     try:
                         next_state = handler(ctx)
+                        if not self.workflow.allows_transition(state, next_state):
+                            allowed = [dst for src, dst in self.workflow.edges() if src == state]
+                            raise RuntimeError(
+                                f"Step {state!r} returned undeclared transition {next_state!r}; allowed={allowed}"
+                            )
                         last_err = None
                         break
                     except ApprovalPending:
@@ -200,6 +206,7 @@ class Runner:
                         )
                         return RunResult(self.run_id, "paused", final_state=state)
                     except Exception as e:  # noqa: BLE001
+                        next_state = None
                         last_err = e
                         if attempt >= policy.max_attempts:
                             break

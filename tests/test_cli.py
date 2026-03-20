@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from typer.testing import CliRunner
 
 from replayt.cli.main import app
@@ -34,6 +35,7 @@ def test_cli_run_inspect_and_replay(tmp_path: Path) -> None:
     inspect = runner.invoke(app, ["inspect", run_id, "--log-dir", str(tmp_path)])
     assert inspect.exit_code == 0
     assert "run_completed" in inspect.stdout
+    assert "workflow=github_issue_triage@1" in inspect.stdout
 
     replay = runner.invoke(app, ["replay", run_id, "--log-dir", str(tmp_path)])
     assert replay.exit_code == 0
@@ -77,3 +79,72 @@ def done(ctx):
     )
     assert resume.exit_code == 0
     assert "status=completed" in resume.stdout
+
+
+def test_cli_supports_python_file_targets(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "mini_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("mini")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    ctx.set("ok", True)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "workflow=mini@1" in result.stdout
+
+
+def test_cli_supports_yaml_file_targets(tmp_path: Path) -> None:
+    pytest.importorskip("yaml")
+    workflow_path = tmp_path / "mini_flow.yaml"
+    workflow_path.write_text(
+        """
+name: yaml-mini
+version: 3
+initial: start
+steps:
+  start:
+    set:
+      ok: true
+""".strip(),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+    assert result.exit_code == 0
+    assert "workflow=yaml-mini@3" in result.stdout
+
+
+def test_cli_runs_and_doctor(tmp_path: Path) -> None:
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            "examples.issue_triage:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"issue":{"title":"Bug report","body":"This body is definitely long enough to pass validation."}}',
+        ],
+    )
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    runs = runner.invoke(app, ["runs", "--log-dir", str(tmp_path)])
+    assert runs.exit_code == 0
+    assert run_id in runs.stdout
+
+    doctor = runner.invoke(app, ["doctor"])
+    assert doctor.exit_code == 0
+    assert "python" in doctor.stdout
