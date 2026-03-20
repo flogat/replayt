@@ -14,10 +14,14 @@ class ApprovalPending(ReplaytError):
         *,
         summary: str,
         details: dict | None = None,
+        on_approve: str | None = None,
+        on_reject: str | None = None,
     ) -> None:
         self.approval_id = approval_id
         self.summary = summary
         self.details = details or {}
+        self.on_approve = on_approve
+        self.on_reject = on_reject
         super().__init__(summary)
 
 
