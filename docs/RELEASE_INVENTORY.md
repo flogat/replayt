@@ -1,12 +1,25 @@
-# Release inventory (since `v0.2.0`)
+# Release inventory (since `v0.4.0`)
 
-Baseline tag: **`v0.2.0`** → commit `6a06bc9` (“bump version to 0.2.0”).  
-Everything below is on the first-parent line from that tag to `HEAD` (as of the last inventory refresh). Use `git log v0.2.0..HEAD --reverse` to reproduce the sequence.
+Baseline tag: **`v0.4.0`** (this release). Use `git log v0.4.0..HEAD --reverse` to list commits after the tag.
 
-## Commit ledger
+## Commit ledger (next release)
 
-| Commit   | Summary | Primary themes |
-| -------- | ------- | -------------- |
+| Commit | Summary | Primary themes |
+| ------ | ------- | -------------- |
+| _(none yet)_ | | |
+
+## Release 0.4.0 delta (`f4a676a` … `3082122`)
+
+| Commit | Summary | Primary themes |
+| ------ | ------- | -------------- |
+| `3082122` | feat!: OpenRouter LLM defaults, persistence/CLI hardening, docs rollup | **Breaking:** unset provider → OpenRouter + `anthropic/claude-sonnet-4.6`; doctor, tests, docs, demos, examples |
+
+## Historical ledger (`v0.2.0` … `f4a676a`)
+
+Commits on the first-parent line from **`v0.2.0`** (`6a06bc9`) through **`f4a676a`** (0.3.0 release line). Reproduce with `git log v0.2.0..f4a676a --reverse`.
+
+| Commit | Summary | Primary themes |
+| ------ | ------- | -------------- |
 | `8ceda2c` | Harden security, fix bugs, improve docs for 0.2.0 | Security (XSS, safe YAML format), LLM client pooling + retries, MultiStore mirrors, templates, CHANGELOG / CONTRIBUTING |
 | `c415ea6` | Critical bugs, resource leak, robustness (code review) | CLI tool events (`name` / `arguments`), YAML scaffold `next`, Runner + httpx lifecycle, snapshot deep copy, `diff --sqlite`, MultiStore.append, tests |
 | `cf3879f` | Remove AI-slop patterns from README, DEMO, examples | Documentation tone |
@@ -21,20 +34,20 @@ Everything below is on the first-parent line from that tag to `HEAD` (as of the 
 | `7f31743` | Export bundles, report-diff, run metadata, log dir env / subdir | `export-run` tarball + schema, report-diff HTML, `REPLAYT_LOG_DIR`, `--log-subdir`, `--metadata-json`, run-meta filters, state validation, tutorial LangGraph note |
 | `f4a676a` | Split Typer app into modules, LLM coercion, CI artifacts | `cli/commands/*`, `llm_coercion`, `ci_artifacts`, `validation`, stores/targets/run_support, approval id string storage, expanded tests + docs |
 
-## Thematic rollup
+## Thematic rollup (0.3.0 release line)
 
-1. **Breaking:** Tutorial package **`examples` → `replayt_examples`**; CLI targets and docs must use the new module path (`fb8f94c`).
-2. **CLI surface:** Modular command layout (`f4a676a`); `validate` / `run --dry-check` JSON; `try`, `ci`, `seal`, export/report-diff, doctor, init, bundle flows (`59d5f38`, `7f31743`, `f4a676a`); log directory and metadata ergonomics (`7f31743`).
-3. **Runner & workflow:** Hooks, approval semantics, experiment metadata, YAML graph inference, safer context snapshots (`59d5f38`, `0066209`, `a93f07a`, `c415ea6`).
-4. **Persistence:** SQLite WAL and lifecycle, JSONL locking and tail recovery, MultiStore strictness and error handling (`0066209`, `a93f07a`, `c415ea6`, plus follow-up items recorded in the changelog **Unreleased** / **0.3.0** bullets).
-5. **LLM:** Coercion helpers, streaming and size limits, schema parsing guards, retries and env validation (across `8ceda2c`, `0066209`, `a93f07a`, `f4a676a` and changelog-documented refinements).
-6. **CI & repo hygiene:** Changelog gate when protected paths change (`59d5f38`); tutorial import tests; artifact helpers (`f4a676a`).
-7. **Documentation & narrative:** Large doc set split (INSTALL, CLI, CONFIG, COMPARISON, PATTERNS, SCOPE, QUICKSTART, PRODUCTION, RECIPES), README refocus, four animated demos + fixes (`3b9d371`, `a93f07a`, `fb8f94c`, SVG commits).
+1. **Breaking:** Tutorial package **`examples` → `replayt_examples`** (`fb8f94c`).
+2. **CLI surface:** Modular commands (`f4a676a`); validate / dry-check, try, ci, seal, export, report-diff, doctor, init (`59d5f38`, `7f31743`, `f4a676a`).
+3. **Runner & workflow:** Hooks, approvals, experiment metadata, YAML graph inference (`59d5f38`, `0066209`, `a93f07a`, `c415ea6`).
+4. **Persistence:** SQLite WAL, JSONL locking, MultiStore (`0066209`, `a93f07a`, `c415ea6` and follow-ups in **CHANGELOG** **0.3.0**).
+5. **LLM:** Coercion, streaming, size limits, retries (`8ceda2c`, `0066209`, `a93f07a`, `f4a676a`).
+6. **CI & docs:** Changelog gate (`59d5f38`); INSTALL / CLI / CONFIG / COMPARISON / demos (`3b9d371`, `a93f07a`, `fb8f94c`, SVG commits).
 
 ## How this relates to `CHANGELOG.md`
 
-- **`## 0.2.0`** in the changelog corresponds to the tagged release line; **`8ceda2c`** landed *after* tag `v0.2.0` but documents the same “0.2.0 hardening” themes (release notes often trail the tag by one commit on active branches).
-- **`## 0.3.0`** aggregates user-visible outcomes of `fb8f94c` … `f4a676a` (and tightly related doc/fix commits before the breaking rename where they shipped together).
-- **`## Unreleased`** should hold only changes **after** the last changelog “release” edit that are not yet tied to a version bump.
+- **`## 0.4.0`** matches git tag **`v0.4.0`** and the **0.4.0 delta** table above.
+- **`## 0.3.0`** is the user-facing rollup for the **historical ledger** through **`f4a676a`**.
+- **`## 0.2.0`** matches tag **`v0.2.0`**; **`8ceda2c`** is the first commit after that tag on `main` but documents the same hardening themes as the 0.2.0 notes.
+- **`## Unreleased`** is for work **after** **`v0.4.0`** not yet versioned.
 
-Refresh this file when you cut a new tag (e.g. `v0.3.0`) by changing the baseline in the title and running `git log <new-tag>..HEAD`.
+Refresh the **Commit ledger (next release)** when you ship again: set a new baseline tag in the title and run `git log <new-tag>..HEAD --reverse`.

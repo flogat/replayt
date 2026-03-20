@@ -2,13 +2,14 @@
 
 ## Unreleased
 
-- **LLM defaults (breaking):** preset and documented default model is **`anthropic/claude-sonnet-4.6`** (OpenRouter slug) instead of **`gpt-4o-mini`** — `LLMSettings` fields, `for_provider("openai" | "openrouter")`, `.env.example`, `replayt doctor` copy when provider is unset, docs (`RECIPES`, `EXAMPLES_PATTERNS`, `CONFIG` example), `replayt_examples` e10, `docs/demo.svg`, and bundled sample JSONL updated accordingly; **`openrouter`** preset uses **`anthropic/claude-sonnet-4.6`**.
-- **Default API host (breaking):** when **`REPLAYT_PROVIDER`** is unset, **`LLMSettings` / `from_env`** default to **OpenRouter** (`https://openrouter.ai/api/v1`) and the OpenRouter model above, not **`https://api.openai.com/v1`**. Use **`REPLAYT_PROVIDER=openai`** (or set **`OPENAI_BASE_URL`**) to target OpenAI’s host again. **`replayt doctor`** reports unset provider as **`(unset, OpenRouter preset)`**; **`test_from_env_default_uses_openrouter`** covers the default.
-- **Docs & changelog:** expanded **`CHANGELOG.md`** **0.3.0** rollup (themes moved out of a thin Unreleased); new **[`docs/RELEASE_INVENTORY.md`](docs/RELEASE_INVENTORY.md)** commit ledger; README / INSTALL / CLI / CONFIG / COMPARISON / patterns / scope and related tutorial copy updates.
+## 0.4.0 — 2026-03-21
+
+- **LLM defaults (breaking):** With **`REPLAYT_PROVIDER`** unset, **`LLMSettings` / `from_env`** target **OpenRouter** at `https://openrouter.ai/api/v1` with model **`anthropic/claude-sonnet-4.6`** (OpenRouter slug), not OpenAI’s host or **`gpt-4o-mini`**. Set **`REPLAYT_PROVIDER=openai`** and/or **`OPENAI_BASE_URL`** to use OpenAI. **`openrouter`** preset uses the same default model. **`replayt doctor`** shows **`(unset, OpenRouter preset)`** when provider is unset; **`test_from_env_default_uses_openrouter`** locks in the default.
+- **Docs and examples:** `LLMSettings` / **`for_provider`**, `.env.example`, RECIPES / EXAMPLES_PATTERNS / CONFIG examples, **`replayt_examples` e10**, **`docs/demo.svg`**, bundled sample JSONL, README / INSTALL / CLI / CONFIG / COMPARISON / SCOPE / tutorials. **[`docs/RELEASE_INVENTORY.md`](docs/RELEASE_INVENTORY.md)** is rebased on **`v0.4.0`** with the **0.3.0** line archived as a historical ledger.
 
 ## 0.3.0 — 2026-03-20
 
-User-facing themes below map to commits since git tag **`v0.2.0`**; see [`docs/RELEASE_INVENTORY.md`](docs/RELEASE_INVENTORY.md) for a per-commit ledger.
+User-facing themes below map to commits since git tag **`v0.2.0`**; see [`docs/RELEASE_INVENTORY.md`](docs/RELEASE_INVENTORY.md) for the archived commit ledger covering **`v0.2.0` … `f4a676a`**.
 
 - **Breaking:** the tutorial package on PyPI is now **`replayt_examples`** (was `examples`). Update targets: `replayt run replayt_examples.e01_hello_world:wf` (not `examples.*`).
 - **CLI layout:** Typer app split into **`replayt.cli.commands`** (`run`, `inspect`, `export`, `doctor`) plus **`config`**, **`validation`**, **`stores`**, **`targets`**, **`run_support`**, **`ci_artifacts`**, **`display`**, **`constants`**; slim **`main`** registers commands and re-exports.

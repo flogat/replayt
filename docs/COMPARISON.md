@@ -1,47 +1,47 @@
 # How replayt compares (mental migration guide)
 
-replayt is a **small FSM runner + local JSONL audit log + CLI**. Use this page to map from tools you already know; it is a migration guide, not a feature parity matrix.
+replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this page to map tools you already know; it is a migration guide, not a feature parity matrix.
 
 ## Plain Python (`if` / `else` + prints)
 
-**You already have:** full control, zero dependencies.
+**You already have:** Full control and no workflow dependency.
 
-**replayt adds:** a single event schema (`run_started`, `state_entered`, `llm_request`, …), `replayt inspect` / `replay` / `report`, first-class approvals (exit code `2`), and graph validation for CI. You still write normal Python inside `@wf.step` handlers; the graph and logging are conventional.
+**replayt adds:** One event schema (`run_started`, `state_entered`, `llm_request`, …), `replayt inspect` / `replay` / `report`, first-class approvals (exit code `2`), and graph validation for CI. Handlers stay ordinary Python inside `@wf.step`; the graph and logging stay explicit.
 
-**When to stay on plain Python:** one-off scripts, no need for shared audit format or replay UI.
+**Stay on plain Python for:** One-off scripts where you do not need a shared audit format or replay tooling.
 
 ## “Agent” or planner frameworks (e.g. LangGraph-style loops)
 
-**Agent-style stacks** emphasize flexible graphs, tool routing, and demos that feel autonomous.
+**Those stacks** stress flexible graphs, tool routing, and demos that feel autonomous.
 
-With **replayt**, transitions live in code you can read, planners do not rewrite edges, and **`replayt replay`** walks a **recorded** timeline without calling the provider again. If you must use another framework, call it **inside one step**, validate to Pydantic, then `return "next_state"` explicitly—see **Pattern: framework in a sandbox step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+**replayt** keeps transitions in code you can read, avoids planners rewriting edges, and **`replayt replay`** follows a **recorded** timeline without calling the provider again. If you use another framework, call it **inside one step**, validate with Pydantic, then `return "next_state"` — see **Pattern: framework in a sandbox step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
-**When to prefer the other tool:** you want the framework to own exploration, dynamic graph mutation, or long-lived autonomous sessions.
+**Prefer the other tool when:** You want the framework to own exploration, dynamic graph mutation, or long-lived autonomous sessions.
 
 ## Temporal / Cadence / distributed workflow engines
 
 **Temporal and similar engines** ship durable timers, cluster-scale orchestration, and activity retries across process boundaries.
 
-**replayt** runs **one finite run per process** (or one `Runner.run` per queue message), keeps logs local, and supports human approval pause/resume. Cross-job retries, concurrency, and backpressure belong in **your** scheduler (Celery, Airflow, K8s Jobs, SQS)—see **Pattern: queue worker** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+**replayt** runs **one finite run per process** (or one `Runner.run` per queue message), keeps logs local, and supports human approval pause/resume. Cross-job retries, concurrency, and backpressure belong in **your** scheduler (Celery, Airflow, K8s Jobs, SQS) — see **Pattern: queue worker** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
-**When to use Temporal:** you need distributed durability and workflow code that survives worker crashes as a first-class product feature.
+**Use Temporal when:** You need distributed durability and workflow code that survives worker crashes as a first-class product feature.
 
 ## Hosted LLM “platforms” and observability suites
 
-**Hosted stacks** usually mean accounts, dashboards, and traces on someone else’s servers.
+**Hosted stacks** usually mean accounts, dashboards, and traces on someone else’s infrastructure.
 
-**replayt** keeps run history in files you own (JSONL, optional SQLite); core has no cloud requirement. You can forward events yourself—see **Pattern: custom EventStore for external sinks** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+**replayt** stores run history in files you own (JSONL, optional SQLite); core has no cloud requirement. The client is **OpenAI-compatible**; provider and base URL come from environment variables (defaults favor OpenRouter when unset — see [`CONFIG.md`](CONFIG.md)). To feed a vendor pipeline, forward events yourself — **Pattern: custom EventStore for external sinks** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
-**When to use hosted observability:** org mandates a vendor for all telemetry; replayt still works as the engine if you treat JSONL as source of truth.
+**Use hosted observability when:** Policy mandates a vendor for telemetry; replayt can still be the engine if JSONL remains the source of truth.
 
 ## Quick reference
 
 | If you need… | replayt | Often paired with… |
-|--------------|---------|-------------------|
-| Explicit states in repo | Yes | Your code review / CI (`replayt validate`) |
+| --- | --- | --- |
+| Explicit states in repo | Yes | Code review / CI (`replayt validate`) |
 | “What happened?” for one run | Yes | `inspect`, `replay`, `report` |
 | Distributed saga across months | No | Temporal, queues, or separate services |
-| Autonomous multi-hour agent | No | Different product shape |
+| Autonomous multi-hour agent | No | A different product shape |
 | One-run audit trail on disk | Yes | `JSONLStore`, optional SQLite |
 
-For scope boundaries and “we won’t add X to core,” see [`SCOPE.md`](SCOPE.md).
+For scope and “we won’t add X to core,” see [`SCOPE.md`](SCOPE.md).
