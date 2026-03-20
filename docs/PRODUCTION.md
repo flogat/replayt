@@ -50,6 +50,7 @@ Preflight with `replayt doctor` in an init container or a separate CI job if you
 - Default log directory is under `.replayt/runs/` (override with `--log-dir` or config—see [`CONFIG.md`](CONFIG.md)).
 - Choose **`LogMode`** explicitly in Python (`LogMode.redacted`, `structured_only`, or full) or via CLI `--log-mode`. **Redacted** is a good default when prompts or payloads may contain PII; see [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md) for what each event records.
 - Optional **SQLite** mirror: same events; treat the files as **data you own** (backup, encryption at rest, retention).
+- **Disk permissions:** restrict who can read or write the log directory (same trust model as credential files). For shareable evidence packets, use `replayt export-run` / `replayt seal` and store artifacts on WORM media or signed archives if policy requires it—see README *Security and trust boundaries*.
 
 ## Human approvals
 

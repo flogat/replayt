@@ -91,7 +91,7 @@ class RunResult:
 class RunContext:
     """Mutable per-run bag + LLM/tools facades."""
 
-    def __init__(self, runner: Runner) -> None:
+    def __init__(self, runner: Runner, *, llm_defaults: dict[str, Any] | None = None) -> None:
         self._runner = runner
         self.run_id = runner.run_id
         self.workflow_name = runner.workflow.name
@@ -101,6 +101,7 @@ class RunContext:
             client=runner._llm_client,
             log_mode=runner.log_mode,
             state_getter=lambda: runner._current_state,
+            defaults=llm_defaults,
         )
         self.tools = ToolRegistry(emit=runner._emit_payload, state_getter=lambda: runner._current_state)
 
@@ -273,6 +274,7 @@ class Runner:
         resume: bool = False,
         tags: dict[str, str] | None = None,
         run_metadata: dict[str, Any] | None = None,
+        experiment: dict[str, Any] | None = None,
     ) -> RunResult:
         if not self.workflow.initial_state:
             raise RuntimeError("Workflow.initial_state is not set (call set_initial)")
@@ -308,11 +310,16 @@ class Runner:
                 "inputs": inputs or {},
             }
             if self.workflow.meta:
-                started_payload["workflow_meta"] = self.workflow.meta
+                meta_out = dict(self.workflow.meta)
+                meta_out.pop("llm_defaults", None)
+                if meta_out:
+                    started_payload["workflow_meta"] = meta_out
             if tags:
                 started_payload["tags"] = tags
             if run_metadata:
                 started_payload["run_metadata"] = run_metadata
+            if experiment:
+                started_payload["experiment"] = dict(experiment)
             self._emit_payload("run_started", started_payload)
         elif paused_from_state is not None and start_state != paused_from_state:
             self._emit_payload(
@@ -327,7 +334,19 @@ class Runner:
                 {"from_state": paused_from_state, "to_state": start_state, "reason": "approval_resolved"},
             )
 
-        ctx = RunContext(self)
+        merged_llm: dict[str, Any] = {}
+        if self.workflow.llm_defaults:
+            merged_llm.update(self.workflow.llm_defaults)
+        meta_ld = (self.workflow.meta or {}).get("llm_defaults")
+        if isinstance(meta_ld, dict):
+            merged_llm.update(meta_ld)
+        if experiment:
+            prev_exp = merged_llm.get("experiment")
+            if isinstance(prev_exp, dict):
+                merged_llm["experiment"] = {**prev_exp, **dict(experiment)}
+            else:
+                merged_llm["experiment"] = dict(experiment)
+        ctx = RunContext(self, llm_defaults=merged_llm or None)
         ctx.data.update(ctx_data)
         if inputs is not None and not resume:
             ctx.data.update(inputs)
@@ -468,7 +487,16 @@ class Runner:
             return RunResult(self.run_id, "failed", final_state=self._current_state, error=str(e))
 
 
-def resolve_approval_on_store(store: EventStore, run_id: str, approval_id: str, *, approved: bool) -> None:
+def resolve_approval_on_store(
+    store: EventStore,
+    run_id: str,
+    approval_id: str,
+    *,
+    approved: bool,
+    resolver: str = "cli",
+    reason: str | None = None,
+    actor: dict[str, Any] | None = None,
+) -> None:
     """Append an `approval_resolved` event; resume execution via `Runner.run(..., resume=True)`."""
     events = store.load_events(run_id)
     if not events:
@@ -488,10 +516,20 @@ def resolve_approval_on_store(store: EventStore, run_id: str, approval_id: str, 
     if pending_request is None:
         raise RuntimeError(f"No pending approval {approval_id!r} found for run_id={run_id!r}")
 
+    payload: dict[str, Any] = {
+        "approval_id": str(approval_id),
+        "approved": approved,
+        "resolver": resolver,
+    }
+    if reason is not None:
+        payload["reason"] = reason
+    if actor:
+        payload["actor"] = dict(actor)
+
     event: dict[str, Any] = {
         "ts": _utcnow_iso(),
         "run_id": run_id,
         "type": "approval_resolved",
-        "payload": {"approval_id": approval_id, "approved": approved, "resolver": "cli"},
+        "payload": payload,
     }
     store.append_event(run_id, ts=event["ts"], typ=event["type"], payload=event["payload"])

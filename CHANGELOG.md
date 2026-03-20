@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Add `replayt seal` (SHA-256 manifest for JSONL run logs), optional `Runner(..., before_step=..., after_step=...)` hooks, PR CI gate requiring `CHANGELOG.md` when protected paths change, and a test that tutorial `MODULE:wf` targets from the examples README stay importable.
+- **Runner / workflow / YAML:** `replayt seal` (SHA-256 manifest for JSONL run logs); optional `Runner(..., before_step=..., after_step=...)` hooks; optional `Workflow(..., llm_defaults=...)` and `meta["llm_defaults"]` (merged into `LLMBridge` defaults; omitted from logged `workflow_meta`); YAML infers `note_transition` edges from `next` / `branch` / `approval` so graph validation matches Python workflows. PR CI gate requiring `CHANGELOG.md` when protected paths change; test that tutorial `MODULE:wf` targets from the examples README stay importable.
+- **CLI:** `replayt validate` (`--format json` → `replayt.validate_report.v1`) and `replayt run --dry-check` (`--output json`, same schema); **`--inputs-file`** for `run` / `ci` / `validate` (mutually exclusive with `--inputs-json`; UTF-8 with clear errors). **`--strict-graph`** on `validate` / `run` / `ci`. **`--experiment-json`** → `run_started.experiment` and LLM `effective`; **`replayt runs`** / **`stats`** filter **`--experiment key=value`**. **`replayt resume`:** `--reason`, `--actor-json`, `--resolver`, optional **`resume_hook`** / **`REPLAYT_RESUME_HOOK`**. **`replayt doctor --format json`** (`replayt.doctor_report.v1`, **`healthy`** + exit). **`replayt bundle-export`**; **`replayt init --ci github`**. **`replayt ci`:** `--junit-xml`, `--github-summary` (paths forwarded without mutating process env; **`REPLAYT_JUNIT_XML`** still works for `replayt run`). **`replayt try`** defaults offline (`--live` for real LLM). Richer stakeholder **`replayt report`** (approval details + timestamps). `replayt.cli.validation` / `replayt.cli.ci_artifacts` module split; `build_run_report_html` in `report_template`.
+- Docs: README + tutorial README expand **composition** (streaming / planner / agent-framework boundaries).
 
 ## 0.3.0 — 2026-03-20
 

@@ -6,6 +6,7 @@ from typing import Any, Literal
 
 from pydantic import create_model
 
+from replayt.llm_coercion import coerce_temperature
 from replayt.types import RetryPolicy
 from replayt.workflow import Workflow
 
@@ -46,12 +47,40 @@ def load_workflow_yaml(path: Path) -> dict[str, Any]:
     return raw
 
 
+def _infer_transitions_for_step(wf: Workflow, state_name: str, step_cfg: dict[str, Any]) -> None:
+    """Declare ``note_transition`` edges from static YAML ``next`` / ``branch`` / ``approval`` fields."""
+
+    ns = step_cfg.get("next")
+    if ns not in (None, ""):
+        wf.note_transition(state_name, str(ns))
+    branch = step_cfg.get("branch")
+    if isinstance(branch, dict):
+        cases = branch.get("cases")
+        if isinstance(cases, dict):
+            for dest in cases.values():
+                if dest not in (None, ""):
+                    wf.note_transition(state_name, str(dest))
+        default_next = branch.get("default")
+        if default_next not in (None, ""):
+            wf.note_transition(state_name, str(default_next))
+    approval = step_cfg.get("approval")
+    if isinstance(approval, dict):
+        on_approve = approval.get("on_approve", step_cfg.get("next", ""))
+        on_reject = approval.get("on_reject", "")
+        if on_approve not in (None, ""):
+            wf.note_transition(state_name, str(on_approve))
+        if on_reject not in (None, ""):
+            wf.note_transition(state_name, str(on_reject))
+
+
 def workflow_from_spec(spec: dict[str, Any]) -> Workflow:
     """Build a runnable workflow from a small declarative YAML spec."""
 
     name = str(spec.get("name", "workflow"))
     version = str(spec.get("version", "1"))
-    wf = Workflow(name, version=version)
+    meta = spec.get("meta")
+    wf_meta = dict(meta) if isinstance(meta, dict) else None
+    wf = Workflow(name, version=version, meta=wf_meta)
     wf.set_initial(str(spec["initial"]))
 
     edges = spec.get("edges") or []
@@ -105,7 +134,7 @@ def workflow_from_spec(spec: dict[str, Any]) -> Workflow:
                     messages.append({"role": "user", "content": prompt})
 
                     model_override = llm_cfg.get("model")
-                    temperature = float(llm_cfg.get("temperature", 0.0))
+                    temperature = coerce_temperature(llm_cfg.get("temperature"), default=0.0)
                     llm_kwargs: dict[str, Any] = {"messages": messages, "temperature": temperature}
                     if model_override:
                         llm_kwargs["model"] = str(model_override)
@@ -167,5 +196,6 @@ def workflow_from_spec(spec: dict[str, Any]) -> Workflow:
             return handler
 
         wf.step(str(state_name), retries=retries)(make_handler(str(state_name), cfg))
+        _infer_transitions_for_step(wf, str(state_name), cfg)
 
     return wf

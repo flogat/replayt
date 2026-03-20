@@ -53,6 +53,14 @@ def test_jsonl_store_raises_for_corruption(tmp_path: Path) -> None:
         store.load_events("bad")
 
 
+def test_jsonl_store_raises_for_truncated_line(tmp_path: Path) -> None:
+    path = tmp_path / "trunc.jsonl"
+    path.write_text('{"seq": 1, "run_id": "trunc", "type": "run_started", "ts": "t", "payload":', encoding="utf-8")
+    store = JSONLStore(tmp_path)
+    with pytest.raises(RuntimeError, match="Corrupted JSONL"):
+        store.load_events("trunc")
+
+
 def test_jsonl_delete_run(tmp_path: Path) -> None:
     store = JSONLStore(tmp_path)
     store.append_event("r1", ts="t1", typ="run_started", payload={})

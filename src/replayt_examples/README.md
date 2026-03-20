@@ -79,6 +79,10 @@ replayt seal <run_id>
 
 For **in-process** trace IDs or policy logging, use **`Runner(..., before_step=..., after_step=...)`** in Python (see **Pattern: webhook / lifecycle callbacks** for outer-wrapper alternatives).
 
+### Framework-style agents, streaming, and planner loops (feature 10 / composition)
+
+This subsection is the **documentation-first** answer for “why isn’t streaming / LangChain / LangGraph built into the runner?” replayt keeps **explicit** states and append-only JSONL; per-token log lines and hidden planners are out of scope ([**docs/SCOPE.md**](../../docs/SCOPE.md)). The supported shape is always: **one step** wraps the fancy SDK or graph; **one** validated exit shape drives the next state.
+
 ### LangGraph (and similar frameworks) — **composition**, not core
 
 replayt will not ship LangGraph inside the runner; that would hide control flow and fight the explicit FSM model (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). **Recommended shape:** run LangGraph **inside one `@wf.step`**, then transition replayt based on **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, or tools—not every planner tick.

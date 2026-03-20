@@ -19,6 +19,13 @@ So you get **one** config file: the nearest ancestor that defines either `.repla
 | `model` | Default model name. |
 | `timeout` | LLM HTTP timeout (seconds). |
 | `strict_mirror` | If true, SQLite mirror write failures surface; if false, mirror errors are logged and the run continues (best-effort mirror). |
+| `resume_hook` | Optional argv list for a subprocess run **before** `replayt resume` appends `approval_resolved` (policy gate). Example: `["python", "scripts/check_resume.py"]`. Override with env `REPLAYT_RESUME_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). |
+
+## `Workflow.meta` — `llm_defaults`
+
+If you set `meta={"llm_defaults": {"experiment": {"cohort": "A"}, ...}}` on `Workflow`, those keys merge into `LLMBridge` defaults (and appear under `effective` on `llm_request` events). The `llm_defaults` key is **not** copied into `workflow_meta` on `run_started` so audit metadata stays separate from workflow labels.
+
+You can also pass `Workflow(..., llm_defaults={...})` in Python; same merge rules.
 
 ## Example `pyproject.toml`
 

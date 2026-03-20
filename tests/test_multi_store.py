@@ -40,3 +40,6 @@ def test_multi_store_lenient_mirror_logs_and_continues(tmp_path: Path) -> None:
     ev = multi.append_event("run1", ts="t", typ="run_started", payload={})
     assert ev["seq"] == 1
     assert multi.mirror_error_count == 1
+    loaded = primary.load_events("run1")
+    assert len(loaded) == 1
+    assert loaded[0]["type"] == "run_started"

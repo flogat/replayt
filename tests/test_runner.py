@@ -6,9 +6,70 @@ import pytest
 
 from replayt.persistence import JSONLStore
 from replayt.runner import Runner, resolve_approval_on_store
+from replayt.testing import MockLLMClient
 from replayt.types import LogMode, RetryPolicy
 from replayt.workflow import Workflow
 from replayt.yaml_workflow import workflow_from_spec
+
+
+def test_workflow_llm_defaults_merge_into_effective(tmp_path: Path) -> None:
+    wf = Workflow("ld", llm_defaults={"experiment": {"cohort": "unit"}})
+    wf.set_initial("s")
+
+    @wf.step("s")
+    def s(ctx):
+        ctx.llm.complete_text(messages=[{"role": "user", "content": "x"}], temperature=0.0)
+        return None
+
+    store = JSONLStore(tmp_path)
+    client = MockLLMClient()
+    client.enqueue("ok")
+    r = Runner(wf, store, log_mode=LogMode.redacted, llm_client=client)
+    res = r.run()
+    assert res.status == "completed"
+    ev = store.load_events(res.run_id)
+    req = next(e for e in ev if e["type"] == "llm_request")
+    assert req["payload"]["effective"]["experiment"] == {"cohort": "unit"}
+
+
+def test_llm_defaults_in_meta_omitted_from_workflow_meta(tmp_path: Path) -> None:
+    wf = Workflow("m", meta={"llm_defaults": {"experiment": {"x": 1}}, "visible": True})
+    wf.set_initial("a")
+
+    @wf.step("a")
+    def a(ctx) -> None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    r = Runner(wf, store, log_mode=LogMode.redacted)
+    r.run()
+    ev = store.load_events(r.run_id)
+    started = next(e for e in ev if e["type"] == "run_started")
+    wm = started["payload"].get("workflow_meta") or {}
+    assert "llm_defaults" not in wm
+    assert wm.get("visible") is True
+
+
+def test_runner_run_experiment_merged_into_effective(tmp_path: Path) -> None:
+    wf = Workflow("exp_wf")
+    wf.set_initial("s")
+
+    @wf.step("s")
+    def s(ctx):
+        ctx.llm.complete_text(messages=[{"role": "user", "content": "x"}], temperature=0.0)
+        return None
+
+    store = JSONLStore(tmp_path)
+    client = MockLLMClient()
+    client.enqueue("ok")
+    r = Runner(wf, store, log_mode=LogMode.redacted, llm_client=client)
+    res = r.run(experiment={"ab": "v2"})
+    assert res.status == "completed"
+    ev = store.load_events(res.run_id)
+    started = next(e for e in ev if e["type"] == "run_started")
+    assert started["payload"]["experiment"] == {"ab": "v2"}
+    req = next(e for e in ev if e["type"] == "llm_request")
+    assert req["payload"]["effective"]["experiment"] == {"ab": "v2"}
 
 
 def test_runner_run_metadata_on_run_started(tmp_path: Path) -> None:
@@ -564,3 +625,42 @@ def test_resolve_approval_accepts_string_for_numeric_logged_id(tmp_path: Path) -
     resolve_approval_on_store(store, paused.run_id, "123", approved=True)
     final = Runner(wf, store, log_mode=LogMode.redacted).run(run_id=paused.run_id, resume=True)
     assert final.status == "completed"
+
+
+def test_resolve_approval_on_store_accepts_int_id_and_stores_string_payload(tmp_path: Path) -> None:
+    wf = Workflow("numeric_id_int_resolve")
+    wf.set_initial("gate")
+
+    @wf.step("gate")
+    def gate(ctx) -> str | None:
+        ctx.request_approval("99", summary="ok?", on_approve="done")
+
+    @wf.step("done")
+    def done(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    paused = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert paused.status == "paused"
+    resolve_approval_on_store(store, paused.run_id, 99, approved=True)  # type: ignore[arg-type]
+    ev = store.load_events(paused.run_id)
+    resolved = [e for e in ev if e["type"] == "approval_resolved"][-1]
+    assert resolved["payload"]["approval_id"] == "99"
+    assert isinstance(resolved["payload"]["approval_id"], str)
+    final = Runner(wf, store, log_mode=LogMode.redacted).run(run_id=paused.run_id, resume=True)
+    assert final.status == "completed"
+
+
+def test_resolve_approval_on_store_raises_when_no_pending_match(tmp_path: Path) -> None:
+    wf = Workflow("no_pending")
+    wf.set_initial("a")
+
+    @wf.step("a")
+    def a(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    r = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert r.status == "completed"
+    with pytest.raises(RuntimeError, match="No pending approval"):
+        resolve_approval_on_store(store, r.run_id, "missing", approved=True)

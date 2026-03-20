@@ -20,6 +20,7 @@ Events are append-only, one JSON object per line. All events share:
 - `inputs` (object, optional) — may be redacted
 - `tags` (object, optional) — string key/value pairs from CLI `--tag`
 - `run_metadata` (object, optional) — JSON-serializable bag from CLI `--metadata-json` or `Runner.run(..., run_metadata={...})` (experiment ids, prompt versions, etc.); filter listings with `replayt runs --run-meta key=value` (string equality on `str(value)`).
+- `experiment` (object, optional) — JSON-serializable bag from CLI `--experiment-json` or `Runner.run(..., experiment={...})`; recorded on `run_started`, merged into `LLMBridge` defaults for the run (so each `llm_request` / `llm_response` `effective` includes it), and filterable with `replayt runs --experiment key=value` / `replayt stats --experiment key=value`.
 - `workflow_meta` (object, optional) — JSON-serializable bag from `Workflow(..., meta={...})` (e.g. package id, git SHA)
 
 ### `state_entered`
@@ -91,7 +92,9 @@ Events are append-only, one JSON object per line. All events share:
 
 - `approval_id` (string)
 - `approved` (bool)
-- `resolver` (string, optional)
+- `resolver` (string, optional) — default `cli` from `replayt resume`; set `--resolver` for bridges
+- `reason` (string, optional) — audit note from `replayt resume --reason`
+- `actor` (object, optional) — JSON object from `replayt resume --actor-json`
 
 ### `run_paused`
 

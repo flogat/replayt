@@ -38,6 +38,32 @@ def test_llm_bridge_with_settings_merges_experiment_into_effective() -> None:
     assert req["effective"]["experiment"] == {"run_id": "r1", "prompt_hash": "abc"}
 
 
+def test_llm_bridge_float_max_tokens_from_defaults_passed_to_client() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="test-key", model="base-model")
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "step_a",
+    ).with_settings(max_tokens=4096.0)
+
+    canned = {"choices": [{"message": {"content": "hello"}}], "usage": {"total_tokens": 3}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        out = bridge.complete_text(messages=[{"role": "user", "content": "hi"}])
+
+    assert out == "hello"
+    assert mock_cc.call_args.kwargs["max_tokens"] == 4096
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["max_tokens"] == 4096
+
+
 def test_llm_bridge_with_settings_merges_into_effective_and_request() -> None:
     events: list[tuple[str, dict]] = []
 

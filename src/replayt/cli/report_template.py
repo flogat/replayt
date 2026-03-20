@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import html
 import json
-from typing import Any
+from datetime import datetime
+from typing import Any, Literal
 
 REPORT_CSS = """
 :root {{
@@ -179,6 +180,8 @@ APPROVAL_ITEM = """\
   <p><span class="rp-label">Approval ID:</span> <code class="rp-code">{approval_id}</code></p>
   <p><span class="rp-label">State:</span> {state}</p>
   <p><span class="rp-label">Summary:</span> {summary}</p>
+  {details_block}
+  {timing_block}
   <p><span class="rp-label">Outcome:</span> <strong>{outcome}</strong></p>
 </div>"""
 
@@ -384,4 +387,252 @@ def build_report_diff_html(
         wb_states=html.escape(state_chain(ctx_b["states"])),
         outputs_diff_rows="\n".join(rows),
         approvals_diff=html.escape(appr),
+    )
+
+
+def _parse_iso_ts(ts: str | None) -> datetime | None:
+    if not ts:
+        return None
+    try:
+        s = str(ts)
+        if s.endswith("Z"):
+            s = s[:-1] + "+00:00"
+        return datetime.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+def build_run_report_html(
+    run_id: str,
+    events: list[dict[str, Any]],
+    *,
+    style: Literal["default", "stakeholder"] = "default",
+) -> str:
+    """Build the same self-contained HTML as ``replayt report`` (for CLI and bundle export)."""
+
+    workflow_name = ""
+    workflow_version = ""
+    status = "unknown"
+    tags: dict[str, str] = {}
+    run_metadata: dict[str, Any] = {}
+    states: list[dict[str, str]] = []
+    outputs: list[dict[str, Any]] = []
+    tool_calls: list[dict[str, Any]] = []
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    first_ts: str | None = None
+    last_ts: str | None = None
+    approval_requests: dict[str, dict[str, Any]] = {}
+    approval_last: dict[str, bool] = {}
+    approval_resolved_ts: dict[str, str] = {}
+
+    for e in events:
+        ts = e.get("ts", "")
+        if first_ts is None:
+            first_ts = ts
+        last_ts = ts
+        typ = e.get("type")
+        payload = e.get("payload") or {}
+
+        if typ == "run_started":
+            workflow_name = str(payload.get("workflow_name", ""))
+            workflow_version = str(payload.get("workflow_version", ""))
+            tags = payload.get("tags") or {}
+            run_metadata = payload.get("run_metadata") or {}
+        elif typ == "state_entered":
+            states.append({"state": str(payload.get("state", "")), "ts": ts})
+        elif typ == "structured_output":
+            outputs.append({"schema_name": payload.get("schema_name", ""), "data": payload.get("data")})
+        elif typ == "tool_call":
+            tool_calls.append({
+                "tool": payload.get("name", ""), "seq": e.get("seq", ""), "args": payload.get("arguments"),
+            })
+        elif typ == "tool_result":
+            tool_calls.append({
+                "tool": payload.get("name", "result"),
+                "seq": e.get("seq", ""),
+                "args": payload.get("result"),
+            })
+        elif typ == "llm_response":
+            usage = payload.get("usage") or {}
+            pt = usage.get("prompt_tokens")
+            ct = usage.get("completion_tokens")
+            tt = usage.get("total_tokens")
+            if isinstance(pt, int):
+                prompt_tokens += pt
+            if isinstance(ct, int):
+                completion_tokens += ct
+            if isinstance(tt, int):
+                total_tokens += tt
+        elif typ == "run_completed":
+            status = str(payload.get("status", status))
+        elif typ == "run_paused":
+            status = "paused"
+        elif typ == "run_failed":
+            status = "failed"
+        elif typ == "approval_requested":
+            aid = payload.get("approval_id")
+            if aid is not None:
+                approval_requests[str(aid)] = {
+                    "summary": payload.get("summary", ""),
+                    "state": payload.get("state", ""),
+                    "details": payload.get("details") or {},
+                    "requested_ts": ts,
+                }
+        elif typ == "approval_resolved":
+            aid = payload.get("approval_id")
+            if aid is not None:
+                approval_last[str(aid)] = bool(payload.get("approved"))
+                approval_resolved_ts[str(aid)] = ts
+
+    duration = "n/a"
+    t0 = _parse_iso_ts(first_ts)
+    t1 = _parse_iso_ts(last_ts)
+    if t0 and t1:
+        delta = t1 - t0
+        secs = delta.total_seconds()
+        if secs < 60:
+            duration = f"{secs:.1f}s"
+        else:
+            duration = f"{secs / 60:.1f}m"
+
+    status_classes = {
+        "completed": "rp-badge-ok",
+        "failed": "rp-badge-err",
+        "paused": "rp-badge-pause",
+    }
+    status_class = status_classes.get(status, "rp-badge-neutral")
+
+    tags_html = ""
+    if tags:
+        tag_strs = ", ".join(f"{html.escape(k)}={html.escape(v)}" for k, v in tags.items())
+        tags_html = f'<p><span class="rp-label">Tags:</span> {tag_strs}</p>'
+    meta_html = ""
+    if run_metadata:
+        meta_html = (
+            '<p><span class="rp-label">Run metadata:</span> '
+            f'<code class="rp-code">{html.escape(json.dumps(run_metadata, default=str)[:4000])}</code></p>'
+        )
+
+    timeline_items: list[str] = []
+    for s in states:
+        dot_class = "rp-dot-muted"
+        if s["state"] == states[-1]["state"] and status == "completed":
+            dot_class = "rp-dot-ok"
+        elif s["state"] == states[-1]["state"] and status == "failed":
+            dot_class = "rp-dot-err"
+        timeline_items.append(
+            TIMELINE_ITEM.format(state=html.escape(s["state"]), ts=html.escape(s["ts"]), dot_class=dot_class)
+        )
+    timeline_html = (
+        "\n".join(timeline_items)
+        if timeline_items
+        else '<li class="rp-tl-item"><p class="rp-muted">No states recorded</p></li>'
+    )
+
+    outputs_section = ""
+    if outputs:
+        items = []
+        for o in outputs:
+            items.append(
+                OUTPUT_ITEM.format(
+                    schema_name=html.escape(str(o["schema_name"])),
+                    data_json=html.escape(json.dumps(o["data"], indent=2, default=str)),
+                )
+            )
+        outputs_section = OUTPUTS_SECTION.format(items="\n".join(items))
+
+    tool_calls_section = ""
+    if tool_calls and style == "default":
+        items = []
+        for tc in tool_calls:
+            items.append(
+                TOOL_CALL_ITEM.format(
+                    tool=html.escape(str(tc["tool"])),
+                    seq=html.escape(str(tc["seq"])),
+                    detail_json=html.escape(json.dumps(tc.get("args"), indent=2, default=str)),
+                )
+            )
+        tool_calls_section = TOOL_CALLS_SECTION.format(items="\n".join(items))
+
+    approvals_section = ""
+    if approval_requests:
+        items_a: list[str] = []
+        for aid, meta in sorted(approval_requests.items()):
+            if aid in approval_last:
+                outcome = "Approved" if approval_last[aid] else "Rejected"
+            else:
+                outcome = "Pending (no resolution in this log)"
+            details = meta.get("details") or {}
+            if isinstance(details, dict) and details:
+                raw_d = json.dumps(details, ensure_ascii=False, default=str)
+                prev = html.escape(raw_d[:4000])
+                if len(raw_d) > 4000:
+                    prev += "…"
+                details_block = f'<p><span class="rp-label">Details:</span></p><pre class="rp-pre">{prev}</pre>'
+            else:
+                details_block = ""
+            rt = str(meta.get("requested_ts") or "")
+            vt = approval_resolved_ts.get(aid, "")
+            if rt or vt:
+                timing_block = (
+                    "<p><span class=\"rp-label\">Timeline:</span> "
+                    f"requested <code class=\"rp-code\">{html.escape(rt or '—')}</code>"
+                    " → "
+                    f"resolved <code class=\"rp-code\">{html.escape(vt or '—')}</code></p>"
+                )
+            else:
+                timing_block = ""
+            items_a.append(
+                APPROVAL_ITEM.format(
+                    approval_id=html.escape(aid),
+                    state=html.escape(str(meta.get("state", ""))),
+                    summary=html.escape(str(meta.get("summary", ""))),
+                    details_block=details_block,
+                    timing_block=timing_block,
+                    outcome=html.escape(outcome),
+                )
+            )
+        appr_block = APPROVALS_SECTION.format(items="\n".join(items_a))
+        if style == "stakeholder":
+            intro = (
+                '<p class="rp-muted">Human approval gates from the JSONL timeline '
+                "(stakeholder view; tool/token sections omitted below).</p>\n"
+            )
+            approvals_section = intro + appr_block
+        else:
+            approvals_section = appr_block
+
+    if style == "stakeholder":
+        token_section = (
+            '<section class="rp-section"><p class="rp-muted">Tool-call and token usage sections omitted. '
+            "For the full technical report, run "
+            f'<code class="rp-code">replayt report {html.escape(run_id)} --style default</code>'
+            "</p></section>"
+        )
+        report_title = "Run summary"
+    else:
+        token_section = TOKEN_USAGE_SECTION.format(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+        report_title = "Run Report"
+
+    return REPORT_HTML.format(
+        report_title=html.escape(report_title),
+        run_id=html.escape(run_id),
+        workflow_name=html.escape(workflow_name),
+        workflow_version=html.escape(workflow_version),
+        status=html.escape(status),
+        status_class=status_class,
+        duration=html.escape(duration),
+        tags_html=tags_html,
+        meta_html=meta_html,
+        approvals_section=approvals_section,
+        timeline_html=timeline_html,
+        outputs_section=outputs_section,
+        tool_calls_section=tool_calls_section,
+        token_section=token_section,
     )

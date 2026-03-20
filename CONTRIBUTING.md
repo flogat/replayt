@@ -20,7 +20,7 @@ replayt intentionally stays small. PRs that expand it into a general agent platf
 ## Versioning (semver)
 
 - **MAJOR** — breaking Python API, CLI behavior users rely on, or **documented** JSONL event payload shapes that consumers parse.
-- **MINOR** — backward-compatible additions (new optional CLI flags, new optional `Workflow` / `Runner` kwargs, new optional event fields).
+- **MINOR** — backward-compatible additions (new optional CLI flags, new optional `Workflow` / `Runner` kwargs such as `Workflow(..., llm_defaults=...)`, new optional event fields).
 - **PATCH** — bug fixes and docs that do not change runtime contracts.
 
 Tutorial imports under `replayt_examples` should keep working across **minor** releases when pinned to a compatible **major**.

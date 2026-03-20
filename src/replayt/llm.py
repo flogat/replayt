@@ -10,6 +10,11 @@ from typing import Any, ClassVar, TypeVar
 import httpx
 from pydantic import BaseModel
 
+from replayt.llm_coercion import (
+    coerce_max_tokens_for_api,
+    coerce_temperature,
+    coerce_timeout_seconds,
+)
 from replayt.types import LogMode
 
 T = TypeVar("T", bound=BaseModel)
@@ -244,13 +249,18 @@ class LLMBridge:
         d = self._defaults
         base = self._client.settings
         eff_model = model if model is not None else (d.get("model") if d.get("model") is not None else base.model)
-        eff_temp = float(d["temperature"]) if "temperature" in d else temperature
+        if "temperature" in d:
+            eff_temp = coerce_temperature(d["temperature"], default=temperature)
+        else:
+            eff_temp = coerce_temperature(temperature, default=0.0)
         eff_max = max_tokens if max_tokens is not None else d.get("max_tokens")
         if eff_max is None:
             eff_max = base.max_tokens
+        eff_max = coerce_max_tokens_for_api(eff_max)
         eff_timeout = timeout_seconds if timeout_seconds is not None else d.get("timeout_seconds")
         if eff_timeout is None:
             eff_timeout = base.timeout_seconds
+        eff_timeout = coerce_timeout_seconds(eff_timeout)
         hdrs: dict[str, str] = {}
         hdrs.update(dict(base.extra_headers or {}))
         hdrs.update(dict(d.get("extra_headers") or {}))
@@ -302,7 +312,7 @@ class LLMBridge:
         self._emit("llm_request", req_payload)
 
         t0 = time.perf_counter()
-        max_tok = int(eff_max) if isinstance(eff_max, int) else None
+        max_tok = coerce_max_tokens_for_api(eff_max)
         data = self._client.chat_completions(
             messages=messages,
             model=eff_model,

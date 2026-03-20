@@ -248,7 +248,7 @@ When things go wrong, the run log is the debugging tool:
 
 Command reference: **[docs/CLI.md](docs/CLI.md)**. Everyday flow: `run` → `inspect` / `replay` / `report` → optional `resume` after approvals. **`TARGET`** is `module:variable`, `workflow.py`, or `workflow.yaml` / `.yml`.
 
-Extras: **`replayt try`** runs the packaged hello-world tutorial; **`replayt ci`** is the same as `run` with a CI-oriented banner; **`replayt run … --dry-check`** validates the graph and `--inputs-json` without executing; **`replayt report --style stakeholder`** trims tool/token sections for sharing; **`replayt report-diff`** compares two runs in HTML; **`replayt export-run`** writes a redacted **`.tar.gz`** for sharing; **`replayt log-schema`** prints the bundled JSON Schema for one JSONL line; **`replayt seal`** writes a SHA-256 manifest for a JSONL run (audit helper). In Python, optional **`Runner(..., before_step=..., after_step=...)`** supports explicit in-process hooks (notifications, trace IDs) without a second workflow engine.
+Extras: **`replayt try`** runs the packaged hello-world tutorial (offline placeholder LLM by default; **`--live`** for a real call); **`replayt ci`** matches `run` plus a CI banner, optional **`--junit-xml`**, **`--github-summary`**, and **`--strict-graph`**; **`replayt run … --dry-check`** validates the graph and inputs JSON without executing (**`--inputs-json`** or **`--inputs-file`**; **`--output json`** / **`validate --format json`** for machine-readable reports); **`replayt validate --strict-graph`** fails when a multi-state workflow declares no transitions; **`replayt report --style stakeholder`** trims tool/token sections and expands approval context; **`replayt report-diff`** compares two runs in HTML; **`replayt export-run`** writes a redacted **`.tar.gz`** for sharing; **`replayt bundle-export`** adds stakeholder **`report.html`**, replay **timeline** HTML, and sanitized JSONL in one archive; **`replayt log-schema`** prints the bundled JSON Schema for one JSONL line; **`replayt seal`** writes a SHA-256 manifest for a JSONL run (audit helper). **`replayt doctor --format json`** is CI-friendly; **`replayt init --ci github`** scaffolds a workflow YAML for Actions. **`replayt resume`** accepts **`--reason`** / **`--actor-json`** and can run a configured **`resume_hook`** before writing `approval_resolved`. In Python, optional **`Runner(..., before_step=..., after_step=...)`** supports explicit in-process hooks (notifications, trace IDs) without a second workflow engine. **`Workflow(..., llm_defaults=...)`** or **`meta["llm_defaults"]`** merge into logged LLM **`effective`** (see [`docs/CONFIG.md`](docs/CONFIG.md)).
 
 Project defaults (log dir, provider preset, timeout, …): **[docs/CONFIG.md](docs/CONFIG.md)**.
 
@@ -532,6 +532,24 @@ Treat **JSONL and SQLite files you own** as the source of truth for dashboards a
 ## Requests we will not take in core (and what to do instead)
 
 replayt stays small on purpose. The full table of common asks, rationale, and **composition patterns** (approval bridge, batch driver, golden tests, etc.) lives in **[docs/SCOPE.md](docs/SCOPE.md)** so this README stays easier to scan.
+
+#### Policy hooks, eval-style harnesses, and agent frameworks
+
+Teams often want SSO-gated approvals, org policy checks before `resume`, pytest-driven regression loops, or planner-style frameworks inside “the workflow.” Those concerns belong in **your** process wrapper or app layer: replayt stays a **Runner** with explicit states and local JSONL—not a hosted control plane, RBAC product, or bundled eval suite ([docs/SCOPE.md](docs/SCOPE.md)).
+
+- **Approvals + identity:** read paused runs from JSONL/SQLite and resolve gates from a UI or chatbot—**Pattern: approval bridge (local UI)** in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md). For notifications and policy logging without a second engine, use **Pattern: webhook / lifecycle callbacks** or `Runner(..., before_step=..., after_step=...)`.
+- **Harness-style runs:** call `Runner.run` from pytest with frozen inputs and assert on final context or events—**Pattern: golden path test (pytest)**. For many jobs, use an outer loop—**Pattern: batch driver (Airflow / Celery / plain loop)**.
+- **Streaming or LangChain-style graphs:** keep provider SDKs and planners **inside one step**, then transition on one Pydantic-shaped outcome—**Pattern: stream inside step, log structured summary** and **Pattern: framework in a sandbox step**.
+
+Human-readable timeline export without building a server:
+
+```bash
+replayt replay <run_id> --format html --out run.html
+```
+
+#### Streaming, planner loops, and “agents” (composition, not core)
+
+Core does **not** emit per-token events or embed LangGraph-style planners in the `Runner`: that would flood JSONL and hide control flow. Put streaming, tool loops, and third-party graphs **inside a single `@wf.step`**, then return one explicit next state after a Pydantic-validated result (or log a summary yourself). Step-by-step tutorial and a copy-paste sketch: **LangGraph (and similar frameworks) — composition, not core** in [`src/replayt_examples/README.md`](src/replayt_examples/README.md). Patterns: **Pattern: stream inside step, log structured summary** and **Pattern: framework in a sandbox step** in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
 
 ---
 

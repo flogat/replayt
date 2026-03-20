@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import sys
+import tarfile
 from pathlib import Path
 
 import pytest
@@ -437,12 +439,12 @@ def test_project_config_from_pyproject_toml(tmp_path: Path, monkeypatch) -> None
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
-    import replayt.cli.main as cli_mod
+    import replayt.cli.config as cfg_mod
 
-    monkeypatch.setattr(cli_mod, "_PROJECT_CONFIG", None)
-    monkeypatch.setattr(cli_mod, "_PROJECT_CONFIG_PATH", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
 
-    cfg, cfg_path = cli_mod._get_project_config()
+    cfg, cfg_path = cfg_mod.get_project_config()
     assert cfg.get("log_dir") == ".logs/runs"
     assert cfg.get("log_mode") == "full"
     assert cfg.get("timeout") == 30
@@ -454,10 +456,10 @@ def test_project_config_doctor_output(tmp_path: Path, monkeypatch) -> None:
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text('[tool.replayt]\nlog_dir = "my_logs"\n', encoding="utf-8")
     monkeypatch.chdir(tmp_path)
-    import replayt.cli.main as cli_mod
+    import replayt.cli.config as cfg_mod
 
-    monkeypatch.setattr(cli_mod, "_PROJECT_CONFIG", None)
-    monkeypatch.setattr(cli_mod, "_PROJECT_CONFIG_PATH", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor"])
@@ -468,10 +470,10 @@ def test_project_config_doctor_output(tmp_path: Path, monkeypatch) -> None:
 
 def test_cli_doctor_skip_connectivity(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(tmp_path)
-    import replayt.cli.main as cli_mod
+    import replayt.cli.config as cfg_mod
 
-    monkeypatch.setattr(cli_mod, "_PROJECT_CONFIG", None)
-    monkeypatch.setattr(cli_mod, "_PROJECT_CONFIG_PATH", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
 
     runner = CliRunner()
     result = runner.invoke(app, ["doctor", "--skip-connectivity"])
@@ -940,4 +942,532 @@ def test_replayt_log_dir_env_default(monkeypatch: pytest.MonkeyPatch, tmp_path: 
     assert r.exit_code == 0
     rid = next(line.split("=", 1)[1] for line in r.stdout.splitlines() if line.startswith("run_id="))
     assert (log_root / f"{rid}.jsonl").is_file()
+
+
+def test_cli_try_runs_offline_by_default(tmp_path: Path) -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["try", "--log-dir", str(tmp_path)])
+    assert r.exit_code == 0
+    assert "Dry run:" in r.stdout
+
+
+def test_cli_validate_strict_graph_fails(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf = tmp_path / "bad.py"
+    wf.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("bad")
+wf.set_initial("a")
+
+@wf.step("a")
+def a(ctx):
+    return "b"
+
+@wf.step("b")
+def b(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    runner = CliRunner()
+    out = runner.invoke(app, ["validate", "bad:wf", "--strict-graph"])
+    assert out.exit_code == 1
+    combined = (out.stdout + out.stderr).lower()
+    assert "strict graph" in combined
+
+
+def test_cli_ci_writes_junit_xml(tmp_path: Path) -> None:
+    junit = tmp_path / "junit.xml"
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "ci",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"Sam"}',
+            "--junit-xml",
+            str(junit),
+        ],
+    )
+    assert r.exit_code == 0
+    assert junit.is_file()
+    text = junit.read_text(encoding="utf-8")
+    assert "testsuite" in text
+    assert "workflow_run" in text
+
+
+def test_cli_resume_hook_failure_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module_path = tmp_path / "approval_flow.py"
+    module_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("approval_flow")
+wf.set_initial("gate")
+wf.note_transition("gate", "done")
+
+@wf.step("gate")
+def gate(ctx):
+    if ctx.is_approved("ship"):
+        return "done"
+    ctx.request_approval("ship", summary="Ship it?")
+
+@wf.step("done")
+def done(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    exe = json.dumps(sys.executable)
+    (tmp_path / ".replaytrc.toml").write_text(
+        f"resume_hook = [{exe}, \"-c\", \"import sys; sys.exit(3)\"]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    import replayt.cli.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    runner = CliRunner()
+    run = runner.invoke(app, ["run", "approval_flow:wf", "--log-dir", str(tmp_path)])
+    assert run.exit_code == 2
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    resume = runner.invoke(
+        app,
+        ["resume", "approval_flow:wf", run_id, "--approval", "ship", "--log-dir", str(tmp_path)],
+    )
+    assert resume.exit_code == 1
+    assert "resume_hook" in (resume.stdout + resume.stderr).lower()
+
+
+def test_cli_validate_format_json_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(app, ["validate", str(wf_path), "--format", "json"])
+    assert r.exit_code == 0
+    data = json.loads(r.stdout)
+    assert data["schema"] == "replayt.validate_report.v1"
+    assert data["ok"] is True
+
+
+def test_cli_run_dry_check_json_invalid_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "run",
+            str(wf_path),
+            "--dry-check",
+            "--inputs-json",
+            "[]",
+            "--output",
+            "json",
+            "--log-dir",
+            str(tmp_path / "logs"),
+        ],
+    )
+    assert r.exit_code == 1
+    data = json.loads(r.stdout)
+    assert data["ok"] is False
+
+
+def test_cli_run_inputs_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    ctx.set("k", ctx.get("k"))
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    inp = tmp_path / "inputs.json"
+    inp.write_text('{"k": 42}', encoding="utf-8")
+    logd = tmp_path / "logs"
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["run", str(wf_path), "--log-dir", str(logd), "--inputs-file", str(inp)],
+    )
+    assert r.exit_code == 0
+
+
+def test_cli_run_rejects_inputs_json_and_file_together(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    inp = tmp_path / "i.json"
+    inp.write_text("{}", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "run",
+            str(wf_path),
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--inputs-json",
+            "{}",
+            "--inputs-file",
+            str(inp),
+        ],
+    )
+    assert r.exit_code == 2
+    assert "only one" in (r.stdout + r.stderr).lower()
+
+
+def test_cli_run_inputs_file_whitespace_only_is_empty_object(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    assert ctx.get("k") is None
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    inp = tmp_path / "i.json"
+    inp.write_text("  \n\t  ", encoding="utf-8")
+    logd = tmp_path / "logs"
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(app, ["run", str(wf_path), "--log-dir", str(logd), "--inputs-file", str(inp)])
+    assert r.exit_code == 0
+
+
+def test_cli_run_inputs_file_requires_utf8(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    inp = tmp_path / "bad.txt"
+    inp.write_bytes(b"\xff\xfe{\x22x\x22:1}")  # not valid UTF-8
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["run", str(wf_path), "--log-dir", str(tmp_path / "logs"), "--inputs-file", str(inp)],
+    )
+    assert r.exit_code == 2
+    assert "utf-8" in (r.stdout + r.stderr).lower()
+
+
+def test_cli_validate_inputs_file_invalid_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    inp = tmp_path / "i.json"
+    inp.write_text("{not json", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(app, ["validate", str(wf_path), "--inputs-file", str(inp), "--format", "json"])
+    assert r.exit_code == 1
+    data = json.loads(r.stdout)
+    assert data["ok"] is False
+    assert any("inputs" in err.lower() for err in data["errors"])
+
+
+def test_cli_ci_appends_github_step_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    summary = tmp_path / "step_summary.md"
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "ci",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"Sam"}',
+            "--github-summary",
+        ],
+    )
+    assert r.exit_code == 0
+    text = summary.read_text(encoding="utf-8")
+    assert "## replayt ci" in text
+    assert "hello_world_tutorial" in text
+
+
+def test_cli_ci_junit_xml_forwards_through_timeout_subprocess(tmp_path: Path) -> None:
+    junit = tmp_path / "junit.xml"
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "ci",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"Sam"}',
+            "--junit-xml",
+            str(junit),
+            "--timeout",
+            "120",
+        ],
+    )
+    assert r.exit_code == 0
+    assert junit.is_file()
+    assert "testsuite" in junit.read_text(encoding="utf-8")
+
+
+def test_cli_run_junit_xml_via_replayt_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    junit = tmp_path / "from_env.xml"
+    monkeypatch.setenv("REPLAYT_JUNIT_XML", str(junit))
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"Sam"}',
+        ],
+    )
+    assert r.exit_code == 0
+    assert junit.is_file()
+
+
+def test_cli_doctor_format_json_healthy(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["doctor", "--skip-connectivity", "--format", "json"],
+    )
+    assert r.exit_code == 0
+    data = json.loads(r.stdout)
+    assert data["schema"] == "replayt.doctor_report.v1"
+    assert data["healthy"] is True
+
+
+def test_cli_bundle_export_creates_tarball(tmp_path: Path) -> None:
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"x"}',
+        ],
+    )
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    out_tar = tmp_path / "b.tar.gz"
+    be = runner.invoke(
+        app,
+        ["bundle-export", run_id, "--out", str(out_tar), "--log-dir", str(tmp_path)],
+    )
+    assert be.exit_code == 0
+    assert out_tar.is_file()
+    with tarfile.open(out_tar, "r:gz") as tf:
+        names = tf.getnames()
+    assert any(n.endswith("/report.html") for n in names)
+    assert any(n.endswith("/timeline.html") for n in names)
+    assert any(n.endswith("/events.jsonl") for n in names)
+
+
+def test_cli_resume_reason_and_actor_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module_path = tmp_path / "approval_flow.py"
+    module_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("approval_flow")
+wf.set_initial("gate")
+wf.note_transition("gate", "done")
+
+@wf.step("gate")
+def gate(ctx):
+    if ctx.is_approved("ship"):
+        return "done"
+    ctx.request_approval("ship", summary="Ship it?")
+
+@wf.step("done")
+def done(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    runner = CliRunner()
+    run = runner.invoke(app, ["run", "approval_flow:wf", "--log-dir", str(tmp_path)])
+    assert run.exit_code == 2
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    resume = runner.invoke(
+        app,
+        [
+            "resume",
+            "approval_flow:wf",
+            run_id,
+            "--approval",
+            "ship",
+            "--log-dir",
+            str(tmp_path),
+            "--reason",
+            "ticket-1",
+            "--actor-json",
+            '{"email":"a@example.com"}',
+            "--resolver",
+            "bridge",
+        ],
+    )
+    assert resume.exit_code == 0
+    raw = (tmp_path / f"{run_id}.jsonl").read_text(encoding="utf-8")
+    resolved = [json.loads(line) for line in raw.splitlines() if '"approval_resolved"' in line]
+    assert resolved
+    p = resolved[-1]["payload"]
+    assert p["reason"] == "ticket-1"
+    assert p["resolver"] == "bridge"
+    assert p["actor"] == {"email": "a@example.com"}
+
+
+def test_cli_init_ci_github_writes_workflow(tmp_path: Path) -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["init", "--path", str(tmp_path), "--ci", "github"])
+    assert r.exit_code == 0
+    wf_yml = tmp_path / ".github" / "workflows" / "replayt.yml"
+    assert wf_yml.is_file()
+    text = wf_yml.read_text(encoding="utf-8")
+    assert "replayt validate" in text
+    assert "CHANGE_ME_MODULE:wf" in text
+
+
+def test_cli_stats_includes_run_when_summary_last_ts_unparseable(tmp_path: Path) -> None:
+    """Unparseable last_ts skips day cutoff exclusion (parse_iso_ts returns None)."""
+
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    rid = "run-bad-last-ts"
+    lines = [
+        {
+            "ts": "2025-06-01T12:00:00+00:00",
+            "run_id": rid,
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "not-an-iso-timestamp",
+            "run_id": rid,
+            "seq": 2,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    (log_dir / f"{rid}.jsonl").write_text(
+        "\n".join(json.dumps(x) for x in lines) + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    out = runner.invoke(app, ["stats", "--log-dir", str(log_dir), "--days", "1", "--output", "json"])
+    assert out.exit_code == 0
+    data = json.loads(out.stdout)
+    assert data["runs_included"] == 1
+
+
+def test_cli_gc_skips_delete_when_last_event_ts_unparseable(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    rid = "old-bad-ts"
+    lines = [
+        {
+            "ts": "1999-01-01T00:00:00+00:00",
+            "run_id": rid,
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "bogus",
+            "run_id": rid,
+            "seq": 2,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    (log_dir / f"{rid}.jsonl").write_text(
+        "\n".join(json.dumps(x) for x in lines) + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    out = runner.invoke(app, ["gc", "--log-dir", str(log_dir), "--older-than", "1d"])
+    assert out.exit_code == 0
+    assert (log_dir / f"{rid}.jsonl").is_file()
+    assert "deleted 0 run(s)" in out.stdout
 
