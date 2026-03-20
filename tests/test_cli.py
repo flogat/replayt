@@ -199,7 +199,7 @@ def start(ctx):
         ["replay", run_id, "--log-dir", str(tmp_path), "--format", "html"],
     )
     assert html_out.exit_code == 0
-    assert "tailwindcss.com" in html_out.stdout
+    assert "<style>" in html_out.stdout
     assert run_id in html_out.stdout
 
 
@@ -226,3 +226,38 @@ def test_cli_runs_and_doctor(tmp_path: Path) -> None:
     assert doctor.exit_code == 0
     assert "python" in doctor.stdout
     assert "replayt" in doctor.stdout.lower()
+
+
+def test_cli_inspect_and_replay_can_read_from_sqlite(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "sqlite_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("sqlite_flow")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    db_path = tmp_path / "events.sqlite3"
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        ["run", str(workflow_path), "--log-dir", str(tmp_path / "jsonl"), "--sqlite", str(db_path)],
+    )
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    inspect = runner.invoke(app, ["inspect", run_id, "--sqlite", str(db_path)])
+    assert inspect.exit_code == 0
+    replay = runner.invoke(app, ["replay", run_id, "--sqlite", str(db_path)])
+    assert replay.exit_code == 0
+    stats = runner.invoke(app, ["stats", "--sqlite", str(db_path), "--output", "json"])
+    assert stats.exit_code == 0
+    runs = runner.invoke(app, ["runs", "--sqlite", str(db_path)])
+    assert runs.exit_code == 0
+    assert run_id in runs.stdout
