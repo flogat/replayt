@@ -1,0 +1,25 @@
+flowchart LR
+  subgraph definition [WorkflowDefinition]
+    W[Workflow]
+    S[Steps in Python]
+    E[Optional note_transition for graph]
+  end
+  subgraph runner [Runner]
+    R[Runner loop]
+    C[RunContext]
+    L[LLMBridge]
+    T[ToolRegistry]
+    A[ApprovalPending pause]
+  end
+  subgraph storage [Persistence]
+    J[JSONLStore]
+    Q[SQLiteStore optional]
+  end
+  W --> R
+  S --> R
+  R --> C
+  C --> L
+  C --> T
+  R --> A
+  R --> J
+  R --> Q

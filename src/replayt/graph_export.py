@@ -1,0 +1,26 @@
+from __future__ import annotations
+
+from replayt.workflow import Workflow
+
+
+def workflow_to_mermaid(wf: Workflow) -> str:
+    lines: list[str] = ["flowchart TD"]
+    init = wf.initial_state or "start"
+    lines.append(f'  _entry(["entry: {init}"])')
+    for n in wf.step_names():
+        lines.append(f'  {m_id(n)}["{n}"]')
+    if wf.initial_state:
+        lines.append(f"  _entry --> {m_id(wf.initial_state)}")
+    for a, b in wf.edges():
+        lines.append(f"  {m_id(a)} --> {m_id(b)}")
+    if not wf.edges() and wf.initial_state:
+        for n in wf.step_names():
+            if n == wf.initial_state:
+                continue
+            lines.append(f"  {m_id(wf.initial_state)} -. possible .-> {m_id(n)}")
+    return "\n".join(lines) + "\n"
+
+
+def m_id(state: str) -> str:
+    safe = "".join(ch if ch.isalnum() else "_" for ch in state)
+    return f"s_{safe}"
