@@ -821,7 +821,7 @@ Use the broker for **retries and DLQ**, not implicit replays inside replayt.
 
 **Scenario:** You forward copies of run events to Datadog, an OTEL collector, or an HTTP log intake **without** making replayt a hosted observability product.
 
-**Approach:** Implement the `EventStore` protocol: wrap **`JSONLStore`** so every `append` writes locally first, then asynchronously or best-effort POSTs a copy. Keep JSONL canonical on disk; treat the remote sink as optional.
+**Approach:** Write an `EventStore` wrapper: wrap **`JSONLStore`** so every `append` writes locally first, then asynchronously or best-effort POSTs a copy. Keep JSONL canonical on disk; treat the remote sink as optional.
 
 ```python
 from __future__ import annotations
@@ -862,7 +862,7 @@ class ForwardingStore:
 
 **Scenario:** Compliance wants encryption at rest on the JSONL directory.
 
-**Approach:** Implement `EventStore` yourself (or wrap `JSONLStore`) so each **logical** replayt event is serialized to JSON, encrypted with **Fernet** (`pip install cryptography`), then written as one wrapped record per line (below uses a small envelope dict). Load the key from your KMS or an env var **outside** replayt core.
+**Approach:** Write your own `EventStore` (or wrap `JSONLStore`) so each **logical** replayt event is serialized to JSON, encrypted with **Fernet** (`pip install cryptography`), then written as one wrapped record per line (below uses a small envelope dict). Load the key from your KMS or an env var **outside** replayt core.
 
 ```python
 from __future__ import annotations

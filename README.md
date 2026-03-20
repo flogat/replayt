@@ -34,6 +34,10 @@ Most LLM tooling drifts toward autonomy, hidden loops, framework sprawl, and run
 
 replayt goes in the opposite direction.
 
+<p align="center">
+  <img src="docs/demo-why.svg" alt="typical agent framework vs replayt" width="820"/>
+</p>
+
 It is for developers who do **not** want:
 
 - open-ended agent behavior
@@ -50,9 +54,7 @@ Instead, replayt is built around a boring, disciplined proposition:
 - inspect every important event
 - replay the exact execution history later
 
-The goal is not maximum capability.
-
-The goal is **clarity, control, and trust**.
+The goal is that you can always explain what happened and why.
 
 ---
 
@@ -108,8 +110,7 @@ It is **not**:
 
 This is a deliberate anti-bloat project.
 
-The value of replayt is not breadth.
-The value is that it stays small enough to understand in one sitting.
+replayt stays small enough to understand in one sitting.
 
 ---
 
@@ -167,6 +168,12 @@ A new user should be able to understand the architecture quickly and feel that t
 - Human-readable replay timeline
 - Raw event inspection
 - Local run listing
+
+When things go wrong, the run log is the debugging tool:
+
+<p align="center">
+  <img src="docs/demo-debug.svg" alt="replayt debugging a failed run" width="820"/>
+</p>
 
 ### CLI
 
@@ -503,6 +510,10 @@ def compute(ctx):
 ---
 
 ## Approval gate example
+
+<p align="center">
+  <img src="docs/demo-approval.svg" alt="replayt approval gate: pause, review, resume" width="820"/>
+</p>
 
 ```python
 @wf.step("review")
