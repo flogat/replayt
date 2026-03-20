@@ -1,4 +1,4 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="820" height="590" viewBox="0 0 820 590">
+<svg xmlns="http://www.w3.org/2000/svg" width="820" height="576" viewBox="0 0 820 576">
   <style>
     @keyframes fadeIn  { from { opacity: 0 } to { opacity: 1 } }
     @keyframes slideIn { from { opacity: 0; transform: translateY(4px) } to { opacity: 1; transform: translateY(0) } }
@@ -19,6 +19,8 @@
     .id        { fill: #fbbf24 }
     .ev-type   { fill: #38bdf8 }
     .ev-json   { fill: #94a3b8 }
+    .note      { fill: #64748b; font-size: 12px }
+    .hl-bg     { fill: #1e293b }
     .sep       { stroke: #475569; stroke-width: 1; stroke-dasharray: 4,4 }
     .label-bg  { rx: 4; ry: 4 }
     .label-txt { font-family: ui-sans-serif, system-ui, sans-serif; font-size: 11px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase }
@@ -27,18 +29,18 @@
 
   <defs>
     <clipPath id="clip1"><rect x="48" y="66" width="0" height="20">
-      <animate attributeName="width" from="0" to="740" begin="0.6s" dur="2.4s" fill="freeze"/>
+      <animate attributeName="width" from="0" to="740" begin="0.6s" dur="2.0s" fill="freeze"/>
     </rect></clipPath>
-    <clipPath id="clip2"><rect x="48" y="198" width="0" height="20">
-      <animate attributeName="width" from="0" to="300" begin="7.2s" dur="0.8s" fill="freeze"/>
+    <clipPath id="clip2"><rect x="48" y="182" width="0" height="20">
+      <animate attributeName="width" from="0" to="280" begin="6.2s" dur="0.7s" fill="freeze"/>
     </rect></clipPath>
-    <clipPath id="clip3"><rect x="48" y="424" width="0" height="20">
-      <animate attributeName="width" from="0" to="300" begin="14.0s" dur="0.8s" fill="freeze"/>
+    <clipPath id="clip3"><rect x="48" y="422" width="0" height="20">
+      <animate attributeName="width" from="0" to="280" begin="12.4s" dur="0.7s" fill="freeze"/>
     </rect></clipPath>
   </defs>
 
   <!-- Terminal chrome -->
-  <rect class="term-bg" width="820" height="590" rx="10" ry="10"/>
+  <rect class="term-bg" width="820" height="576" rx="10" ry="10"/>
   <rect class="title-bar" width="820" height="38" rx="10" ry="10"/>
   <rect class="title-bar" width="820" height="20" y="18"/>
   <circle class="dot-r" cx="20" cy="19" r="6"/>
@@ -55,99 +57,98 @@
 
   <text class="prompt" x="32" y="80">$</text>
   <g clip-path="url(#clip1)">
-    <text class="cmd" x="48" y="80">replayt run examples.issue_triage:wf --inputs-json '{"issue":{"title":"Crash on save"}}'</text>
+    <text class="cmd" x="48" y="80">replayt run refund:wf --inputs-json '{"request":"Broken headphones, want refund"}'</text>
   </g>
 
-  <g opacity="0" style="animation: fadeIn 0.3s 3.6s forwards">
+  <g opacity="0" style="animation: fadeIn 0.3s 3.2s forwards">
     <text x="32" y="108">
-      <tspan class="out">run_id=</tspan><tspan class="id">3e9cb4d2-23ad-4a16-8d13-9ae3d5e28f3f</tspan>
+      <tspan class="out">run_id=</tspan><tspan class="id">a3f8c921-7e2b-4d19-bc05-6f1a2d3e4f5a</tspan>
     </text>
     <text x="32" y="126">
-      <tspan class="out">workflow=</tspan><tspan class="val">github_issue_triage@1</tspan>
-    </text>
-    <text x="32" y="144">
-      <tspan class="out">status=</tspan><tspan class="ok">completed</tspan>
+      <tspan class="out">workflow=</tspan><tspan class="val">refund@1</tspan>
+      <tspan class="out">  status=</tspan><tspan class="ok">completed</tspan>
     </text>
   </g>
 
-  <line x1="32" y1="168" x2="788" y2="168" class="sep" opacity="0" style="animation: fadeIn 0.2s 4.8s forwards"/>
+  <line x1="32" y1="150" x2="788" y2="150" class="sep" opacity="0" style="animation: fadeIn 0.2s 4.4s forwards"/>
 
   <!-- =========== STEP 2: inspect =========== -->
 
-  <g opacity="0" style="animation: slideIn 0.3s 5.6s forwards">
-    <rect class="label-bg" x="30" y="180" width="66" height="18" fill="#a78bfa" opacity="0.18"/>
-    <text class="label-txt" x="63" y="193" fill="#c4b5fd" text-anchor="middle">INSPECT</text>
+  <g opacity="0" style="animation: slideIn 0.3s 5.2s forwards">
+    <rect class="label-bg" x="30" y="162" width="66" height="18" fill="#a78bfa" opacity="0.18"/>
+    <text class="label-txt" x="63" y="175" fill="#c4b5fd" text-anchor="middle">INSPECT</text>
   </g>
 
-  <text class="prompt" x="32" y="212" opacity="0" style="animation: fadeIn 0.1s 6.8s forwards">$</text>
+  <text class="prompt" x="32" y="196" opacity="0" style="animation: fadeIn 0.1s 6.0s forwards">$</text>
   <g clip-path="url(#clip2)">
-    <text class="cmd" x="48" y="212">replayt inspect 3e9cb4d2-23ad...</text>
+    <text class="cmd" x="48" y="196">replayt inspect a3f8c921...</text>
   </g>
 
-  <g opacity="0" style="animation: fadeIn 0.3s 8.6s forwards">
-    <text x="32" y="240">
-      <tspan class="out">run_id=</tspan><tspan class="id">3e9cb4d2...</tspan>
-      <tspan class="out"> workflow=</tspan><tspan class="val">github_issue_triage@1</tspan>
+  <g opacity="0" style="animation: fadeIn 0.3s 7.6s forwards">
+    <text x="32" y="224">
+      <tspan class="out">run_id=</tspan><tspan class="id">a3f8c921...</tspan>
+      <tspan class="out"> workflow=</tspan><tspan class="val">refund@1</tspan>
       <tspan class="out"> status=</tspan><tspan class="ok">completed</tspan>
     </text>
-    <text class="out" x="32" y="258">events=16 states=4 transitions=3 llm_calls=1 tool_calls=0 approvals=0</text>
-    <text x="32" y="282">
+    <text class="out" x="32" y="242">events=12 states=3 transitions=2 llm_calls=1 tool_calls=0</text>
+
+    <text x="32" y="266">
       <tspan class="dim">0001  </tspan><tspan class="ev-type">run_started</tspan>
     </text>
-    <text x="32" y="300">
-      <tspan class="dim">0002  </tspan><tspan class="ev-type">state_entered</tspan>
+    <text x="32" y="284">
+      <tspan class="dim">0002  </tspan><tspan class="ev-type">state_entered  </tspan><tspan class="ev-json">{"state": "parse"}</tspan>
     </text>
-    <text x="32" y="318">
-      <tspan class="dim">0003  </tspan><tspan class="ev-type">state_exited</tspan>
+    <text x="32" y="302">
+      <tspan class="dim">0005  </tspan><tspan class="ev-type">state_entered  </tspan><tspan class="ev-json">{"state": "evaluate"}</tspan>
     </text>
-    <text x="32" y="336">
-      <tspan class="dim">0004  </tspan><tspan class="ev-type">transition</tspan>
+    <text x="32" y="320">
+      <tspan class="dim">0006  </tspan><tspan class="ev-type">llm_request    </tspan><tspan class="ev-json">{"model": "gpt-4o-mini"}</tspan>
+      <tspan class="note">  &#8592; every call logged</tspan>
     </text>
-    <text x="32" y="354">
-      <tspan class="dim">0005  </tspan><tspan class="ev-type">state_entered</tspan>
+    <rect class="hl-bg" x="28" y="327" width="760" height="18"/>
+    <text x="32" y="338">
+      <tspan class="dim">0007  </tspan><tspan class="ev-type">structured_output  </tspan><tspan class="ev-json">{"approved": true, "amount": 49.99}</tspan>
+      <tspan class="note">  &#8592; schema-validated</tspan>
     </text>
-    <text x="32" y="372">
-      <tspan class="dim">0006  </tspan><tspan class="ev-type">llm_request</tspan>
+    <text class="dim" x="32" y="356">  ...</text>
+    <text x="32" y="374">
+      <tspan class="dim">0012  </tspan><tspan class="ev-type">run_completed</tspan>
     </text>
-    <text class="dim" x="32" y="390">...</text>
   </g>
 
-  <line x1="32" y1="404" x2="788" y2="404" class="sep" opacity="0" style="animation: fadeIn 0.2s 10.8s forwards"/>
+  <line x1="32" y1="394" x2="788" y2="394" class="sep" opacity="0" style="animation: fadeIn 0.2s 10.4s forwards"/>
 
   <!-- =========== STEP 3: replay =========== -->
 
-  <g opacity="0" style="animation: slideIn 0.3s 11.6s forwards">
-    <rect class="label-bg" x="30" y="408" width="56" height="18" fill="#4ade80" opacity="0.18"/>
-    <text class="label-txt" x="58" y="421" fill="#4ade80" text-anchor="middle">REPLAY</text>
+  <g opacity="0" style="animation: slideIn 0.3s 11.0s forwards">
+    <rect class="label-bg" x="30" y="402" width="56" height="18" fill="#4ade80" opacity="0.18"/>
+    <text class="label-txt" x="58" y="415" fill="#4ade80" text-anchor="middle">REPLAY</text>
   </g>
 
-  <text class="prompt" x="32" y="436" opacity="0" style="animation: fadeIn 0.1s 13.2s forwards">$</text>
+  <text class="prompt" x="32" y="436" opacity="0" style="animation: fadeIn 0.1s 12.0s forwards">$</text>
   <g clip-path="url(#clip3)">
-    <text class="cmd" x="48" y="436">replayt replay 3e9cb4d2-23ad...</text>
+    <text class="cmd" x="48" y="436">replayt replay a3f8c921...</text>
   </g>
 
-  <g opacity="0" style="animation: fadeIn 0.3s 15.4s forwards">
+  <g opacity="0" style="animation: fadeIn 0.3s 13.8s forwards">
     <text x="32" y="464">
-      <tspan class="dim">0002  </tspan><tspan class="ev-type">state_entered  </tspan><tspan class="ev-json">{"state": "validate"}</tspan>
+      <tspan class="dim">0002  </tspan><tspan class="ev-type">state_entered  </tspan><tspan class="ev-json">{"state": "parse"}</tspan>
     </text>
+    <rect class="hl-bg" x="28" y="471" width="760" height="18"/>
     <text x="32" y="482">
-      <tspan class="dim">0004  </tspan><tspan class="ev-type">transition  </tspan><tspan class="ev-json">{"from_state": "validate", "to_state": "classify", "reason": ""}</tspan>
+      <tspan class="dim">0007  </tspan><tspan class="ev-type">structured_output  </tspan><tspan class="ev-json">{"approved": true, "amount": 49.99}</tspan>
+      <tspan class="note">  &#8592; same result</tspan>
     </text>
     <text x="32" y="500">
-      <tspan class="dim">0008  </tspan><tspan class="ev-type">structured_output  </tspan><tspan class="ev-json">{"state": "classify", "schema_name": "TriageDecision", ...</tspan>
-    </text>
-    <text x="32" y="518">
-      <tspan class="dim">0013  </tspan><tspan class="ev-type">transition  </tspan><tspan class="ev-json">{"from_state": "respond", "to_state": "done", "reason": ""}</tspan>
-    </text>
-    <text x="32" y="536">
-      <tspan class="dim">0016  </tspan><tspan class="ev-type">run_completed</tspan>
+      <tspan class="dim">0012  </tspan><tspan class="ev-type">run_completed</tspan>
+      <tspan class="note">  deterministic &#10003;</tspan>
     </text>
   </g>
 
   <!-- footer -->
-  <g opacity="0" style="animation: fadeIn 0.4s 16.6s forwards">
-    <text x="32" y="572">
-      <tspan class="footer">every step logged, every step replayable &#8212; that's </tspan><tspan class="ok" font-weight="bold">replayt</tspan>
+  <g opacity="0" style="animation: fadeIn 0.4s 15.4s forwards">
+    <text x="32" y="548">
+      <tspan class="footer">refund approved for $49.99 &#8212; you know exactly why, and can </tspan><tspan class="ok" font-weight="bold">replay it</tspan>
     </text>
   </g>
 </svg>
