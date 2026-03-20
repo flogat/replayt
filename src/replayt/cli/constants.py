@@ -54,13 +54,13 @@ INIT_ENV_EXAMPLE = """# Copy to .env and load before running (replayt does not r
 OPENAI_API_KEY=
 
 # Optional — OpenAI-compatible API base (overrides REPLAYT_PROVIDER preset default).
-# OPENAI_BASE_URL=https://api.openai.com/v1
+# OPENAI_BASE_URL=https://openrouter.ai/api/v1
 
 # Optional — default model (overrides provider preset default).
-# REPLAYT_MODEL=gpt-4o-mini
+# REPLAYT_MODEL=anthropic/claude-sonnet-4.6
 
 # Optional — openai | ollama | groq | together | openrouter | anthropic (see README).
-# REPLAYT_PROVIDER=openai
+# REPLAYT_PROVIDER=openrouter
 """
 
 INIT_GITIGNORE_LINES = [".replayt/", ".env", ".venv/", "__pycache__/"]

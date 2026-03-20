@@ -27,6 +27,13 @@ def load_python_file(path: Path) -> Any:
 
 
 def load_target(target: str) -> Workflow:
+    """Resolve *target* to a :class:`~replayt.workflow.Workflow`.
+
+    ``*.py`` paths are loaded with :func:`importlib.util.spec_from_file_location` and
+    :meth:`importlib.abc.Loader.exec_module` (same trust model as ``python path/to/file.py``).
+    Use only trusted files; prefer ``MODULE:VAR`` from installed
+    packages or YAML workflows when inputs are less trusted.
+    """
     path = Path(target)
     looks_like_file = path.suffix in {".py", ".yaml", ".yml"} and path.is_file()
     if looks_like_file:

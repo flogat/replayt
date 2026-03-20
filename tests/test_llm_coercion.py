@@ -13,9 +13,13 @@ def test_coerce_max_tokens_string() -> None:
     assert coerce_max_tokens_for_api(" 128 ") == 128
 
 
-def test_coerce_max_tokens_none_and_bool() -> None:
+def test_coerce_max_tokens_none() -> None:
     assert coerce_max_tokens_for_api(None) is None
-    assert coerce_max_tokens_for_api(True) is None
+
+
+def test_coerce_max_tokens_rejects_bool() -> None:
+    with pytest.raises(TypeError, match="max_tokens cannot be a boolean"):
+        coerce_max_tokens_for_api(True)
 
 
 def test_coerce_temperature_rejects_bool() -> None:

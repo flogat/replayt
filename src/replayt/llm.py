@@ -20,37 +20,83 @@ from replayt.types import LogMode
 T = TypeVar("T", bound=BaseModel)
 
 
-def _extract_json_object(text: str) -> str:
+# Cap `{` probes so pathological multi-megabyte text cannot burn CPU in raw_decode attempts.
+_MAX_JSON_OBJECT_BRACE_STARTS = 50_000
+
+
+def _extract_json_object(text: str, *, max_brace_starts: int = _MAX_JSON_OBJECT_BRACE_STARTS) -> str:
+    """Parse JSON object spans from *text* and pick a single ``{...}`` result.
+
+    Nested objects produce multiple valid spans (inner and outer). Spans **strictly contained**
+    in another dict span are dropped. If more than one span remains (e.g. two sibling objects),
+    the **last** span wins so a trailing final JSON object beats an earlier draft.
+    """
+
     text = text.strip()
     decoder = json.JSONDecoder()
+    spans: list[tuple[int, int, str]] = []
+    brace_starts = 0
     for idx, ch in enumerate(text):
         if ch != "{":
             continue
+        brace_starts += 1
+        if brace_starts > max_brace_starts:
+            raise ValueError(
+                f"Too many '{{' characters to scan for a JSON object (limit {max_brace_starts}); "
+                "response may be malformed or not JSON-object-shaped."
+            )
         try:
             obj, end = decoder.raw_decode(text[idx:])
         except ValueError:
             continue
         if isinstance(obj, dict):
-            return text[idx : idx + end]
-    raise ValueError("No JSON object found in model response")
+            end_idx = idx + end
+            spans.append((idx, end_idx, text[idx:end_idx]))
+
+    if not spans:
+        raise ValueError(
+            "No JSON object found in model response (expected a {...} object). "
+            "If the model returned markdown fences, prose only, or non-object JSON, adjust the prompt "
+            "or parse the text manually."
+        )
+
+    def strictly_inside(inner: tuple[int, int, str], outer: tuple[int, int, str]) -> bool:
+        a0, a1, _ = inner
+        b0, b1, _ = outer
+        return b0 < a0 and a1 < b1
+
+    maximal: list[tuple[int, int, str]] = []
+    for sp in spans:
+        if any(strictly_inside(sp, other) for other in spans):
+            continue
+        maximal.append(sp)
+    if not maximal:
+        maximal = list(spans)
+    return maximal[-1][2]
 
 
 @dataclass
 class LLMSettings:
     api_key: str | None = None
-    base_url: str = "https://api.openai.com/v1"
-    model: str = "gpt-4o-mini"
+    base_url: str = "https://openrouter.ai/api/v1"
+    model: str = "anthropic/claude-sonnet-4.6"
     timeout_seconds: float = 120.0
     max_tokens: int | None = None
     extra_headers: dict[str, str] = field(default_factory=dict)
     http_retries: int = 0
+    #: Upper bound on ``LLMBridge.parse`` response text length (after ``complete_text``) before ``json.loads``.
+    max_parse_response_chars: int = 4_000_000
+    #: Hard cap on HTTP response body size for ``/chat/completions`` (bytes), read via streaming.
+    max_response_bytes: int = 32 * 1024 * 1024
+    #: Upper bound on JSON Schema text embedded in :meth:`LLMBridge.parse` system prompts.
+    max_schema_json_chars: int = 250_000
 
     _provider_presets: ClassVar[dict[str, tuple[str, str]]] = {
-        "openai": ("https://api.openai.com/v1", "gpt-4o-mini"),
+        "openai": ("https://api.openai.com/v1", "claude-sonnet-4.6"),
         "ollama": ("http://127.0.0.1:11434/v1", "llama3.2"),
         "groq": ("https://api.groq.com/openai/v1", "llama-3.1-8b-instant"),
         "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.1-8B-Instruct-Turbo"),
-        "openrouter": ("https://openrouter.ai/api/v1", "openai/gpt-4o-mini"),
+        "openrouter": ("https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4.6"),
         # Anthropic native HTTP is not OpenAI-compat; use a gateway or SDK-in-step (replayt_examples README).
         "anthropic": (
             "https://api.anthropic.com/v1",
@@ -81,22 +127,63 @@ class LLMSettings:
     @classmethod
     def from_env(cls) -> LLMSettings:
         provider = os.environ.get("REPLAYT_PROVIDER", "").strip().lower()
-        preset_base = "https://api.openai.com/v1"
-        preset_model = "gpt-4o-mini"
         if provider:
             preset = cls.for_provider(provider)
             preset_base = preset.base_url
             preset_model = preset.model
+        else:
+            preset_base, preset_model = cls._provider_presets["openrouter"]
+        max_rb = 32 * 1024 * 1024
+        raw_rb = os.environ.get("REPLAYT_LLM_MAX_RESPONSE_BYTES", "").strip()
+        if raw_rb:
+            try:
+                max_rb = max(1024, int(raw_rb))
+            except ValueError:
+                raise ValueError(
+                    f"REPLAYT_LLM_MAX_RESPONSE_BYTES must be an integer number of bytes, got {raw_rb!r}"
+                ) from None
+        max_schema = 250_000
+        raw_schema = os.environ.get("REPLAYT_LLM_MAX_SCHEMA_CHARS", "").strip()
+        if raw_schema:
+            try:
+                max_schema = max(1024, int(raw_schema))
+            except ValueError:
+                raise ValueError(
+                    f"REPLAYT_LLM_MAX_SCHEMA_CHARS must be a positive integer, got {raw_schema!r}"
+                ) from None
         return cls(
             api_key=os.environ.get("OPENAI_API_KEY"),
             base_url=os.environ.get("OPENAI_BASE_URL", preset_base),
             model=os.environ.get("REPLAYT_MODEL", preset_model),
+            max_response_bytes=max_rb,
+            max_schema_json_chars=max_schema,
         )
 
 
-_RETRYABLE_STATUS_CODES = frozenset({429, 502, 503, 504})
+# 500 included: many gateways return it for transient upstream failures (retry-safe in practice).
+_RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _RETRY_BASE_DELAY = 1.0
 _RETRY_MAX_DELAY = 30.0
+
+
+def _drain_stream_with_limit(response: httpx.Response, byte_limit: int) -> None:
+    n = 0
+    for chunk in response.iter_bytes():
+        n += len(chunk)
+        if n >= byte_limit:
+            break
+
+
+def _read_response_body_capped(response: httpx.Response, max_bytes: int) -> bytes:
+    buf = bytearray()
+    for chunk in response.iter_bytes():
+        buf.extend(chunk)
+        if len(buf) > max_bytes:
+            raise RuntimeError(
+                f"Chat completions response body exceeds max_response_bytes ({max_bytes}); "
+                "raise LLMSettings.max_response_bytes if needed."
+            )
+    return bytes(buf)
 
 
 class OpenAICompatClient:
@@ -148,28 +235,40 @@ class OpenAICompatClient:
             headers["Authorization"] = f"Bearer {self.settings.api_key}"
         timeout = timeout_seconds if timeout_seconds is not None else self.settings.timeout_seconds
         max_attempts = max(self.settings.http_retries + 1, 1)
+        cap = self.settings.max_response_bytes
+        drain_cap = min(cap, 65_536)
 
         last_exc: Exception | None = None
         for attempt in range(max_attempts):
             try:
-                r = self._client.post(url, json=payload, headers=headers, timeout=timeout)
-                if r.status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts - 1:
-                    retry_after = r.headers.get("retry-after")
-                    try:
-                        delay = float(retry_after) if retry_after else _RETRY_BASE_DELAY
-                    except (ValueError, TypeError):
-                        delay = _RETRY_BASE_DELAY
-                    delay = min(delay * (2**attempt), _RETRY_MAX_DELAY)
-                    time.sleep(delay)
-                    continue
-                r.raise_for_status()
+                with self._client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as r:
+                    if r.status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts - 1:
+                        _drain_stream_with_limit(r, drain_cap)
+                        retry_after = r.headers.get("retry-after")
+                        try:
+                            delay = float(retry_after) if retry_after else _RETRY_BASE_DELAY
+                        except (ValueError, TypeError):
+                            delay = _RETRY_BASE_DELAY
+                        delay = min(delay * (2**attempt), _RETRY_MAX_DELAY)
+                        time.sleep(delay)
+                        continue
+                    r.raise_for_status()
+                    cl = r.headers.get("content-length")
+                    if cl is not None:
+                        try:
+                            if int(cl) > cap:
+                                raise RuntimeError(
+                                    f"Chat completions Content-Length ({cl}) exceeds max_response_bytes ({cap})"
+                                )
+                        except ValueError:
+                            pass
+                    raw = _read_response_body_capped(r, cap)
                 try:
-                    return r.json()
+                    return json.loads(raw.decode("utf-8"))
                 except json.JSONDecodeError as exc:
-                    preview = (r.text or "")[:500]
+                    preview = raw[:500]
                     raise RuntimeError(
-                        f"Chat completions response was not valid JSON (HTTP {r.status_code}): {exc}; "
-                        f"body preview: {preview!r}"
+                        f"Chat completions response was not valid JSON: {exc}; body preview: {preview!r}"
                     ) from exc
             except httpx.TransportError as exc:
                 last_exc = exc
@@ -353,6 +452,13 @@ class LLMBridge:
         extra_headers: dict[str, str] | None = None,
     ) -> T:
         schema_hint = json.dumps(model_type.model_json_schema(), ensure_ascii=False)
+        cap = self._client.settings.max_schema_json_chars
+        if len(schema_hint) > cap:
+            raise ValueError(
+                f"JSON Schema for {model_type.__name__!r} serializes to {len(schema_hint)} characters, "
+                f"above max_schema_json_chars ({cap}); use a smaller model, split fields, or raise the limit "
+                "on LLMSettings / env REPLAYT_LLM_MAX_SCHEMA_CHARS."
+            )
         sys = (
             "You must respond with a single JSON object that validates against this JSON Schema "
             f"(return JSON only, no markdown):\n{schema_hint}"
@@ -366,7 +472,13 @@ class LLMBridge:
             timeout_seconds=timeout_seconds,
             extra_headers=extra_headers,
         )
-        obj = json.loads(_extract_json_object(text))
+        cap = self._client.settings.max_parse_response_chars
+        if len(text) > cap:
+            raise ValueError(
+                f"Model response length ({len(text)} chars) exceeds max_parse_response_chars ({cap}); "
+                "raise the limit on LLMSettings if needed."
+            )
+        obj = json.loads(_extract_json_object(text, max_brace_starts=min(_MAX_JSON_OBJECT_BRACE_STARTS, cap)))
         result = model_type.model_validate(obj)
         self._emit(
             "structured_output",

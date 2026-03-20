@@ -52,6 +52,7 @@ def validation_report(
     wf: Workflow,
     strict_graph: bool,
     errors: list[str],
+    warnings: list[str],
     inputs_json: str | None,
     metadata_json: str | None,
     experiment_json: str | None,
@@ -77,14 +78,19 @@ def validation_report(
             "edge_count": len(wf.edges()),
         },
         "strict_graph": strict_graph,
+        "warnings": list(warnings),
         "errors": list(errors) + extra_errors,
     }
 
 
-def validate_workflow_graph(wf: Workflow, *, strict_graph: bool = False) -> list[str]:
-    """Graph / handler checks without executing steps (no LLM)."""
+def validate_workflow_graph(wf: Workflow, *, strict_graph: bool = False) -> tuple[list[str], list[str]]:
+    """Graph / handler checks without executing steps (no LLM).
+
+    Returns ``(errors, warnings)``. Warnings do not fail validation.
+    """
 
     errors: list[str] = []
+    warnings: list[str] = []
     if not wf.initial_state:
         errors.append("initial state is not set (call set_initial)")
     declared = set(wf.step_names())
@@ -125,4 +131,9 @@ def validate_workflow_graph(wf: Workflow, *, strict_graph: bool = False) -> list
             "strict graph: multi-state workflow has no declared transitions; use "
             "wf.note_transition(from_state, to_state), or YAML next/branch/approval (edges inferred)"
         )
-    return errors
+    elif len(wf.step_names()) >= 2 and not wf.edges():
+        warnings.append(
+            "Workflow has 2+ steps but no declared transitions (empty note_transition / YAML-inferred "
+            "edges). Any step-to-step return value is allowed at runtime unless you use --strict-graph."
+        )
+    return errors, warnings

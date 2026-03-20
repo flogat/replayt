@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 from collections.abc import Iterator
@@ -8,7 +9,16 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from replayt.exceptions import LogLockError
+
+_log = logging.getLogger(__name__)
+
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+
+_LOCK_HELP = (
+    "Use a single writer per run_id, close other processes using this log, or retry. "
+    "On Windows, another process may be holding the JSONL lock."
+)
 
 
 if os.name == "nt":  # pragma: no cover
@@ -23,7 +33,10 @@ if os.name == "nt":  # pragma: no cover
         fall outside the originally-locked range.
         """
         f.seek(0)
-        msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+        try:
+            msvcrt.locking(f.fileno(), msvcrt.LK_LOCK, 1)
+        except OSError as e:
+            raise LogLockError(f"Could not lock JSONL log file. {_LOCK_HELP}") from e
         try:
             yield
         finally:
@@ -31,26 +44,42 @@ if os.name == "nt":  # pragma: no cover
                 f.flush()
                 os.fsync(f.fileno())
             f.seek(0)
-            msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            try:
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+            except OSError:
+                _log.warning("Could not unlock JSONL file (Windows); lock may be stuck", exc_info=True)
 else:
     import fcntl
 
     @contextmanager
     def _lock_file(f, *, shared: bool = False) -> Iterator[None]:
-        fcntl.flock(f.fileno(), fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        op = fcntl.LOCK_SH if shared else fcntl.LOCK_EX
+        try:
+            fcntl.flock(f.fileno(), op)
+        except OSError as e:
+            raise LogLockError(f"Could not lock JSONL log file. {_LOCK_HELP}") from e
         try:
             yield
         finally:
             if not shared:
                 f.flush()
                 os.fsync(f.fileno())
-            fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            try:
+                fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                _log.warning("Could not unlock JSONL file; lock may be stuck", exc_info=True)
 
 
 def _validate_run_id(run_id: str) -> str:
     if not _RUN_ID_RE.fullmatch(run_id):
         raise ValueError("run_id must be 1-128 chars and contain only letters, numbers, dot, underscore, or hyphen")
     return run_id
+
+
+def validate_run_id(run_id: str) -> str:
+    """Return *run_id* if it is safe for JSONL basenames and store APIs (same rules as :class:`JSONLStore`)."""
+
+    return _validate_run_id(run_id)
 
 
 class JSONLStore:
@@ -70,6 +99,22 @@ class JSONLStore:
         if not path.exists() or path.stat().st_size == 0:
             path.write_bytes(b"\n")
         return path
+
+    def _max_seq_full_scan(self, f) -> int:
+        """Scan from BOF for the maximum ``seq`` (used when tail parsing cannot read a valid last line)."""
+
+        f.seek(0)
+        max_seq = 0
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                event = json.loads(line)
+                max_seq = max(max_seq, int(event.get("seq", 0)))
+            except (json.JSONDecodeError, TypeError, ValueError):
+                continue
+        return max_seq
 
     def _read_last_seq_locked(self, f) -> int:
         """Return the last event seq by reading from EOF backward (O(tail)), not a full-file scan."""
@@ -96,7 +141,7 @@ class JSONLStore:
                         return int(event.get("seq", 0))
                     except (json.JSONDecodeError, TypeError, ValueError):
                         continue
-                return 0
+                return self._max_seq_full_scan(f) if end > 0 else 0
             read_size = min(read_size * 2, end)
             start = end - read_size
 

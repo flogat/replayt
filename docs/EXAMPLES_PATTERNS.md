@@ -1,6 +1,6 @@
 # Examples: composition patterns
 
-These recipes are **not** built into replayt core. They show how to stay within the design principles (explicit states, local logs, no hosted platform in core) while integrating queues, UIs, other SDKs, and analytics.
+These recipes are **not** built into replayt core. Use them to wire up queues, UIs, other SDKs, and analytics while core stays small: explicit states, local logs, no hosted platform.
 
 **Tutorial first:** work through sections 1–14 in [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) in order. Return here when you need a reference pattern.
 
@@ -8,7 +8,7 @@ These recipes are **not** built into replayt core. They show how to stay within 
 
 ## Patterns (composition, not core features)
 
-These are **not** shipped as frameworks inside replayt. They show how different teams stay within the design principles (explicit states, local logs, no hosted platform in core).
+Same idea as the intro above: patterns you implement yourself, not features shipped inside replayt.
 
 ### Pattern: approval bridge (local UI)
 
@@ -107,7 +107,7 @@ class Plan(BaseModel):
 def plan_with_sdk(ctx):
     client = OpenAI()
     r = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="anthropic/claude-sonnet-4.6",
         temperature=0,
         response_format={"type": "json_object"},
         messages=[{"role": "user", "content": "Return JSON only: next_action and risk_notes."}],
@@ -161,7 +161,7 @@ class StreamSummary(BaseModel):
 def stream_then_struct(ctx):
     client = OpenAI()
     stream = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="anthropic/claude-sonnet-4.6",
         stream=True,
         messages=[{"role": "user", "content": "Long explanation of the bug."}],
     )
@@ -459,7 +459,7 @@ def normalize(ctx):
 
 ## Workaround patterns (rejected features — composition, not core)
 
-These patterns address common requests that conflict with replayt's design principles. They are documented here as workarounds rather than built into core.
+Common requests we keep out of core. Implement these in your own stack; they are patterns, not shipped features.
 
 ### Pattern: async runner (use `asyncio.to_thread`)
 
@@ -508,9 +508,9 @@ Or use the `ForwardingStore` pattern (above) to stream events in real-time to an
 
 **Request:** "I want a web app to browse runs, view timelines, and approve pending runs from the browser."
 
-**Why rejected:** A dashboard is a full product surface requiring auth, sessions, real-time updates, and deployment. It conflicts with local-first and tiny mental model. replayt is the engine, not the dashboard.
+**Why rejected:** Auth, sessions, deployment, and live updates are a separate product. Core stays local-first; replayt stays the engine.
 
-**Workaround:** Combine existing tools for a dashboard-like experience with zero custom code:
+**Workaround:** Stitch together tools you already use:
 
 1. **Single-run HTML report:** `replayt report RUN_ID --out run.html` produces a self-contained shareable page.
 2. **SQL over runs with datasette:** Point [datasette](https://datasette.io/) at your SQLite store for an instant browsable, filterable UI:
@@ -524,7 +524,7 @@ datasette .replayt/runs.db
 3. **DuckDB ad-hoc analytics:** Query JSONL logs directly (see DuckDB pattern above).
 4. **Approval bridge:** See the FastAPI approval bridge pattern above for a minimal custom approval API.
 
-The pieces exist; assemble the combination your org needs.
+Pick the mix that fits your org.
 
 ### Pattern: static graph with dynamic data (no runtime state creation)
 

@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from replayt.persistence import JSONLStore
+from replayt.persistence import JSONLStore, validate_run_id
 
 
 def test_jsonl_roundtrip(tmp_path: Path) -> None:
@@ -24,6 +24,19 @@ def test_jsonl_append_event_allocates_monotonic_sequence(tmp_path: Path) -> None
     second = store.append_event("r1", ts="t2", typ="state_entered", payload={})
     assert first["seq"] == 1
     assert second["seq"] == 2
+
+
+def test_jsonl_append_event_monotonic_seq_after_corrupt_tail_line(tmp_path: Path) -> None:
+    path = tmp_path / "corrupt_tail.jsonl"
+    path.write_text(
+        '{"ts":"t","run_id":"corrupt_tail","seq":1,"type":"run_started","payload":{}}\n'
+        '{"ts":"t","run_id":"corrupt_tail","seq":2,"type":"state_entered","payload":{}}\n'
+        "NOT_JSON_TAIL\n",
+        encoding="utf-8",
+    )
+    store = JSONLStore(tmp_path)
+    ev = store.append_event("corrupt_tail", ts="t3", typ="state_entered", payload={})
+    assert ev["seq"] == 3
 
 
 def test_jsonl_append_event_tail_seq_on_long_log(tmp_path: Path) -> None:
@@ -75,3 +88,15 @@ def test_jsonl_delete_run_missing(tmp_path: Path) -> None:
     store = JSONLStore(tmp_path)
     freed = store.delete_run("nonexistent")
     assert freed == 0
+
+
+def test_validate_run_id_accepts_safe_ids() -> None:
+    assert validate_run_id("ab") == "ab"
+    assert validate_run_id("a-b_1.c") == "a-b_1.c"
+
+
+def test_validate_run_id_rejects_unsafe_ids() -> None:
+    with pytest.raises(ValueError, match="run_id"):
+        validate_run_id("../x")
+    with pytest.raises(ValueError, match="run_id"):
+        validate_run_id("x/y")

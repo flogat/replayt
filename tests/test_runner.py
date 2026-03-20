@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from replayt.exceptions import RunFailed
 from replayt.persistence import JSONLStore
 from replayt.runner import Runner, resolve_approval_on_store
 from replayt.testing import MockLLMClient
@@ -586,6 +587,58 @@ def test_approval_outcomes_last_resolution_wins(tmp_path: Path) -> None:
     ctx = RunContext(r)
     assert ctx.is_rejected("ship")
     assert not ctx.is_approved("ship")
+
+
+def test_resume_target_pairs_fifo_when_same_approval_id_requested_twice(tmp_path: Path) -> None:
+    wf = Workflow("dup_aid")
+    wf.set_initial("start")
+
+    @wf.step("start")
+    def start(ctx) -> str | None:
+        return None
+
+    events = [
+        {"type": "approval_requested", "payload": {"approval_id": "x", "on_approve": "first", "state": "a"}},
+        {"type": "approval_requested", "payload": {"approval_id": "x", "on_approve": "second", "state": "b"}},
+        {"type": "approval_resolved", "payload": {"approval_id": "x", "approved": True}},
+    ]
+    r = Runner(wf, store=JSONLStore(tmp_path))
+    target, _paused = r._resume_target_from_events(events)
+    assert target == "first"
+
+
+def test_resolve_approval_consumes_oldest_pending_when_duplicate_ids(tmp_path: Path) -> None:
+    store = JSONLStore(tmp_path)
+    rid = "fifoaid"
+    store.append_event(rid, ts="1", typ="run_started", payload={})
+    store.append_event(
+        rid, ts="2", typ="approval_requested", payload={"approval_id": "x", "on_approve": "a", "state": "s"}
+    )
+    store.append_event(
+        rid, ts="3", typ="approval_requested", payload={"approval_id": "x", "on_approve": "b", "state": "s"}
+    )
+    resolve_approval_on_store(store, rid, "x", approved=True)
+    events = store.load_events(rid)
+    n_req = sum(1 for e in events if e["type"] == "approval_requested")
+    n_res = sum(1 for e in events if e["type"] == "approval_resolved")
+    assert n_req == 2
+    assert n_res == 1
+
+
+def test_run_failed_from_step_is_not_retried(tmp_path: Path) -> None:
+    wf = Workflow("no_retry_rf")
+    wf.set_initial("a")
+
+    @wf.step("a", retries=RetryPolicy(max_attempts=5, backoff_seconds=0.0))
+    def a(ctx) -> str | None:
+        raise RunFailed("fatal")
+
+    store = JSONLStore(tmp_path)
+    r = Runner(wf, store, log_mode=LogMode.redacted)
+    result = r.run()
+    assert result.status == "failed"
+    retries = [e for e in store.load_events(result.run_id) if e["type"] == "retry_scheduled"]
+    assert retries == []
 
 
 def test_resume_target_prefers_latest_chronological_resolution(tmp_path: Path) -> None:

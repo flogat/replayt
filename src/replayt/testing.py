@@ -14,7 +14,12 @@ from replayt.workflow import Workflow
 
 
 class DryRunLLMClient(OpenAICompatClient):
-    """Returns placeholder responses without calling any LLM. Useful for ``replayt run --dry-run``."""
+    """Returns placeholder responses without calling any LLM. Useful for ``replayt run --dry-run``.
+
+    Structured responses are synthesized from the JSON Schema via a **minimal** filler: ``allOf`` /
+    ``oneOf`` / ``anyOf`` and uncommon combinators are only partially handled—complex schemas may
+    not validate until you switch to :class:`MockLLMClient` or a real model.
+    """
 
     def __init__(self) -> None:
         super().__init__(LLMSettings(api_key="dry-run"))

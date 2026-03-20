@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from collections.abc import Callable
 from typing import Any, TypeVar, get_type_hints
 
 from pydantic import BaseModel, TypeAdapter
 
 T = TypeVar("T")
+
+_log = logging.getLogger("replayt.tools")
 
 
 class ToolRegistry:
@@ -33,7 +36,19 @@ class ToolRegistry:
         self._emit("tool_call", {"state": state, "name": name, "arguments": arguments})
         try:
             sig = inspect.signature(fn)
-            hints = get_type_hints(fn)
+            mod = inspect.getmodule(fn)
+            globalns = vars(mod) if mod is not None else {}
+            try:
+                hints = get_type_hints(fn, globalns=globalns)
+            except NameError:
+                try:
+                    hints = get_type_hints(fn)
+                except NameError:
+                    _log.warning(
+                        "Could not resolve type hints for tool %r; validating arguments as Any",
+                        name,
+                    )
+                    hints = {p: Any for p in sig.parameters}
             unknown = set(arguments) - set(sig.parameters)
             if unknown:
                 raise TypeError(f"Unexpected tool arguments: {sorted(unknown)}")

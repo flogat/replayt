@@ -60,7 +60,7 @@ Print the bundled JSON Schema for one JSONL event line (stdout)—useful for CI 
 
 Resolve an approval gate and continue a paused run. Same exit codes as `run`. Use `--reject` to reject the approval. Optional **`--reason`**, **`--actor-json '{…}'`**, and **`--resolver NAME`** (default `cli`) are stored on the `approval_resolved` event.
 
-If project config defines **`resume_hook`** (argv list) or env **`REPLAYT_RESUME_HOOK`** is set, that command runs **first** with `REPLAYT_TARGET`, `REPLAYT_RUN_ID`, `REPLAYT_APPROVAL_ID`, and `REPLAYT_REJECT` (`0` or `1`) in the environment; non-zero exit aborts resume without writing `approval_resolved`. See [`CONFIG.md`](CONFIG.md).
+If project config defines **`resume_hook`** (argv list) or env **`REPLAYT_RESUME_HOOK`** is set, that command runs **first** with `REPLAYT_TARGET`, `REPLAYT_RUN_ID`, `REPLAYT_APPROVAL_ID`, and `REPLAYT_REJECT` (`0` or `1`) in the environment; non-zero exit aborts resume without writing `approval_resolved`. A **default 120s** wall-clock limit applies unless you set **`resume_hook_timeout`** / **`REPLAYT_RESUME_HOOK_TIMEOUT`** (≤ 0 = no limit). See [`CONFIG.md`](CONFIG.md).
 
 ## `replayt graph TARGET`
 

@@ -4,14 +4,14 @@ Operational snippets that are easy to copy. For onboarding, use [`QUICKSTART.md`
 
 ## Configure the LLM client (base URL, model, timeouts)
 
-replayt uses a small OpenAI-compatible HTTP client. You can steer it in two layers: **process defaults** and **per-call overrides**.
+replayt uses a small OpenAI-compatible HTTP client. Configure it at two levels: **process defaults** and **per-call overrides**.
 
 **Environment (CLI and Python if you omit `llm_settings`):**
 
 - `OPENAI_API_KEY` — required for live model calls
-- `OPENAI_BASE_URL` — if unset, defaults to the **`REPLAYT_PROVIDER`** preset base URL, else `https://api.openai.com/v1`
-- `REPLAYT_MODEL` — if unset, defaults to the **`REPLAYT_PROVIDER`** preset model, else `gpt-4o-mini`
-- `REPLAYT_PROVIDER` — optional preset name: `openai` (default behavior), `ollama`, `groq`, `together`, `openrouter`, `anthropic` (native Anthropic hosts often need an OpenAI-compatible gateway—see [`src/replayt_examples/README.md`](../src/replayt_examples/README.md))
+- `OPENAI_BASE_URL` — if unset, defaults to the **`REPLAYT_PROVIDER`** preset base URL, else **`https://openrouter.ai/api/v1`**
+- `REPLAYT_MODEL` — if unset, defaults to the **`REPLAYT_PROVIDER`** preset model, else **`anthropic/claude-sonnet-4.6`** (OpenRouter slug)
+- `REPLAYT_PROVIDER` — optional preset name: if unset, behavior matches **`openrouter`**; explicit values: `openai`, `ollama`, `groq`, `together`, `openrouter`, `anthropic` (native Anthropic hosts often need an OpenAI-compatible gateway—see [`src/replayt_examples/README.md`](../src/replayt_examples/README.md))
 
 **Python defaults** — pick a preset without memorizing URLs:
 
@@ -43,7 +43,7 @@ runner = Runner(
     llm_settings=LLMSettings(
         api_key=os.environ["OPENAI_API_KEY"],
         base_url="https://api.example.com/v1",
-        model="gpt-4o-mini",
+        model="anthropic/claude-sonnet-4.6",
         timeout_seconds=90.0,
         extra_headers={"X-My-Gateway": "team-b"},
     ),

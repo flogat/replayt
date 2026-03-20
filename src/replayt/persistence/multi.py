@@ -14,9 +14,16 @@ MirrorErrorHandler = Callable[[str, EventStore, Exception], None]
 class MultiStore:
     """Write-through to multiple stores; reads come from the first store.
 
-    Mirror store failures are logged at WARNING level.  Pass *on_mirror_error*
-    to receive a callback ``(operation, store, exception)`` for alerting or
-    metrics.
+    **Consistency:** Events are always appended to the *primary* first, then to each
+    mirror via ``append``. If a mirror fails and ``strict_mirror`` is false, the primary
+    log still contains the event but the mirror may be missing rows—queries against SQLite
+    (or a second JSONL file) can then diverge until repaired. Use ``strict_mirror=True``
+    when the mirror must stay byte-for-byte consistent with the primary or the run should
+    fail. The CLI defaults to strict mirroring whenever ``--sqlite`` is used unless
+    ``strict_mirror`` is set false in project config (see ``replayt.cli.config.resolve_strict_mirror``).
+
+    Mirror failures are logged at WARNING. Pass *on_mirror_error* for a callback
+    ``(operation, store, exception)`` for alerting or metrics.
 
     With ``strict_mirror=True``, any mirror write failure is re-raised after logging
     so the primary and mirrors stay consistent or the run fails loudly.
@@ -35,6 +42,14 @@ class MultiStore:
         self._on_mirror_error = on_mirror_error
         self._strict_mirror = strict_mirror
         self.mirror_error_count: int = 0
+
+    def close(self) -> None:
+        """Close mirror stores that expose ``close`` (e.g. :class:`~replayt.persistence.sqlite.SQLiteStore`)."""
+
+        for store in self._mirror:
+            closer = getattr(store, "close", None)
+            if callable(closer):
+                closer()
 
     def _handle_mirror_error(self, operation: str, store: EventStore, exc: Exception, run_id: str) -> None:
         self.mirror_error_count += 1

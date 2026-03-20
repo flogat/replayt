@@ -96,7 +96,7 @@ Each run is an append-only **JSONL** file under `.replayt/runs/` (one line per e
 | `next_state: null` on exit | Terminal state—no further steps. |
 | `run_completed` | Final status (`completed`, `failed`, etc.). |
 
-Workflows that call an LLM add `llm_request`, `llm_response`, and `structured_output` events; tool usage adds `tool_call` / `tool_result`; approvals add `approval_requested` / `approval_resolved`. Same file—same mental model.
+Workflows that call an LLM add `llm_request`, `llm_response`, and `structured_output` events; tool usage adds `tool_call` / `tool_result`; approvals add `approval_requested` / `approval_resolved`. Same file throughout.
 
 ## 6. Where replayt fits (one glance)
 

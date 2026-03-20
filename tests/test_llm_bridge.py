@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from unittest.mock import MagicMock, patch
+from contextlib import contextmanager
+from unittest.mock import patch
 
 import httpx
 import pytest
@@ -13,6 +14,24 @@ from replayt.types import LogMode
 
 class Answer(BaseModel):
     value: int
+
+
+class _FakeStreamResp:
+    def __init__(self, body: bytes, *, status: int = 200, headers: dict[str, str] | None = None) -> None:
+        self.status_code = status
+        self.headers = headers or {}
+        self._body = body
+
+    def raise_for_status(self) -> None:
+        pass
+
+    def iter_bytes(self):
+        yield self._body
+
+
+@contextmanager
+def _stream_cm(resp: _FakeStreamResp):
+    yield resp
 
 
 def test_llm_bridge_with_settings_merges_experiment_into_effective() -> None:
@@ -130,7 +149,7 @@ def test_llm_bridge_structured_only_skips_content_preview() -> None:
     assert "latency_ms" in resp
 
 
-def test_llm_bridge_parse_extracts_first_valid_json_object() -> None:
+def test_llm_bridge_parse_extracts_json_object_from_fenced_response() -> None:
     client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
     bridge = LLMBridge(
         emit=lambda *_args, **_kwargs: None,
@@ -155,6 +174,31 @@ def test_llm_bridge_parse_extracts_first_valid_json_object() -> None:
     assert out.value == 7
 
 
+def test_llm_bridge_parse_prefers_last_json_object() -> None:
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=lambda *_args, **_kwargs: None,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "parse",
+    )
+    canned = {
+        "choices": [
+            {
+                "message": {
+                    "content": '{"value": 1} noise {"value": 42}',
+                }
+            }
+        ],
+        "usage": {},
+    }
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        out = bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
+
+    assert out.value == 42
+
+
 def test_llm_bridge_parse_raises_for_missing_json_object() -> None:
     client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
     bridge = LLMBridge(
@@ -165,8 +209,42 @@ def test_llm_bridge_parse_raises_for_missing_json_object() -> None:
     )
 
     with patch.object(client, "chat_completions", return_value={"choices": [{"message": {"content": "no json"}}]}):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match="No JSON object found"):
             bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
+
+
+def test_llm_bridge_parse_rejects_oversized_response() -> None:
+    settings = LLMSettings(api_key="k", model="m", max_parse_response_chars=100)
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(
+        emit=lambda *_args, **_kwargs: None,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "parse",
+    )
+    huge = "x" * 101
+    with patch.object(bridge, "complete_text", return_value=huge):
+        with pytest.raises(ValueError, match="exceeds max_parse_response_chars"):
+            bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
+
+
+def test_llm_bridge_parse_rejects_oversized_json_schema() -> None:
+    from pydantic import BaseModel, Field
+
+    class Wide(BaseModel):
+        a: str = Field(description="x" * 400)
+        b: str = Field(description="y" * 400)
+
+    settings = LLMSettings(api_key="k", model="m", max_schema_json_chars=120)
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(
+        emit=lambda *_args, **_kwargs: None,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "parse",
+    )
+    with pytest.raises(ValueError, match="max_schema_json_chars"):
+        bridge.parse(Wide, messages=[{"role": "user", "content": "hi"}])
 
 
 def test_extract_json_object_empty_string() -> None:
@@ -193,6 +271,13 @@ def test_extract_json_object_nested() -> None:
     assert json.loads(result) == {"outer": {"inner": 1}}
 
 
+def test_extract_json_object_prefers_last_dict() -> None:
+    from replayt.llm import _extract_json_object
+
+    text = '{"a": 1} middle {"b": 2}'
+    assert json.loads(_extract_json_object(text)) == {"b": 2}
+
+
 def test_extract_json_object_ignores_arrays() -> None:
     from replayt.llm import _extract_json_object
 
@@ -200,27 +285,62 @@ def test_extract_json_object_ignores_arrays() -> None:
         _extract_json_object("[1, 2, 3]")
 
 
-def test_openai_compat_invalid_json_body_raises() -> None:
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.text = "<html>not json</html>"
-    mock_resp.json.side_effect = json.JSONDecodeError("Expecting value", "<html>", 0)
-    mock_resp.raise_for_status = MagicMock()
+def test_extract_json_object_too_many_braces_aborts() -> None:
+    from replayt.llm import _extract_json_object
 
+    text = "{" * 60_000 + '{"z": 1}'
+    with pytest.raises(ValueError, match="Too many"):
+        _extract_json_object(text, max_brace_starts=50_000)
+
+
+def test_openai_compat_invalid_json_body_raises() -> None:
+    body = b"<html>not json</html>"
     client = OpenAICompatClient(LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"))
-    with patch.object(httpx.Client, "post", return_value=mock_resp):
+    with patch.object(
+        httpx.Client,
+        "stream",
+        side_effect=lambda *a, **k: _stream_cm(_FakeStreamResp(body)),
+    ):
         with pytest.raises(RuntimeError, match="not valid JSON"):
             client.chat_completions(messages=[{"role": "user", "content": "x"}])
 
 
 def test_openai_compat_omits_authorization_without_api_key() -> None:
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"choices": [{"message": {"content": "{}"}}]}
-    mock_resp.raise_for_status = MagicMock()
-
+    body = b'{"choices":[{"message":{"content":"{}"}}]}'
     client = OpenAICompatClient(LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"))
-    with patch.object(httpx.Client, "post", return_value=mock_resp) as post:
+    with patch.object(
+        httpx.Client,
+        "stream",
+        side_effect=lambda *a, **k: _stream_cm(_FakeStreamResp(body)),
+    ) as stream:
         client.chat_completions(messages=[{"role": "user", "content": "x"}])
-    hdrs = post.call_args.kwargs["headers"]
+    hdrs = stream.call_args.kwargs["headers"]
     assert "Authorization" not in hdrs
+
+
+def test_openai_compat_rejects_response_over_max_bytes() -> None:
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", max_response_bytes=10)
+    )
+    with patch.object(
+        httpx.Client,
+        "stream",
+        side_effect=lambda *a, **k: _stream_cm(_FakeStreamResp(b"x" * 20)),
+    ):
+        with pytest.raises(RuntimeError, match="max_response_bytes"):
+            client.chat_completions(messages=[{"role": "user", "content": "x"}])
+
+
+def test_openai_compat_rejects_content_length_over_max_bytes() -> None:
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", max_response_bytes=10)
+    )
+    with patch.object(
+        httpx.Client,
+        "stream",
+        side_effect=lambda *a, **k: _stream_cm(
+            _FakeStreamResp(b"{}", headers={"content-length": "999"})
+        ),
+    ):
+        with pytest.raises(RuntimeError, match="Content-Length"):
+            client.chat_completions(messages=[{"role": "user", "content": "x"}])

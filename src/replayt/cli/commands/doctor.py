@@ -51,7 +51,7 @@ def cmd_doctor(
     pyver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     checks.append(("python", True, pyver))
     prov = os.environ.get("REPLAYT_PROVIDER", "")
-    checks.append(("replayt_provider", True, prov or "(unset, using openai-style defaults)"))
+    checks.append(("replayt_provider", True, prov or "(unset, OpenRouter preset)"))
     checks.append(("openai_api_key", bool(settings.api_key), "set" if settings.api_key else "missing"))
     checks.append(("openai_base_url", True, settings.base_url))
     checks.append(("model", True, settings.model))

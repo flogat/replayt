@@ -37,3 +37,7 @@ class ContextSchemaError(ReplaytError):
 
 class RunFailed(ReplaytError):
     """Fatal workflow failure after retries exhausted."""
+
+
+class LogLockError(ReplaytError):
+    """Could not acquire the JSONL file lock (contention or unsupported filesystem)."""

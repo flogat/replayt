@@ -16,7 +16,7 @@
 - **`replayt replay`** / **`replayt report`** walk the **recorded** timeline **without** calling the provider again (not bitwise regeneration; see [docs/SCOPE.md](docs/SCOPE.md)).
 - **Approvals** pause with exit code **`2`**; **`replayt resume`** continues the same run.
 
-**replayt** is a small Python library and CLI for teams that want **obvious control flow and a durable audit trail** around LLM steps—without centering the product on a sprawling agent platform or hosted “AI OS.”
+**replayt** is a small Python library and CLI for teams that want **obvious control flow and a durable audit trail** around LLM steps, without building a full agent platform or hosted control plane.
 
 **Where it fits**
 
@@ -35,7 +35,7 @@ Transitions and branching are **your code**; the model does not silently rewrite
 
 **Start here:** [Five-minute quickstart](docs/QUICKSTART.md) · [Tutorial (14 workflows)](src/replayt_examples/README.md) · [Production checklist](docs/PRODUCTION.md) · [Recipes (LLM, CI)](docs/RECIPES.md) · [Composition patterns](docs/EXAMPLES_PATTERNS.md) · [Vs other tools](docs/COMPARISON.md)
 
-**Featured reads after quickstart:** in the tutorial, jump to **§10 GitHub issue triage** (validation + LLM) and **§12 Publishing preflight** (structured review + approval) in [`src/replayt_examples/README.md`](src/replayt_examples/README.md).
+**After quickstart:** in the tutorial, try **§10 GitHub issue triage** (validation + LLM) and **§12 Publishing preflight** (structured review + approval) in [`src/replayt_examples/README.md`](src/replayt_examples/README.md).
 
 **Terminal demo:** Short illustrative cast [`docs/replayt-demo.cast`](docs/replayt-demo.cast) (`asciinema play docs/replayt-demo.cast`). To share in a browser, upload the cast to [asciinema.org](https://asciinema.org/) and link the player URL here or in your fork—steps in [docs/DEMO.md](docs/DEMO.md).
 
@@ -98,15 +98,15 @@ flowchart LR
 
 ## Why replayt exists
 
-Most LLM tooling optimizes for autonomy and fast demos. Teams shipping real workflows often need **boring** systems: explicit branches, schema-shaped outputs, and logs you can diff, approve against, and replay.
+Most LLM tooling targets autonomy and fast demos. Teams shipping real workflows often need **boring** systems: explicit branches, schema-shaped outputs, and logs you can diff, approve against, and replay.
 
-replayt optimizes for that.
+replayt is aimed at that job.
 
 <p align="center">
   <img src="docs/demo-why.svg" alt="typical agent framework vs replayt" width="820"/>
 </p>
 
-replayt is built around a small, disciplined proposition:
+replayt sticks to a small, fixed set of rules:
 
 - define the workflow explicitly
 - validate meaningful outputs strictly
@@ -147,7 +147,7 @@ A good replayt workflow lets you answer, after the fact:
 - What required human approval?
 - Can I replay the run and inspect it step by step?
 
-That “after the fact” understanding is the wedge.
+That is what the run log is for.
 
 ---
 
@@ -168,15 +168,13 @@ It is **not**:
 - an “AI workforce” platform
 - “Temporal for agents”
 
-This is a deliberate anti-bloat project.
-
 replayt stays small enough to understand in one sitting.
 
 ---
 
 ## Security and trust boundaries
 
-replayt targets **trusted local or CI environments**: running a workflow **executes Python** from your file or import path (`replayt run workflow.py` / `module:wf`), with the privileges of your user.
+replayt targets **trusted local or CI environments**: running a workflow **runs Python** from your file or import path (`replayt run workflow.py` / `module:wf`), with the privileges of your user.
 
 - **Logs and approvals** are stored on disk without authentication. Anyone who can write your log directory can append events or influence resume behavior—treat the log path like credential storage.
 - **`replayt doctor`** performs an HTTP `GET` to ``OPENAI_BASE_URL``/``models`` and may send ``OPENAI_API_KEY``. Point the base URL only at providers you trust, or run ``replayt doctor --skip-connectivity`` to skip network I/O entirely.
@@ -487,7 +485,7 @@ steps:
 
 The repo ships a **linear tutorial** of **14 runnable workflows** (deterministic steps, LLM-backed classification, tools, retries, approvals, YAML, OpenAI/Anthropic SDK patterns)—see [`src/replayt_examples/README.md`](src/replayt_examples/README.md). **Composition patterns** (queues, approval UIs, pytest, …) live in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
 
-**Featured narratives** (good first reads in the tutorial):
+**Tutorial highlights:**
 
 - **GitHub issue triage** — validate issue shape, classify it, route or request more information
 - **Refund policy** — constrained support decisions with structured model output
@@ -521,7 +519,7 @@ See [`docs/RUN_LOG_SCHEMA.md`](docs/RUN_LOG_SCHEMA.md) for the event schema, [`d
 
 **Use something else when** you want autonomous long-running agents, a distributed workflow engine with cross-process durability, a visual graph builder, or a broad hosted “AI platform.”
 
-**Good phrases:** deterministic LLM workflows, replayable runs (recorded timeline), explicit state transitions, schema-enforced steps, local-first runner, inspectable pipelines, approval-gated workflows. **Avoid** selling it as an “AI workforce,” magic orchestration layer, or enterprise suite—those fight what the tool is good at. Prefer **anti-hype, pro-discipline** wording; boundaries are in [docs/SCOPE.md](docs/SCOPE.md).
+**Good phrases:** deterministic LLM workflows, replayable runs (recorded timeline), explicit state transitions, schema-enforced steps, local-first runner, inspectable pipelines, approval-gated workflows. Skip positioning it as an “AI workforce,” magic orchestration layer, or enterprise suite. Use plain language; boundaries are in [docs/SCOPE.md](docs/SCOPE.md).
 
 Treat **JSONL and SQLite files you own** as the source of truth for dashboards and approval UIs. replayt is the **engine**; your app owns auth, routing, and UX.
 

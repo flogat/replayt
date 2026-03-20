@@ -40,7 +40,7 @@ def coerce_max_tokens_for_api(value: Any) -> int | None:
     if value is None:
         return None
     if isinstance(value, bool):
-        return None
+        raise TypeError("max_tokens cannot be a boolean")
     if isinstance(value, int):
         return value if value >= 0 else None
     if isinstance(value, float):

@@ -49,7 +49,7 @@ def classify(ctx) -> str:
     issue_body = str(ctx.get("issue_body") or "")
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="anthropic/claude-sonnet-4.6",
         temperature=0,
         response_format={"type": "json_object"},
         messages=[
@@ -96,7 +96,7 @@ def enrich(ctx) -> str:
     ]
 
     response = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="anthropic/claude-sonnet-4.6",
         temperature=0,
         tools=tools,
         tool_choice={"type": "function", "function": {"name": "set_enrichment"}},
@@ -130,7 +130,7 @@ def summarize(ctx) -> str:
     enrichment = ctx.get("enrichment") or {}
 
     stream = client.chat.completions.create(
-        model="gpt-4o-mini",
+        model="anthropic/claude-sonnet-4.6",
         stream=True,
         messages=[
             {

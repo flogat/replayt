@@ -39,6 +39,12 @@ def dry_check_suggested_command(
 
 
 def resume_hook_argv(cfg: dict[str, Any]) -> list[str] | None:
+    """Argv for the optional resume gate subprocess (trusted project config / env only).
+
+    ``resume_hook`` and ``REPLAYT_RESUME_HOOK`` are split with ``shlex`` and executed
+    without a shell—equivalent to typing the same argv in a terminal: do not point them
+    at untrusted input.
+    """
     env_hook = os.environ.get("REPLAYT_RESUME_HOOK", "").strip()
     use_posix = os.name != "nt"
     if env_hook:
@@ -58,7 +64,10 @@ def invoke_resume_hook(
     run_id: str,
     approval_id: str,
     reject: bool,
+    timeout_seconds: float | None,
 ) -> None:
+    """Run *argv* with extra ``REPLAYT_*`` env vars; *argv* must come from trusted config."""
+
     env = {
         **os.environ,
         "REPLAYT_TARGET": target,
@@ -66,7 +75,7 @@ def invoke_resume_hook(
         "REPLAYT_APPROVAL_ID": approval_id,
         "REPLAYT_REJECT": "1" if reject else "0",
     }
-    subprocess.run(argv, env=env, check=True)
+    subprocess.run(argv, env=env, check=True, timeout=timeout_seconds)
 
 
 def build_internal_run_argv(

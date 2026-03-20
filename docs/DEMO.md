@@ -1,6 +1,6 @@
 # Demo checklist
 
-Product positioning, diagrams, and the full story live in the [**main README**](../README.md). This file is for **smoke tests**, **terminal recordings**, and **release** reminders.
+Overview, diagrams, and the main narrative are in the [**README**](../README.md). This file covers **smoke tests**, **terminal recordings**, and **release** reminders.
 
 ## The three-step loop (reminder)
 

@@ -7,12 +7,13 @@ import logging
 import time
 import traceback
 import uuid
+from collections import defaultdict, deque
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
-from replayt.exceptions import ApprovalPending, ContextSchemaError, RunFailed
+from replayt.exceptions import ApprovalPending, ContextSchemaError, ReplaytError, RunFailed
 from replayt.llm import LLMBridge, LLMSettings, OpenAICompatClient
 from replayt.persistence.base import EventStore
 from replayt.tools import ToolRegistry
@@ -240,31 +241,32 @@ class Runner:
         return last
 
     def _resume_target_from_events(self, events: list[dict[str, Any]]) -> tuple[str | None, str | None]:
-        requests: dict[str, dict[str, Any]] = {}
-        resolutions: list[tuple[str, bool]] = []
+        """Pair each ``approval_resolved`` with the oldest still-pending request for that id (FIFO)."""
+
+        pending: dict[str, deque[dict[str, Any]]] = defaultdict(deque)
+        paired: list[tuple[bool, dict[str, Any]]] = []
         for e in events:
             payload = e.get("payload") or {}
-            if e.get("type") == "approval_requested":
-                approval_id = payload.get("approval_id")
-                if approval_id is not None:
-                    requests[str(approval_id)] = payload
-            elif e.get("type") == "approval_resolved":
-                approval_id = payload.get("approval_id")
-                if approval_id is not None:
-                    resolutions.append((str(approval_id), bool(payload.get("approved"))))
-
-        if not resolutions:
+            typ = e.get("type")
+            if typ == "approval_requested":
+                aid = payload.get("approval_id")
+                if aid is not None:
+                    pending[str(aid)].append(payload)
+            elif typ == "approval_resolved":
+                aid = payload.get("approval_id")
+                if aid is None:
+                    continue
+                q = pending[str(aid)]
+                if q:
+                    req = q.popleft()
+                    paired.append((bool(payload.get("approved")), req))
+        if not paired:
             return None, None
-
-        for approval_id, approved in reversed(resolutions):
-            request = requests.get(approval_id)
-            if not request:
-                continue
-            target = request.get("on_approve") if approved else request.get("on_reject")
-            if target in (None, ""):
-                return None, str(request.get("state")) if request.get("state") is not None else None
-            return str(target), str(request.get("state")) if request.get("state") is not None else None
-        return None, None
+        approved, request = paired[-1]
+        target = request.get("on_approve") if approved else request.get("on_reject")
+        if target in (None, ""):
+            return None, str(request.get("state")) if request.get("state") is not None else None
+        return str(target), str(request.get("state")) if request.get("state") is not None else None
 
     def run(
         self,
@@ -299,7 +301,7 @@ class Runner:
                 start_state = target_state
             else:
                 snapped = self._last_snapshot_state(events)
-                if snapped:
+                if snapped is not None:
                     start_state = snapped
 
         if not resume:
@@ -432,6 +434,10 @@ class Runner:
                             },
                         )
                         return RunResult(self.run_id, "paused", final_state=state)
+                    except ReplaytError as e:
+                        next_state = None
+                        last_err = e
+                        break
                     except Exception as e:  # noqa: BLE001
                         next_state = None
                         last_err = e
@@ -503,17 +509,18 @@ def resolve_approval_on_store(
         raise RuntimeError(f"No events found for run_id={run_id!r}")
 
     want = str(approval_id)
-    pending_request: dict[str, Any] | None = None
+    pending: deque[dict[str, Any]] = deque()
     for event in events:
         payload = event.get("payload") or {}
         aid = payload.get("approval_id")
         aid_str = str(aid) if aid is not None else ""
         if event.get("type") == "approval_requested" and aid_str == want:
-            pending_request = payload
+            pending.append(payload)
         elif event.get("type") == "approval_resolved" and aid_str == want:
-            pending_request = None
+            if pending:
+                pending.popleft()
 
-    if pending_request is None:
+    if not pending:
         raise RuntimeError(f"No pending approval {approval_id!r} found for run_id={run_id!r}")
 
     payload: dict[str, Any] = {

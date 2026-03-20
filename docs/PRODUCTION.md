@@ -50,6 +50,7 @@ Preflight with `replayt doctor` in an init container or a separate CI job if you
 - Default log directory is under `.replayt/runs/` (override with `--log-dir` or config—see [`CONFIG.md`](CONFIG.md)).
 - Choose **`LogMode`** explicitly in Python (`LogMode.redacted`, `structured_only`, or full) or via CLI `--log-mode`. **Redacted** is a good default when prompts or payloads may contain PII; see [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md) for what each event records.
 - Optional **SQLite** mirror: same events; treat the files as **data you own** (backup, encryption at rest, retention).
+- **SQLite mirror consistency:** With `strict_mirror = false` (default in some templates), a failed mirror write leaves the JSONL primary ahead of SQLite—mirror failures are logged at WARNING and the run continues. Set **`strict_mirror = true`** in project config when SQLite must match JSONL or the run should abort on mirror errors. See [`CONFIG.md`](CONFIG.md).
 - **Disk permissions:** restrict who can read or write the log directory (same trust model as credential files). For shareable evidence packets, use `replayt export-run` / `replayt seal` and store artifacts on WORM media or signed archives if policy requires it—see README *Security and trust boundaries*.
 
 ## Human approvals
@@ -62,6 +63,10 @@ Preflight with `replayt doctor` in an init container or a separate CI job if you
 - **`replayt validate TARGET`** — graph checks with no LLM calls ([`CLI.md`](CLI.md)).
 - **Exit codes:** `0` completed, `1` failed, `2` paused (approval required).
 - Prefer **mocked LLM** in automated tests; see [`RECIPES.md`](RECIPES.md) and **Pattern: golden path test** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+
+## LLM base URL (SSRF)
+
+`OPENAI_BASE_URL` / `LLMSettings.base_url` must come from **trusted** configuration—never from untrusted user input. Pointing the runner at an arbitrary URL is effectively **server-side request forgery** from the process network position. Local gateways (Ollama, corporate proxies) are normal; unvalidated URLs are not.
 
 ## Multi-tenant / isolation
 

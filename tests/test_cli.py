@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tarfile
 from pathlib import Path
@@ -202,6 +203,14 @@ def test_cli_seal_writes_manifest(tmp_path: Path) -> None:
     assert data["schema"] == "replayt.seal.v1"
     assert data["run_id"] == run_id
     assert len(data["line_sha256"]) == data["line_count"]
+
+
+def test_cli_seal_rejects_invalid_run_id(tmp_path: Path) -> None:
+    runner = CliRunner()
+    bad = "../../etc/passwd"
+    r = runner.invoke(app, ["seal", bad, "--log-dir", str(tmp_path)])
+    assert r.exit_code == 2
+    assert "run_id must be" in r.stderr or "run_id must be" in r.stdout
 
 
 def test_cli_run_dry_check() -> None:
@@ -1470,4 +1479,44 @@ def test_cli_gc_skips_delete_when_last_event_ts_unparseable(tmp_path: Path) -> N
     assert out.exit_code == 0
     assert (log_dir / f"{rid}.jsonl").is_file()
     assert "deleted 0 run(s)" in out.stdout
+
+
+def test_cli_run_timeout_appends_run_interrupted_to_sqlite_mirror(tmp_path: Path, monkeypatch) -> None:
+    from replayt.cli.commands import run as run_cmd
+    from replayt.persistence import JSONLStore, SQLiteStore
+
+    def boom(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout", 1))
+
+    monkeypatch.setattr(run_cmd.subprocess, "run", boom)
+    db = tmp_path / "mirror.sqlite3"
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--sqlite",
+            str(db),
+            "--timeout",
+            "1",
+            "--run-id",
+            "tout1",
+            "--dry-run",
+        ],
+    )
+    assert r.exit_code == 1
+    assert "timed out" in r.stderr.lower() or "timed out" in r.stdout.lower()
+
+    sql = SQLiteStore(db)
+    try:
+        ev_sql = sql.load_events("tout1")
+        assert any(e["type"] == "run_interrupted" for e in ev_sql)
+    finally:
+        sql.close()
+
+    ev_j = JSONLStore(tmp_path).load_events("tout1")
+    assert any(e["type"] == "run_interrupted" for e in ev_j)
 

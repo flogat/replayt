@@ -186,8 +186,8 @@ APPROVAL_ITEM = """\
 </div>"""
 
 
-def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
-    """Parse events into the same shape ``cmd_report`` uses (for single-run and diff reports)."""
+def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Single pass over events for HTML reports and diff context (rich approval metadata)."""
 
     workflow_name = ""
     workflow_version = ""
@@ -204,6 +204,7 @@ def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
     last_ts: str | None = None
     approval_requests: dict[str, dict[str, Any]] = {}
     approval_last: dict[str, bool] = {}
+    approval_resolved_ts: dict[str, str] = {}
 
     for e in events:
         ts = e.get("ts", "")
@@ -216,8 +217,10 @@ def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
         if typ == "run_started":
             workflow_name = str(payload.get("workflow_name", ""))
             workflow_version = str(payload.get("workflow_version", ""))
-            tags = payload.get("tags") or {}
-            run_metadata = payload.get("run_metadata") or {}
+            raw_tags = payload.get("tags") or {}
+            tags = raw_tags if isinstance(raw_tags, dict) else {}
+            raw_meta = payload.get("run_metadata") or {}
+            run_metadata = raw_meta if isinstance(raw_meta, dict) else {}
         elif typ == "state_entered":
             states.append({"state": str(payload.get("state", "")), "ts": ts})
         elif typ == "structured_output":
@@ -255,11 +258,14 @@ def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
                 approval_requests[str(aid)] = {
                     "summary": payload.get("summary", ""),
                     "state": payload.get("state", ""),
+                    "details": payload.get("details") or {},
+                    "requested_ts": ts,
                 }
         elif typ == "approval_resolved":
             aid = payload.get("approval_id")
             if aid is not None:
                 approval_last[str(aid)] = bool(payload.get("approved"))
+                approval_resolved_ts[str(aid)] = ts
 
     return {
         "workflow_name": workflow_name,
@@ -277,6 +283,34 @@ def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
         "last_ts": last_ts,
         "approval_requests": approval_requests,
         "approval_last": approval_last,
+        "approval_resolved_ts": approval_resolved_ts,
+    }
+
+
+def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Parse events into the same shape ``cmd_report`` uses (for single-run and diff reports)."""
+
+    agg = aggregate_run_report_data(events)
+    slim_approvals = {
+        aid: {"summary": meta["summary"], "state": meta["state"]}
+        for aid, meta in agg["approval_requests"].items()
+    }
+    return {
+        "workflow_name": agg["workflow_name"],
+        "workflow_version": agg["workflow_version"],
+        "status": agg["status"],
+        "tags": agg["tags"],
+        "run_metadata": agg["run_metadata"],
+        "states": agg["states"],
+        "outputs": agg["outputs"],
+        "tool_calls": agg["tool_calls"],
+        "prompt_tokens": agg["prompt_tokens"],
+        "completion_tokens": agg["completion_tokens"],
+        "total_tokens": agg["total_tokens"],
+        "first_ts": agg["first_ts"],
+        "last_ts": agg["last_ts"],
+        "approval_requests": slim_approvals,
+        "approval_last": agg["approval_last"],
     }
 
 
@@ -410,81 +444,23 @@ def build_run_report_html(
 ) -> str:
     """Build the same self-contained HTML as ``replayt report`` (for CLI and bundle export)."""
 
-    workflow_name = ""
-    workflow_version = ""
-    status = "unknown"
-    tags: dict[str, str] = {}
-    run_metadata: dict[str, Any] = {}
-    states: list[dict[str, str]] = []
-    outputs: list[dict[str, Any]] = []
-    tool_calls: list[dict[str, Any]] = []
-    prompt_tokens = 0
-    completion_tokens = 0
-    total_tokens = 0
-    first_ts: str | None = None
-    last_ts: str | None = None
-    approval_requests: dict[str, dict[str, Any]] = {}
-    approval_last: dict[str, bool] = {}
-    approval_resolved_ts: dict[str, str] = {}
-
-    for e in events:
-        ts = e.get("ts", "")
-        if first_ts is None:
-            first_ts = ts
-        last_ts = ts
-        typ = e.get("type")
-        payload = e.get("payload") or {}
-
-        if typ == "run_started":
-            workflow_name = str(payload.get("workflow_name", ""))
-            workflow_version = str(payload.get("workflow_version", ""))
-            tags = payload.get("tags") or {}
-            run_metadata = payload.get("run_metadata") or {}
-        elif typ == "state_entered":
-            states.append({"state": str(payload.get("state", "")), "ts": ts})
-        elif typ == "structured_output":
-            outputs.append({"schema_name": payload.get("schema_name", ""), "data": payload.get("data")})
-        elif typ == "tool_call":
-            tool_calls.append({
-                "tool": payload.get("name", ""), "seq": e.get("seq", ""), "args": payload.get("arguments"),
-            })
-        elif typ == "tool_result":
-            tool_calls.append({
-                "tool": payload.get("name", "result"),
-                "seq": e.get("seq", ""),
-                "args": payload.get("result"),
-            })
-        elif typ == "llm_response":
-            usage = payload.get("usage") or {}
-            pt = usage.get("prompt_tokens")
-            ct = usage.get("completion_tokens")
-            tt = usage.get("total_tokens")
-            if isinstance(pt, int):
-                prompt_tokens += pt
-            if isinstance(ct, int):
-                completion_tokens += ct
-            if isinstance(tt, int):
-                total_tokens += tt
-        elif typ == "run_completed":
-            status = str(payload.get("status", status))
-        elif typ == "run_paused":
-            status = "paused"
-        elif typ == "run_failed":
-            status = "failed"
-        elif typ == "approval_requested":
-            aid = payload.get("approval_id")
-            if aid is not None:
-                approval_requests[str(aid)] = {
-                    "summary": payload.get("summary", ""),
-                    "state": payload.get("state", ""),
-                    "details": payload.get("details") or {},
-                    "requested_ts": ts,
-                }
-        elif typ == "approval_resolved":
-            aid = payload.get("approval_id")
-            if aid is not None:
-                approval_last[str(aid)] = bool(payload.get("approved"))
-                approval_resolved_ts[str(aid)] = ts
+    agg = aggregate_run_report_data(events)
+    workflow_name = agg["workflow_name"]
+    workflow_version = agg["workflow_version"]
+    status = agg["status"]
+    tags = agg["tags"]
+    run_metadata = agg["run_metadata"]
+    states = agg["states"]
+    outputs = agg["outputs"]
+    tool_calls = agg["tool_calls"]
+    prompt_tokens = agg["prompt_tokens"]
+    completion_tokens = agg["completion_tokens"]
+    total_tokens = agg["total_tokens"]
+    first_ts = agg["first_ts"]
+    last_ts = agg["last_ts"]
+    approval_requests = agg["approval_requests"]
+    approval_last = agg["approval_last"]
+    approval_resolved_ts = agg["approval_resolved_ts"]
 
     duration = "n/a"
     t0 = _parse_iso_ts(first_ts)

@@ -19,13 +19,11 @@ If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTA
 
 ## How to use this tutorial README
 
-A productive rhythm is:
-
 1. Read one section in this file.
 2. Open the corresponding source file in `src/replayt_examples/`.
 3. Run the example exactly as shown.
 4. Inspect the run and compare the resulting context and events with the explanation here.
-5. Change the sample input and run it again to see how the workflow behaves.
+5. Change the sample input and run again to see different behavior.
 
 ### Install (PyPI — no clone required)
 
@@ -54,9 +52,9 @@ See [`README.md`](../../README.md) for Windows activation lines, `replayt doctor
 
 Sections **1–5** of this tutorial need **no API key**. For LLM-backed workflows in **automated tests**, use **`MockLLMClient`** with **`run_with_mock`** (or mock `httpx`) and assert on context or JSONL events—see **Pattern: golden path test (pytest)** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md). For **`replayt validate`** and CI exit codes, see [`docs/RECIPES.md`](../../docs/RECIPES.md).
 
-## When core ends: streaming, hooks, approvals, and audit integrity
+## Beyond core: streaming, hooks, approvals, and logs
 
-replayt’s contract is explicit states, an append-only **JSONL** timeline, and structured LLM outputs—use **`ctx.llm.with_settings(...)`** when you need per-call overrides so they show up under **`effective`** on **`llm_request`** events. Core does **not** emit per-token streams as first-class log lines (that would flood the timeline and blur replay semantics); instead, stream inside a step and record a **Pydantic-validated** result or a small summary you control. Terminal **`replayt resume`** is enough for many teams; stakeholder-facing or SSO-adjacent approvals stay in **your** app that reads the same JSONL and resolves gates without changing replayt’s graph. Org notifications, trace IDs, and policy checks should live in outer wrappers or callbacks so the FSM is never a hidden second engine. Tamper-evident or compliance-heavy bundles mean hashing, encrypting, or archiving **your** log files—the runtime cannot cryptographically prove integrity if an attacker can write the log directory (see **Security and trust boundaries** in the main [`README.md`](../../README.md)).
+replayt keeps explicit states, append-only **JSONL**, and structured LLM outputs. Use **`ctx.llm.with_settings(...)`** for per-call overrides; they show up under **`effective`** on **`llm_request`** events. Core does **not** log per-token streams (too noisy for replay); stream inside a step, then store a **Pydantic-validated** result or a short summary. **`replayt resume`** covers many approval flows; richer UIs read the same JSONL and resolve gates in **your** app. Notifications, trace IDs, and policy hooks belong in wrappers or callbacks—one FSM, not a second hidden engine. Strong audit packets mean hashing, encrypting, or archiving **your** logs; the runtime cannot prove integrity if an attacker can write the log directory (see **Security and trust boundaries** in [`README.md`](../../README.md)).
 
 **Composition patterns** (copy the names into EXAMPLES_PATTERNS search):
 
@@ -81,11 +79,11 @@ For **in-process** trace IDs or policy logging, use **`Runner(..., before_step=.
 
 ### Framework-style agents, streaming, and planner loops (feature 10 / composition)
 
-This subsection is the **documentation-first** answer for “why isn’t streaming / LangChain / LangGraph built into the runner?” replayt keeps **explicit** states and append-only JSONL; per-token log lines and hidden planners are out of scope ([**docs/SCOPE.md**](../../docs/SCOPE.md)). The supported shape is always: **one step** wraps the fancy SDK or graph; **one** validated exit shape drives the next state.
+**Why no built-in streaming / LangChain / LangGraph in the runner?** replayt keeps **explicit** states and append-only JSONL; per-token log lines and hidden planners are out of scope ([**docs/SCOPE.md**](../../docs/SCOPE.md)). Supported shape: **one step** wraps the other SDK or graph; **one** validated exit shape picks the next state.
 
 ### LangGraph (and similar frameworks) — **composition**, not core
 
-replayt will not ship LangGraph inside the runner; that would hide control flow and fight the explicit FSM model (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). **Recommended shape:** run LangGraph **inside one `@wf.step`**, then transition replayt based on **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, or tools—not every planner tick.
+replayt will not ship LangGraph inside the runner; that would hide control flow next to an explicit FSM (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). **Recommended shape:** run LangGraph **inside one `@wf.step`**, then move replayt forward from **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, or tools—not every planner tick.
 
 Install graph libraries in **your** project only:
 
@@ -172,7 +170,7 @@ The workflow has three stages in spirit, although only two state handlers do rea
 - `normalize` trims whitespace, title-cases the name, lowercases the email, compresses message spacing, and derives a `segment`.
 - `done` ends the run.
 
-The important lesson is that replayt is not just for LLM calls. It is also useful for deterministic business logic that you want to inspect later.
+replayt is not only for LLM calls: deterministic steps you want to inspect later use the same model.
 
 ### What to run
 Validate a raw lead payload, normalize formatting, and derive an internal segment.
@@ -194,7 +192,7 @@ The run should complete successfully and preserve both the validated input and t
 - `message="Need a demo for 40 seats"`
 - `segment="enterprise"`
 
-The `segment` becomes `enterprise` because the normalization logic checks whether the message mentions `seat` or `demo`. This is a good example of deterministic branching based on explicit code instead of a model guess.
+The `segment` becomes `enterprise` because the normalization logic checks whether the message mentions `seat` or `demo`. That is deterministic branching from explicit code, not a model guess.
 
 ## 3. Support routing — `replayt_examples.e03_support_routing`
 
@@ -229,7 +227,7 @@ The sample input contains billing language (`payment`, `invoice`, `declined`) an
 - `priority="high"`
 - `sla_hours=4`
 
-This is a useful tutorial example because you can easily change the subject/body and watch the route change in predictable ways.
+Change the subject or body and the route should shift in predictable ways.
 
 ## 4. Typed tool calls — `replayt_examples.e04_tool_using_procurement`
 
@@ -264,11 +262,11 @@ The run should complete successfully and the event log should show both tool cal
 - `within_policy=true`
 - `recommended_action="auto_approve"`
 
-The Design department limit in the example code is `500.0`, so a total of `298.0` stays within policy. This makes the example a good tutorial for both typed tools and deterministic post-tool branching.
+The Design department limit in the example code is `500.0`, so a total of `298.0` stays within policy. The same run covers typed tools and deterministic post-tool branching.
 
 ## 5. Retries for flaky integrations — `replayt_examples.e05_retrying_vendor_lookup`
 
-This example demonstrates retries without hidden loops.
+This example shows explicit retries: no hidden retry loops.
 
 ### What the code does
 
@@ -300,7 +298,7 @@ You should see a failed `lookup` attempt followed by an automatic retry and then
 - `risk_level="low"`
 - `lookup_attempts=2`
 
-The point of this tutorial is that the retry behavior is visible and auditable. replayt is not hiding the failure; it is recording it as part of the workflow history.
+Retries are visible and auditable: replayt records the failed attempt in the workflow history instead of hiding it.
 
 ## 6. Sales call prep brief — `replayt_examples.e06_sales_call_brief`
 
@@ -338,7 +336,7 @@ The exact wording will vary by model, but the outcome should still be predictabl
 - talking points that help the seller prepare for the next conversation
 - a concise `next_step`
 
-This is a tutorial example for the difference between “model output exists” and “model output is constrained enough to drive a workflow.”
+That is the gap between free-form model text and schema-shaped output that can drive the next step.
 
 ## 7. Customer feedback clustering — `replayt_examples.e07_feedback_clustering`
 
@@ -371,7 +369,7 @@ Again, the exact wording depends on the model, but the structure should stay sta
 - for each theme, a `priority`, `representative_quotes`, and `recommended_owner`
 - a single `release_note_hint`
 
-For this sample input, likely themes include performance/export reliability and access management or SSO. This makes the example useful for understanding how replayt captures structured analysis over multiple pieces of text.
+For this sample input, expect themes around performance or exports and around access or SSO. That is how replayt records structured analysis across several text inputs.
 
 ## 8. Travel approval — `replayt_examples.e08_travel_approval`
 
@@ -422,7 +420,7 @@ If you approve the run, it should resume through `book_trip` and end with `trave
 
 If you reject the run, it should resume through `reject_trip` and end with `travel_status="rejected"`.
 
-This is one of the best examples for learning how paused workflows appear in normal CLI usage.
+Use this section to see how paused workflows look from the CLI.
 
 ## 9. Incident response — `replayt_examples.e09_incident_response`
 
@@ -474,7 +472,7 @@ If approved, the final context should include `communication_plan="external_stat
 
 If rejected, the final context should include `communication_plan="internal_updates_only"`.
 
-This tutorial example shows how replayt keeps even high-pressure operational flows explicit and replayable.
+High-pressure operational flows stay explicit and replayable here too.
 
 ## 10. GitHub issue triage — `replayt_examples.issue_triage`
 
@@ -486,7 +484,7 @@ This example shows how deterministic validation and LLM classification can work 
 
 ### What the code does
 
-The workflow starts with `validate`, which ensures the issue payload exists and checks for obviously incomplete title/body fields. It then moves to `classify`:
+The workflow starts with `validate`, which checks that the issue payload exists and flags obviously incomplete title/body fields. It then moves to `classify`:
 
 - if required fields are missing, the workflow avoids an LLM classification and routes to `respond`
 - otherwise, the model produces a `TriageDecision`
@@ -512,7 +510,7 @@ The sample input is long enough to pass validation, so the interesting behavior 
 - `response_template` if the model decides more information is needed
 - `routing` if the model is confident enough to classify and route
 
-For this particular issue, a bug-style classification and engineering-oriented routing are the most likely result. The key tutorial lesson is that replayt still keeps the control flow explicit even when a model is involved.
+For this particular issue, a bug-style classification and engineering-oriented routing are the most likely result. Control flow stays explicit even when a model is involved.
 
 ## 11. Refund policy workflow — `replayt_examples.refund_policy`
 
@@ -550,7 +548,7 @@ The model still has discretion, but it must answer inside a bounded schema. Afte
 - `reason_codes`
 - `customer_message`
 
-Because the order was delivered only 3 days ago and the ticket reports damage, a refund-friendly action is plausible under the stated policy. The most important tutorial takeaway is that the output remains structured and reviewable rather than hidden inside prose.
+Because the order was delivered only 3 days ago and the ticket reports damage, a refund-friendly action is plausible under the stated policy. The output stays structured and reviewable instead of buried in prose.
 
 ## 12. Publishing preflight with approval gate — `replayt_examples.publishing_preflight`
 
@@ -600,7 +598,7 @@ If approved, the resumed run should end with `publish_status="approved"`.
 
 If rejected, the resumed run should end with `publish_status="aborted"`.
 
-This is a good tutorial example for content review pipelines where an LLM can prepare structured guidance, but a human still makes the final go/no-go decision.
+Fits content review pipelines where an LLM can prepare structured guidance and a human still makes the final go/no-go decision.
 
 ## Python file target
 

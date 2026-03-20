@@ -20,6 +20,7 @@ SUPPORTED_CONFIG_KEYS = frozenset(
         "timeout",
         "strict_mirror",
         "resume_hook",
+        "resume_hook_timeout",
     }
 )
 
@@ -91,6 +92,32 @@ def resolve_log_dir(cli_log_dir: Path, log_subdir: str | None = None) -> Path:
     if log_subdir is not None:
         base = base / sanitize_log_subdir(log_subdir)
     return base
+
+
+def resolve_strict_mirror(cfg: dict[str, Any], *, sqlite: Path | None) -> bool:
+    """Mirror write policy: explicit ``strict_mirror`` in config, else strict when ``--sqlite`` is used."""
+
+    if "strict_mirror" in cfg:
+        return bool(cfg["strict_mirror"])
+    return sqlite is not None
+
+
+def resume_hook_timeout_seconds(cfg: dict[str, Any]) -> float | None:
+    """Wall-clock limit for the ``resume_hook`` subprocess (seconds).
+
+    ``None`` means no limit. Env ``REPLAYT_RESUME_HOOK_TIMEOUT`` overrides config; value ``<= 0``
+    means unlimited. Default when unset: 120 seconds.
+    """
+
+    env_raw = os.environ.get("REPLAYT_RESUME_HOOK_TIMEOUT", "").strip()
+    if env_raw:
+        v = float(env_raw)
+        return None if v <= 0 else v
+    cfg_val = cfg.get("resume_hook_timeout")
+    if cfg_val is not None:
+        v = float(cfg_val)
+        return None if v <= 0 else v
+    return 120.0
 
 
 def parse_log_mode(log_mode: str) -> LogMode:

@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
 
@@ -16,7 +17,14 @@ from replayt.cli.ci_artifacts import (
     should_write_github_step_summary,
     write_ci_artifacts,
 )
-from replayt.cli.config import DEFAULT_LOG_DIR, get_project_config, parse_log_mode, resolve_log_dir
+from replayt.cli.config import (
+    DEFAULT_LOG_DIR,
+    get_project_config,
+    parse_log_mode,
+    resolve_log_dir,
+    resolve_strict_mirror,
+    resume_hook_timeout_seconds,
+)
 from replayt.cli.constants import INIT_ENV_EXAMPLE, INIT_GITHUB_REPLAYT_WORKFLOW, INIT_GITIGNORE_LINES
 from replayt.cli.run_support import (
     build_internal_run_argv,
@@ -34,6 +42,7 @@ from replayt.cli.validation import (
     validate_workflow_graph,
     validation_report,
 )
+from replayt.persistence import MultiStore
 from replayt.runner import Runner, resolve_approval_on_store
 
 
@@ -106,7 +115,14 @@ def cmd_init(
 
 
 def cmd_run(
-    target: str = typer.Argument(..., metavar="TARGET", help="MODULE:VAR, workflow.py, or workflow.yaml."),
+    target: str = typer.Argument(
+        ...,
+        metavar="TARGET",
+        help=(
+            "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Loading a .py file executes that file as code—use only trusted paths."
+        ),
+    ),
     run_id: str | None = typer.Option(None, help="Optional run id (default: random UUID)."),
     inputs_json: str | None = typer.Option(
         None,
@@ -189,11 +205,10 @@ def cmd_run(
 
     in_child = os.environ.get("REPLAYT_SUBPROCESS_RUN") == "1"
     cfg, _ = get_project_config()
-    strict_mirror = bool(cfg.get("strict_mirror"))
-
     log_dir = resolve_log_dir(log_dir, log_subdir)
     if sqlite is None and cfg.get("sqlite"):
         sqlite = Path(cfg["sqlite"])
+    strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite)
     if log_mode == "redacted" and cfg.get("log_mode"):
         log_mode = cfg["log_mode"]
     if not in_child and timeout is None and cfg.get("timeout"):
@@ -207,12 +222,13 @@ def cmd_run(
         if resume:
             typer.echo("--dry-check cannot be used with --resume", err=True)
             raise typer.Exit(code=2)
-        errors = validate_workflow_graph(wf, strict_graph=strict_graph)
+        errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
         report = validation_report(
             target=target,
             wf=wf,
             strict_graph=strict_graph,
             errors=errors,
+            warnings=warnings,
             inputs_json=inputs_resolved,
             metadata_json=metadata_json,
             experiment_json=experiment_json,
@@ -225,6 +241,8 @@ def cmd_run(
             for err in report["errors"]:
                 typer.echo(f"  - {err}", err=True)
             raise typer.Exit(code=1)
+        for w in warnings:
+            typer.echo(f"Warning: {w}", err=True)
         typer.echo(f"OK: {wf.name}@{wf.version} (dry check passed; no run executed)")
         typer.echo(
             "Next: "
@@ -240,7 +258,9 @@ def cmd_run(
         )
         return
 
-    errors = validate_workflow_graph(wf, strict_graph=strict_graph)
+    errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
+    for w in warnings:
+        typer.echo(f"Warning: {w}", err=True)
     if errors:
         typer.echo(f"INVALID: {wf.name}@{wf.version}", err=True)
         for err in errors:
@@ -277,6 +297,31 @@ def cmd_run(
             )
         except subprocess.TimeoutExpired:
             typer.echo(f"Run timed out after {timeout}s", err=True)
+            if run_id is not None:
+                try:
+                    store = make_store(log_dir, sqlite, strict_mirror=strict_mirror)
+                    try:
+                        note = (
+                            "Parent subprocess timeout; event appended via same store layout as the run "
+                            "(including SQLite mirror when configured)."
+                            if sqlite is not None
+                            else "Parent subprocess timeout; JSONL only (no --sqlite)."
+                        )
+                        store.append_event(
+                            run_id,
+                            ts=datetime.now(timezone.utc).isoformat(),
+                            typ="run_interrupted",
+                            payload={
+                                "reason": "subprocess_timeout",
+                                "timeout_seconds": timeout,
+                                "note": note,
+                            },
+                        )
+                    finally:
+                        if isinstance(store, MultiStore):
+                            store.close()
+                except Exception:
+                    pass
             raise typer.Exit(code=1)
         rc = completed.returncode if completed.returncode is not None else 1
         raise typer.Exit(code=rc)
@@ -411,7 +456,14 @@ def cmd_try(
 
 def cmd_ci(
     ctx: typer.Context,
-    target: str = typer.Argument(..., metavar="TARGET", help="MODULE:VAR, workflow.py, or workflow.yaml."),
+    target: str = typer.Argument(
+        ...,
+        metavar="TARGET",
+        help=(
+            "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Loading a .py file executes that file as code—use only trusted paths."
+        ),
+    ),
     run_id: str | None = typer.Option(None, help="Optional run id (default: random UUID)."),
     inputs_json: str | None = typer.Option(
         None,
@@ -510,7 +562,14 @@ def cmd_ci(
 
 
 def cmd_resume(
-    target: str = typer.Argument(..., metavar="TARGET"),
+    target: str = typer.Argument(
+        ...,
+        metavar="TARGET",
+        help=(
+            "MODULE:VAR or workflow file (same as ``replayt run``). "
+            "``.py`` paths execute code—use only trusted paths."
+        ),
+    ),
     run_id: str = typer.Argument(...),
     approval_id: str = typer.Option(..., "--approval", help="Approval id to resolve."),
     reject: bool = typer.Option(False, "--reject", help="Reject instead of approve."),
@@ -527,10 +586,10 @@ def cmd_resume(
     log_mode: str = typer.Option("redacted", case_sensitive=False),
 ) -> None:
     cfg, _ = get_project_config()
-    strict_mirror = bool(cfg.get("strict_mirror"))
-    log_dir = resolve_log_dir(log_dir, log_subdir)
     if sqlite is None and cfg.get("sqlite"):
         sqlite = Path(cfg["sqlite"])
+    strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite)
+    log_dir = resolve_log_dir(log_dir, log_subdir)
     if log_mode == "redacted" and cfg.get("log_mode"):
         log_mode = cfg["log_mode"]
     wf = load_target(target)
@@ -538,6 +597,7 @@ def cmd_resume(
     store = make_store(log_dir, sqlite, strict_mirror=strict_mirror)
     hook = resume_hook_argv(cfg)
     if hook:
+        hook_timeout = resume_hook_timeout_seconds(cfg)
         try:
             invoke_resume_hook(
                 hook,
@@ -545,7 +605,16 @@ def cmd_resume(
                 run_id=run_id,
                 approval_id=approval_id,
                 reject=reject,
+                timeout_seconds=hook_timeout,
             )
+        except subprocess.TimeoutExpired as exc:
+            lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
+            typer.echo(
+                f"resume_hook timed out (limit {lim}); set REPLAYT_RESUME_HOOK_TIMEOUT or "
+                "resume_hook_timeout in project config (<=0 for no limit).",
+                err=True,
+            )
+            raise typer.Exit(code=1) from exc
         except subprocess.CalledProcessError as exc:
             typer.echo(f"resume_hook exited with code {exc.returncode}", err=True)
             raise typer.Exit(code=1) from exc

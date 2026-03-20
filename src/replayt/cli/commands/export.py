@@ -18,6 +18,7 @@ from replayt.cli.stores import read_store
 from replayt.cli.targets import load_target
 from replayt.export_run import events_to_jsonl_lines
 from replayt.graph_export import workflow_to_mermaid
+from replayt.persistence.jsonl import validate_run_id
 
 
 def cmd_seal(
@@ -35,7 +36,22 @@ def cmd_seal(
 
     log_dir = resolve_log_dir(log_dir, log_subdir)
 
-    path = log_dir / f"{run_id}.jsonl"
+    try:
+        safe_run_id = validate_run_id(run_id)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2)
+
+    log_root = log_dir.resolve()
+    path = (log_dir / f"{safe_run_id}.jsonl").resolve()
+    try:
+        path.relative_to(log_root)
+    except ValueError:
+        typer.echo(
+            f"Refusing to seal JSONL outside log directory: {path} is not under {log_root}",
+            err=True,
+        )
+        raise typer.Exit(code=2)
     if not path.is_file():
         typer.echo(
             f"No JSONL at {path} (``seal`` applies to the primary JSONL file, not SQLite-only stores).",
@@ -48,7 +64,7 @@ def cmd_seal(
     line_digests = [hashlib.sha256(line).hexdigest() for line in raw.splitlines(keepends=True)]
     manifest: dict[str, Any] = {
         "schema": "replayt.seal.v1",
-        "run_id": run_id,
+        "run_id": safe_run_id,
         "jsonl_path": str(path.resolve()),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "line_count": len(line_digests),
@@ -59,7 +75,7 @@ def cmd_seal(
             "both the JSONL and this manifest; use WORM storage or external signing for stronger guarantees."
         ),
     }
-    out_path = out if out is not None else log_dir / f"{run_id}.seal.json"
+    out_path = out if out is not None else log_dir / f"{safe_run_id}.seal.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if output == "json":
@@ -203,7 +219,7 @@ def cmd_bundle_export(
     target: str | None = typer.Option(
         None,
         "--target",
-        help="Optional MODULE:wf / workflow.py for workflow.mmd.txt (Mermaid) in the bundle.",
+        help="Optional MODULE:wf / workflow.py for workflow.mmd.txt (Mermaid); .py executes code—trusted only.",
     ),
 ) -> None:
     """Write a stakeholder-oriented .tar.gz: HTML report, replay timeline HTML, sanitized events.jsonl, manifest."""

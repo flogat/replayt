@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import string
 from pathlib import Path
 from typing import Any, Literal
@@ -22,7 +23,45 @@ class _SafeFormatter(string.Formatter):
 
 _safe_fmt = _SafeFormatter()
 
+_PROMPT_PLACEHOLDER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 _TYPE_MAP: dict[str, type] = {"string": str, "integer": int, "float": float, "boolean": bool}
+
+
+def _yaml_prompt_placeholder_names(template: str, *, step_name: str) -> list[str]:
+    """Collect unique named placeholders; reject splatting arbitrary context keys into ``str.format``."""
+
+    order: list[str] = []
+    seen: set[str] = set()
+    for _, field_name, _, _ in string.Formatter().parse(template):
+        if field_name is None:
+            continue
+        name = field_name.strip()
+        if not name:
+            raise ValueError(
+                f"YAML step {step_name!r}: empty `{{}}` placeholders are not supported; "
+                "use named fields such as {{customer_name}}."
+            )
+        if "." in name or "[" in name:
+            raise ValueError(
+                f"YAML step {step_name!r}: invalid placeholder {name!r} "
+                "(attribute or index access is not allowed)."
+            )
+        if not _PROMPT_PLACEHOLDER_RE.fullmatch(name):
+            raise ValueError(
+                f"YAML step {step_name!r}: placeholder {name!r} must be a valid identifier "
+                "(ASCII letter or underscore, then letters, digits, or underscores)."
+            )
+        if name not in seen:
+            seen.add(name)
+            order.append(name)
+    return order
+
+
+def _format_yaml_llm_prompt(raw_prompt: str, ctx: Any, *, step_name: str) -> str:
+    names = _yaml_prompt_placeholder_names(raw_prompt, step_name=step_name)
+    kwargs = {n: ctx.get(n, "") for n in names}
+    return _safe_fmt.format(raw_prompt, **kwargs)
 
 
 def _build_pydantic_model(name: str, schema: dict[str, Any]) -> type:
@@ -126,7 +165,7 @@ def workflow_from_spec(spec: dict[str, Any]) -> Workflow:
                 if llm_cfg is not None:
                     output_key = str(llm_cfg["output_key"])
                     raw_prompt: str = llm_cfg["prompt"]
-                    prompt = _safe_fmt.format(raw_prompt, **{k: ctx.get(k, "") for k in ctx.data})
+                    prompt = _format_yaml_llm_prompt(raw_prompt, ctx, step_name=step_name)
 
                     messages: list[dict[str, Any]] = []
                     if llm_cfg.get("system"):

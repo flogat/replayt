@@ -235,3 +235,56 @@ def test_yaml_llm_missing_output_key_raises() -> None:
             }
         )
 
+
+def test_yaml_llm_prompt_allows_hyphenated_context_keys_not_in_template(tmp_path: Path) -> None:
+    wf = workflow_from_spec(
+        {
+            "name": "llm-hyphen-ctx",
+            "initial": "summarize",
+            "steps": {
+                "summarize": {
+                    "require": ["doc"],
+                    "llm": {
+                        "prompt": "Summarize: {doc}",
+                        "output_key": "summary",
+                    },
+                    "next": "done",
+                },
+                "done": {"set": {"status": "done"}},
+            },
+        }
+    )
+    mock = MockLLMClient()
+    mock.enqueue("OK.")
+    store = JSONLStore(tmp_path)
+    result = run_with_mock(
+        wf,
+        store,
+        mock,
+        inputs={"doc": "text", "customer-name": "ACME"},
+    )
+    assert result.status == "completed"
+
+
+def test_yaml_llm_invalid_placeholder_fails_run(tmp_path: Path) -> None:
+    wf = workflow_from_spec(
+        {
+            "name": "bad-ph",
+            "initial": "s",
+            "steps": {
+                "s": {
+                    "llm": {
+                        "prompt": "Hello {doc.extra}",
+                        "output_key": "x",
+                    },
+                },
+            },
+        }
+    )
+    mock = MockLLMClient()
+    store = JSONLStore(tmp_path)
+    result = run_with_mock(wf, store, mock, inputs={})
+    assert result.status == "failed"
+    assert result.error is not None
+    assert "doc.extra" in result.error
+

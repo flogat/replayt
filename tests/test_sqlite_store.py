@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,34 @@ def test_multi_store_writes_both(tmp_path: Path) -> None:
     assert event["seq"] == 1
     assert len(j.load_events("r2")) == 1
     assert len(s.load_events("r2")) == 1
+
+
+def test_multi_store_close_closes_sqlite_mirror(tmp_path: Path) -> None:
+    j = JSONLStore(tmp_path / "j")
+    s = SQLiteStore(tmp_path / "db.sqlite3")
+    m = MultiStore(j, s)
+    m.append_event("r1", ts="t", typ="run_started", payload={})
+    m.close()
+    with pytest.raises(sqlite3.ProgrammingError):
+        s._cx.execute("SELECT 1")
+
+
+def test_sqlite_load_events_corrupt_payload_includes_seq(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    store = SQLiteStore(db)
+    store.close()
+    cx = sqlite3.connect(db)
+    cx.execute(
+        "INSERT INTO events (run_id, seq, type, ts, payload_json) VALUES (?,?,?,?,?)",
+        ("r1", 1, "x", "t", "NOT JSON"),
+    )
+    cx.commit()
+    cx.close()
+    reader = SQLiteStore(db)
+    with pytest.raises(RuntimeError) as exc_info:
+        reader.load_events("r1")
+    assert "Corrupted SQLite event payload" in str(exc_info.value)
+    assert "seq=1" in str(exc_info.value)
 
 
 def test_sqlite_store_rejects_path_traversal_run_id(tmp_path: Path) -> None:

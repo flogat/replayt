@@ -102,7 +102,7 @@
       <tspan class="dim">0005  </tspan><tspan class="ev-type">state_entered  </tspan><tspan class="ev-json">{"state": "evaluate"}</tspan>
     </text>
     <text x="32" y="320">
-      <tspan class="dim">0006  </tspan><tspan class="ev-type">llm_request    </tspan><tspan class="ev-json">{"model": "gpt-4o-mini"}</tspan>
+      <tspan class="dim">0006  </tspan><tspan class="ev-type">llm_request    </tspan><tspan class="ev-json">{"model": "anthropic/claude-sonnet-4.6"}</tspan>
       <tspan class="note">  &#8592; every call logged</tspan>
     </text>
     <rect class="hl-bg" x="28" y="327" width="760" height="18"/>

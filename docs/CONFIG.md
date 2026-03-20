@@ -18,8 +18,9 @@ So you get **one** config file: the nearest ancestor that defines either `.repla
 | `provider` | Preset name for base URL/model (`openai`, `ollama`, `groq`, …)—same idea as `REPLAYT_PROVIDER`. |
 | `model` | Default model name. |
 | `timeout` | LLM HTTP timeout (seconds). |
-| `strict_mirror` | If true, SQLite mirror write failures surface; if false, mirror errors are logged and the run continues (best-effort mirror). |
-| `resume_hook` | Optional argv list for a subprocess run **before** `replayt resume` appends `approval_resolved` (policy gate). Example: `["python", "scripts/check_resume.py"]`. Override with env `REPLAYT_RESUME_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). |
+| `strict_mirror` | If **true**, any SQLite mirror write failure aborts the run after logging (primary and mirror stay aligned or you fix the failure). If **false**, the JSONL primary still records events but the mirror may miss rows until you repair or re-sync—do not treat SQLite as authoritative until you understand this mode. **Default:** when omitted, the CLI uses **strict** mirroring whenever `--sqlite` is set (or `sqlite` is set in project config); set `strict_mirror = false` explicitly to allow a lenient mirror. |
+| `resume_hook` | Optional argv list for a subprocess run **before** `replayt resume` appends `approval_resolved` (policy gate). Example: `["python", "scripts/check_resume.py"]`. Override with env `REPLAYT_RESUME_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). Treat like shell commands: **trusted config only**, not untrusted user input. |
+| `resume_hook_timeout` | Wall-clock seconds for that subprocess (default **120** if unset). Env `REPLAYT_RESUME_HOOK_TIMEOUT` overrides; value **≤ 0** means **no limit** (same as unlimited hook runtime—use only when intentional). |
 
 ## `Workflow.meta` — `llm_defaults`
 
@@ -33,7 +34,7 @@ You can also pass `Workflow(..., llm_defaults={...})` in Python; same merge rule
 [tool.replayt]
 log_dir = ".replayt/runs"
 log_mode = "redacted"
-provider = "openai"
+provider = "openrouter"
 timeout = 120
 ```
 
@@ -45,6 +46,18 @@ strict_mirror = false
 ```
 
 Environment variables and explicit CLI flags still override these defaults when you pass them.
+
+## `REPLAYT_RESUME_HOOK_TIMEOUT`
+
+Seconds for the optional resume gate subprocess (`resume_hook` / `REPLAYT_RESUME_HOOK`). Overrides `resume_hook_timeout` from project config. **≤ 0** disables the timeout.
+
+## `REPLAYT_LLM_MAX_RESPONSE_BYTES`
+
+Upper bound on the HTTP body size for `/chat/completions` (default **32 MiB**). Parsed from env as a positive integer (minimum **1024** when set). Prevents unbounded memory use on huge or hostile responses. Invalid values raise a clear error at startup.
+
+## `REPLAYT_LLM_MAX_SCHEMA_CHARS`
+
+Upper bound on the serialized JSON Schema size embedded in `LLMBridge.parse` system prompts (default **250_000** characters). Parsed as a positive integer (minimum **1024** when set). Raise the limit or shrink the Pydantic model when you hit this guard.
 
 ## `REPLAYT_LOG_DIR`
 

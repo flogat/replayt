@@ -121,14 +121,28 @@ def cmd_replay(
 
 
 def cmd_graph(
-    target: str = typer.Argument(..., metavar="TARGET"),
+    target: str = typer.Argument(
+        ...,
+        metavar="TARGET",
+        help=(
+            "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Loading a .py file executes that file as code—use only trusted paths."
+        ),
+    ),
 ) -> None:
     wf = load_target(target)
     typer.echo(workflow_to_mermaid(wf).rstrip())
 
 
 def cmd_validate(
-    target: str = typer.Argument(..., metavar="TARGET", help="MODULE:VAR, workflow.py, or workflow.yaml."),
+    target: str = typer.Argument(
+        ...,
+        metavar="TARGET",
+        help=(
+            "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Loading a .py file executes that file as code—use only trusted paths."
+        ),
+    ),
     strict_graph: bool = typer.Option(
         False,
         "--strict-graph",
@@ -164,13 +178,14 @@ def cmd_validate(
     """Validate a workflow graph without calling any LLM (useful in CI)."""
 
     wf = load_target(target)
-    errors = validate_workflow_graph(wf, strict_graph=strict_graph)
+    errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
     inputs_resolved = inputs_json_from_options(inputs_json, inputs_file)
     report = validation_report(
         target=target,
         wf=wf,
         strict_graph=strict_graph,
         errors=errors,
+        warnings=warnings,
         inputs_json=inputs_resolved,
         metadata_json=metadata_json,
         experiment_json=experiment_json,
@@ -183,6 +198,8 @@ def cmd_validate(
         for err in report["errors"]:
             typer.echo(f"  - {err}", err=True)
         raise typer.Exit(code=1)
+    for w in warnings:
+        typer.echo(f"Warning: {w}", err=True)
     typer.echo(
         f"OK: {wf.name}@{wf.version} ({len(wf.step_names())} states, {len(wf.edges())} edges)"
     )

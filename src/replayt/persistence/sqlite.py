@@ -87,13 +87,19 @@ class SQLiteStore:
         ).fetchall()
         events: list[dict[str, Any]] = []
         for seq, typ, ts, payload_json in rows:
+            try:
+                payload = json.loads(payload_json)
+            except json.JSONDecodeError as e:
+                raise RuntimeError(
+                    f"Corrupted SQLite event payload for run_id={run_id!r} seq={seq}"
+                ) from e
             events.append(
                 {
                     "seq": seq,
                     "type": typ,
                     "ts": ts,
                     "run_id": run_id,
-                    "payload": json.loads(payload_json),
+                    "payload": payload,
                 }
             )
         return events
