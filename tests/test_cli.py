@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from replayt.cli.main import app
+from replayt.cli.main import REPLAY_HTML_CSS, _replay_html, app
 
 
 def test_cli_graph_smoke() -> None:
@@ -261,3 +261,20 @@ def start(ctx):
     runs = runner.invoke(app, ["runs", "--sqlite", str(db_path)])
     assert runs.exit_code == 0
     assert run_id in runs.stdout
+
+
+def test_replay_html_embeds_valid_css() -> None:
+    html = _replay_html(
+        "run-123",
+        [
+            {"seq": 1, "type": "run_started", "payload": {"workflow_name": "demo", "workflow_version": "1"}},
+            {"seq": 2, "type": "run_completed", "payload": {"status": "completed"}},
+        ],
+    )
+
+    assert "body{" in REPLAY_HTML_CSS
+    assert "body{{" not in REPLAY_HTML_CSS
+    assert "<style>" in html
+    assert "body{" in html
+    assert "body{{" not in html
+
