@@ -148,7 +148,8 @@ A new user should be able to understand the architecture quickly and feel that t
 
 - OpenAI-compatible chat provider support
 - Strict Pydantic schema parsing for structured outputs
-- Redacted or full logging modes for model traffic
+- Redacted, structured-only, or full logging modes for model traffic
+- Per-call LLM overrides via `ctx.llm.with_settings(...)` (logged as `effective` on each `llm_request` / `llm_response`)
 
 ### Tooling
 
@@ -466,6 +467,25 @@ Use something else when:
 - you need a distributed workflow engine with cross-process durability
 - you want a visual graph builder
 - you need a broad AI platform rather than a tiny runtime
+
+---
+
+## Requests we will not take in core (and what to do instead)
+
+replayt stays small on purpose. These are common asks that **do not belong in the core library**; compose them in **your** app or ops stack.
+
+| You might ask for… | Why we avoid it in core | Do this instead |
+| --- | --- | --- |
+| **Hosted approval UI, multi-user queues, team RBAC** | That is a product surface, not a runtime primitive. | Build a tiny local **approval bridge**: read paused runs from JSONL/SQLite, render a UI, append `approval_resolved` (same event shape as `replayt resume`). See **Pattern: approval bridge** in [`src/examples/README.md`](src/examples/README.md). |
+| **OpenTelemetry traces, metrics, fancy dashboards** | replayt is not an observability platform. | Treat JSONL as the **source of truth**; ship lines to Vector, Loki, Splunk, or S3 with your existing pipeline. Example Vector skeleton (conceptual): `source file` → `sink http`/`sink console`; point `include` at `.replayt/runs/*.jsonl`. |
+| **Built-in RAG / memory / vector DB** | Scope creep into an “AI platform.” | Put retrieval **inside a typed tool** or a plain Python function your step calls; return a Pydantic model, log `tool_result`. |
+| **LangChain / LangGraph / “agent framework” integration** | Hides control flow; competes with our explicit FSM story. | If you must: call that stack **inside one step’s handler**; keep transitions and approvals in replayt. Prefer **no** framework in the hot path. |
+| **Multi-tenant isolation, enterprise secrets managers** | Deployment and policy vary per org. | **One tenant → one log directory** (or SQLite file): e.g. `.replayt/runs/customer_a/`. Load secrets in your process wrapper or shell; export `OPENAI_API_KEY` before `replayt run`. |
+| **Batch orchestration (Spark, Celery, Airflow as “the runner”)** | replayt is not a distributed engine. | **Outer loop** in your scheduler: for each row/job, `Runner.run(..., inputs=..., run_id=...)` with a unique `run_id`; use separate log dirs per job if needed. See **Pattern: batch driver** in examples README. |
+| **Streaming tokens as first-class events** | Complicates replay semantics and event volume. | Stream inside your code if required; log **final** structured output (or a summary event you emit yourself in application code). |
+| **Guaranteed bitwise replay of LLM outputs across providers** | Not achievable in general. | Use **timeline replay** (`replayt replay`) for audit; for tests, **mock** the client or freeze fixtures; pin provider + model in metadata. |
+
+For **per-call LLm settings** (model, temperature, `max_tokens`, timeout, extra headers) without a fork, use `ctx.llm.with_settings(...)` so overrides are explicit and show up under `effective` on `llm_request` events.
 
 ---
 

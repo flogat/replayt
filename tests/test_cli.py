@@ -148,3 +148,4 @@ def test_cli_runs_and_doctor(tmp_path: Path) -> None:
     doctor = runner.invoke(app, ["doctor"])
     assert doctor.exit_code == 0
     assert "python" in doctor.stdout
+    assert "replayt" in doctor.stdout.lower()

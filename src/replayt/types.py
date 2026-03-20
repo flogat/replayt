@@ -9,6 +9,7 @@ class LogMode(str, Enum):
 
     redacted = "redacted"
     full = "full"
+    structured_only = "structured_only"
 
 
 @dataclass

@@ -187,3 +187,65 @@ replayt run workflow.yaml --inputs-json '{"route":"refund","ticket":"where is my
 ```bash
 replayt graph examples.e04_tool_using_procurement:wf
 ```
+
+---
+
+## Patterns (composition, not core features)
+
+These are **not** shipped as frameworks inside replayt. They show how different teams stay within the design principles (explicit states, local logs, no hosted platform in core).
+
+### Pattern: approval bridge (local UI)
+
+**Scenario:** You want a web UI or Slack button instead of only `replayt resume`.
+
+**Approach:**
+
+1. Run the workflow until it pauses; note `run_id` and `approval_id` from `replayt inspect` / `approval_requested` events.
+2. Your small service reads the JSONL file for that `run_id` (read-only is enough for display).
+3. When a human approves, append the same `approval_resolved` event replayt expects (same schema as [`docs/RUN_LOG_SCHEMA.md`](../../docs/RUN_LOG_SCHEMA.md)), or shell out to `replayt resume TARGET RUN_ID --approval ID`.
+4. Call `replayt run ... --resume --run-id ...` or use `Runner.run(..., resume=True)` in Python.
+
+replayt remains the **engine**; your app owns auth, routing, and UX.
+
+### Pattern: batch driver (Airflow / Celery / plain loop)
+
+**Scenario:** Thousands of rows, each should become one replayt run with full audit history.
+
+**Approach:**
+
+```python
+from pathlib import Path
+from replayt import LogMode, Runner, Workflow
+from replayt.persistence import JSONLStore
+import uuid
+
+# wf: your Workflow
+
+def run_batch(rows: list[dict], log_root: Path) -> None:
+    log_root.mkdir(parents=True, exist_ok=True)
+    for i, row in enumerate(rows):
+        run_id = str(uuid.uuid4())
+        store = JSONLStore(log_root)  # or one store, unique run_ids
+        runner = Runner(wf, store, log_mode=LogMode.redacted)
+        result = runner.run(inputs={"row": row, "index": i}, run_id=run_id)
+        assert result.status in {"completed", "failed", "paused"}
+```
+
+Use your orchestrator for **retries between rows**, concurrency, and backpressure—not replayt.
+
+### Pattern: OpenAI Python SDK inside a step
+
+**Scenario:** You want `openai` package features (custom retries, future betas) without waiting for replayt to wrap everything.
+
+**Approach:** Inside a `@wf.step`, call the SDK directly, then **validate** with Pydantic and `ctx.set(...)`. Optionally emit custom data via `ctx.set` only, or add small helper functions in your repo that write aligned dicts if you standardize on extra event types later.
+
+Keep **transitions and approvals** in replayt; keep **provider SDK** in imperative Python inside the step.
+
+### Pattern: stronger log redaction
+
+**Scenario:** You need structured outputs in logs but want to avoid even short LLM body previews.
+
+**Approach:** Run the CLI with `--log-mode structured_only` (or `LogMode.structured_only` in `Runner`). LLM bodies are not stored; validated `structured_output` events still capture schema-shaped results for audit.
+</think>
+<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>
+TodoWrite

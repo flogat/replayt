@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib
 import importlib.util
 import json
-import os
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,17 @@ from replayt.yaml_workflow import load_workflow_yaml, workflow_from_spec
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
 
+def _parse_log_mode(log_mode: str) -> LogMode:
+    key = log_mode.strip().lower()
+    if key == "redacted":
+        return LogMode.redacted
+    if key == "full":
+        return LogMode.full
+    if key in {"structured_only", "structured-only"}:
+        return LogMode.structured_only
+    raise typer.BadParameter("log_mode must be redacted, full, or structured_only")
+
+
 def _load_python_file(path: Path) -> Any:
     module_name = f"replayt_user_{path.stem}_{abs(hash(path.resolve()))}"
     spec = importlib.util.spec_from_file_location(module_name, path)
@@ -34,22 +45,23 @@ def _load_python_file(path: Path) -> Any:
 
 
 def _load_target(target: str) -> Workflow:
-    if ":" in target:
+    path = Path(target)
+    looks_like_file = path.suffix in {".py", ".yaml", ".yml"} and path.is_file()
+    if looks_like_file:
+        if path.suffix == ".py":
+            obj = _load_python_file(path)
+        else:
+            obj = workflow_from_spec(load_workflow_yaml(path))
+    elif ":" in target:
         mod_name, attr = target.split(":", 1)
         mod = importlib.import_module(mod_name)
         obj = getattr(mod, attr)
     else:
-        path = Path(target)
         if not path.exists():
             raise typer.BadParameter(
                 "Expected MODULE:VAR, workflow.py, or workflow.yaml target; path was not found"
             )
-        if path.suffix == ".py":
-            obj = _load_python_file(path)
-        elif path.suffix in {".yaml", ".yml"}:
-            obj = workflow_from_spec(load_workflow_yaml(path))
-        else:
-            raise typer.BadParameter("Target must be MODULE:VAR, .py, .yaml, or .yml")
+        raise typer.BadParameter("Target must be MODULE:VAR, .py, .yaml, or .yml")
     if not isinstance(obj, Workflow):
         raise typer.BadParameter(f"{target} did not resolve to a replayt.workflow.Workflow")
     return obj
@@ -111,7 +123,11 @@ def cmd_run(
     ),
     log_dir: Path = typer.Option(Path(".replayt/runs"), help="Directory for JSONL run logs."),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file mirrored alongside JSONL."),
-    log_mode: str = typer.Option("redacted", case_sensitive=False, help="redacted|full"),
+    log_mode: str = typer.Option(
+        "redacted",
+        case_sensitive=False,
+        help="redacted|full|structured_only (no body previews; structured_output events still logged)",
+    ),
     resume: bool = typer.Option(False, help="Resume a paused run (requires --run-id)."),
 ) -> None:
     if resume and not run_id:
@@ -123,7 +139,7 @@ def cmd_run(
         inputs = json.loads(inputs_json)
         if not isinstance(inputs, dict):
             raise typer.BadParameter("--inputs-json must be a JSON object")
-    lm = LogMode.redacted if log_mode.lower() == "redacted" else LogMode.full
+    lm = _parse_log_mode(log_mode)
     store = _make_store(log_dir, sqlite)
     runner = Runner(wf, store, log_mode=lm)
     result = runner.run(run_id=run_id, resume=resume, inputs=inputs)
@@ -214,7 +230,7 @@ def cmd_resume(
     log_mode: str = typer.Option("redacted", case_sensitive=False),
 ) -> None:
     wf = _load_target(target)
-    lm = LogMode.redacted if log_mode.lower() == "redacted" else LogMode.full
+    lm = _parse_log_mode(log_mode)
     store = _make_store(log_dir, sqlite)
     resolve_approval_on_store(store, run_id, approval_id, approved=not reject)
     runner = Runner(wf, store, log_mode=lm)
@@ -261,9 +277,17 @@ def cmd_runs(
 def cmd_doctor() -> None:
     """Check local install health for replayt's default OpenAI-compatible setup."""
 
+    try:
+        import replayt as _rt
+
+        pkg_ver = getattr(_rt, "__version__", "unknown")
+    except ImportError:
+        pkg_ver = "unknown"
+
     settings = LLMSettings.from_env()
     checks: list[tuple[str, bool, str]] = []
-    pyver = f"{os.sys.version_info.major}.{os.sys.version_info.minor}.{os.sys.version_info.micro}"
+    checks.append(("replayt", True, pkg_ver))
+    pyver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     checks.append(("python", True, pyver))
     checks.append(("openai_api_key", bool(settings.api_key), "set" if settings.api_key else "missing"))
     checks.append(("openai_base_url", True, settings.base_url))
@@ -277,10 +301,12 @@ def cmd_doctor() -> None:
         checks.append(("yaml_extra", False, "missing (pip install replayt[yaml])"))
 
     try:
+        import httpx
+
         client = OpenAICompatClient(settings)
         reachable = False
         if settings.api_key:
-            with importlib.import_module("httpx").Client(timeout=5.0) as http_client:
+            with httpx.Client(timeout=5.0) as http_client:
                 r = http_client.get(
                     settings.base_url.rstrip("/") + "/models",
                     headers={"Authorization": f"Bearer {settings.api_key}"},
