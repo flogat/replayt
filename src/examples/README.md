@@ -1,12 +1,25 @@
 # Examples
 
-These examples show what replayt is good at in practice:
+These examples are meant to be read like a tutorial, not just a command catalog.
 
-- concrete workflows
-- explicit branching
-- strict outputs
-- local replay
-- realistic approval gates
+Each section below tries to answer four questions:
+
+- **Why does this example exist?**
+- **What does the workflow code do?**
+- **What command should you run?**
+- **What should you expect to see after it runs?**
+
+If you are new to replayt, read the examples in order. They move from a two-step deterministic workflow to LLM-backed classification, typed tools, retries, and approval gates. By the time you reach the later examples, you should be comfortable opening the corresponding Python file, reading the state handlers, and mapping that code to the events you see in `inspect` and `replay`.
+
+## How to use this tutorial README
+
+A productive rhythm is:
+
+1. Read one section in this file.
+2. Open the corresponding source file in `src/examples/`.
+3. Run the example exactly as shown.
+4. Inspect the run and compare the resulting context and events with the explanation here.
+5. Change the sample input and run it again to see how the workflow behaves.
 
 Install locally first:
 
@@ -22,7 +35,20 @@ See [`README.md`](../../README.md) for Windows activation lines, `replayt doctor
 
 ## 1. Hello world — `examples.e01_hello_world`
 
-The smallest workflow in the tutorial set. It writes a greeting and a next action into context so you can inspect and replay the run. Expect a short successful run whose final context includes a greeting for the customer and a simple `next_action` value, which makes it useful for learning what `inspect` and `replay` output look like on a minimal workflow.
+Start here if you want the absolute minimum replayt workflow.
+
+### What the code does
+
+This example has only two states: `greet` and `done`.
+
+- `greet` reads `customer_name` from context.
+- It writes a friendly `message` plus a `next_action` hint back into context.
+- It transitions directly to `done`.
+- `done` sets `completed=true` and returns `None`, which ends the workflow.
+
+This is the example to use when you want to understand the core replayt model: a named state reads context, writes context, and returns the next state explicitly.
+
+### What to run
 
 ```bash
 replayt run examples.e01_hello_world:wf \
@@ -36,63 +62,226 @@ replayt inspect <run_id>
 replayt replay <run_id>
 ```
 
+### What to expect
+
+The run should complete successfully in a very small number of events. The final context should include:
+
+- `message="Hello, Sam! Your first replayt workflow ran."`
+- `next_action="Inspect this run, then replay it from the CLI."`
+- `completed=true`
+
+Use this section to get comfortable with the idea that even a tiny workflow produces a replayable execution history.
+
 ## 2. Intake normalization — `examples.e02_intake_normalization`
 
-Validate a raw lead payload, normalize formatting, and derive an internal segment. Expect the output context to contain trimmed and normalized lead fields plus a deterministic segment such as SMB or enterprise, showing how replayt turns messy inputs into auditable structured state.
+This example introduces a very common workflow pattern: validate raw input first, then transform it into a cleaner internal representation.
+
+### What the code does
+
+The workflow has three stages in spirit, although only two state handlers do real work:
+
+- `validate` checks that `lead` exists and matches the `RawLead` Pydantic schema.
+- `normalize` trims whitespace, title-cases the name, lowercases the email, compresses message spacing, and derives a `segment`.
+- `done` ends the run.
+
+The important lesson is that replayt is not just for LLM calls. It is also useful for deterministic business logic that you want to inspect later.
+
+### What to run
 
 ```bash
 replayt run examples.e02_intake_normalization:wf \
   --inputs-json '{"lead":{"name":"  Sam Patel ","email":"SAM@example.com ","company":"Northwind","message":"Need a demo for 40 seats"}}'
 ```
 
+### What to expect
+
+The run should complete successfully and preserve both the validated input and the normalized output in context. In particular, `normalized_lead` should contain:
+
+- `name="Sam Patel"`
+- `email="sam@example.com"`
+- `company="Northwind"`
+- `message="Need a demo for 40 seats"`
+- `segment="enterprise"`
+
+The `segment` becomes `enterprise` because the normalization logic checks whether the message mentions `seat` or `demo`. This is a good example of deterministic branching based on explicit code instead of a model guess.
+
 ## 3. Support routing — `examples.e03_support_routing`
 
-A deterministic branching flow for support operations. Expect the run to choose a route based on ticket details and customer tier, so the final state makes it obvious whether the ticket was escalated, prioritized, or sent through a standard support path.
+This example shows explicit branching for operational workflows.
+
+### What the code does
+
+The workflow validates the incoming `ticket`, then derives a routing decision from plain rules:
+
+- security keywords route to the `security` queue with `urgent` priority
+- billing keywords route to the `billing` queue
+- bug/error keywords route to the `technical` queue
+- enterprise or VIP customers can raise the priority even if the queue stays the same
+
+Finally, the workflow writes a `routing_decision` dictionary with queue, priority, and SLA hours.
+
+### What to run
 
 ```bash
 replayt run examples.e03_support_routing:wf \
   --inputs-json '{"ticket":{"channel":"email","subject":"Payment failed twice","body":"Enterprise invoice card was declined during renewal.","customer_tier":"enterprise"}}'
 ```
 
+### What to expect
+
+The sample input contains billing language (`payment`, `invoice`, `declined`) and an enterprise customer tier. That means the final `routing_decision` should be:
+
+- `queue="billing"`
+- `priority="high"`
+- `sla_hours=4`
+
+This is a useful tutorial example because you can easily change the subject/body and watch the route change in predictable ways.
+
 ## 4. Typed tool calls — `examples.e04_tool_using_procurement`
 
-Register strongly typed tools and use them from a workflow step. Expect to see tool call and tool result events in the run history plus a final purchasing decision in context, which demonstrates what typed tool use looks like when replayed step by step.
+This example introduces replayt's typed tool system.
+
+### What the code does
+
+Inside the `intake` step, the workflow registers two tools:
+
+- `calculate_total(unit_price, quantity)` computes the purchase total
+- `budget_policy(query: BudgetPolicyInput)` checks the department's spending limit
+
+After validating the purchase request, the `evaluate` step calls those tools through `ctx.tools.call(...)` rather than invoking ad hoc helper functions. That means the tool activity is captured in the run history.
+
+### What to run
 
 ```bash
 replayt run examples.e04_tool_using_procurement:wf \
   --inputs-json '{"request":{"employee":"Maya","department":"Design","item":"monitor arm","unit_price":149.0,"quantity":2}}'
 ```
 
+### What to expect
+
+The run should complete successfully and the event log should show both tool call and tool result events. In final context, `decision` should look roughly like this:
+
+- `employee="Maya"`
+- `item="monitor arm"`
+- `total_cost=298.0`
+- `within_policy=true`
+- `recommended_action="auto_approve"`
+
+The Design department limit in the example code is `500.0`, so a total of `298.0` stays within policy. This makes the example a good tutorial for both typed tools and deterministic post-tool branching.
+
 ## 5. Retries for flaky integrations — `examples.e05_retrying_vendor_lookup`
 
-Show how a state can retry automatically before succeeding. Expect the event log to show one or more failed attempts followed by a later success, so readers can see exactly how retries appear in `inspect` output without hidden control flow.
+This example demonstrates retries without hidden loops.
+
+### What the code does
+
+The `lookup` step is decorated with a retry policy of up to three attempts. The implementation intentionally simulates a flaky dependency:
+
+- it increments `lookup_attempts`
+- it throws a temporary error on the first attempt
+- it succeeds on the second attempt by storing `vendor_record`
+
+The `summarize` step then copies the vendor record into `lookup_summary` and includes the attempt count.
+
+### What to run
 
 ```bash
 replayt run examples.e05_retrying_vendor_lookup:wf \
   --inputs-json '{"vendor_name":"Acme Fulfillment"}'
 ```
 
+### What to expect
+
+You should see a failed `lookup` attempt followed by an automatic retry and then a successful continuation into `summarize`. The final `lookup_summary` should include:
+
+- `vendor_name="Acme Fulfillment"`
+- `status="active"`
+- `payment_terms="net-30"`
+- `risk_level="low"`
+- `lookup_attempts=2`
+
+The point of this tutorial is that the retry behavior is visible and auditable. replayt is not hiding the failure; it is recording it as part of the workflow history.
+
 ## 6. Sales call prep brief — `examples.e06_sales_call_brief`
 
-Use structured LLM output to turn CRM notes into a call brief. Expect a validated brief with fields such as account summary, risks, and talking points rather than free-form prose, which helps readers understand the library's schema-first LLM pattern.
+This is the first example where the model produces a structured object.
+
+### What the code does
+
+The workflow defines a `CallBrief` schema with these fields:
+
+- `customer_stage`
+- `top_goals`
+- `risks`
+- `recommended_talking_points`
+- `next_step`
+
+The single working state, `draft_brief`, sends the account name and CRM notes to `ctx.llm.parse(...)`. replayt then validates the model output against the schema before storing it in context as `call_brief`.
+
+### What to run
 
 ```bash
 replayt run examples.e06_sales_call_brief:wf \
   --inputs-json '{"account_name":"Northwind Health","notes":"Champion wants SOC 2 confirmation, budget approved, pilot starts in April."}'
 ```
 
+### What to expect
+
+The exact wording will vary by model, but the outcome should still be predictable in shape. The run should complete successfully and `call_brief` should always be a schema-valid object rather than raw free-form text. In practice you should expect:
+
+- a `customer_stage` consistent with active evaluation or procurement
+- goals related to the pilot and security review
+- risks related to SOC 2 confirmation or rollout timing
+- talking points that help the seller prepare for the next conversation
+- a concise `next_step`
+
+This is a tutorial example for the difference between “model output exists” and “model output is constrained enough to drive a workflow.”
+
 ## 7. Customer feedback clustering — `examples.e07_feedback_clustering`
 
-Use the LLM for batch summarization and prioritization. Expect clustered themes and a prioritized summary of the feedback list, giving a realistic example of how replayt captures structured model output for multi-item analysis.
+This example scales the same structured-output idea to a list of inputs instead of one note.
+
+### What the code does
+
+The workflow defines two schemas:
+
+- `FeedbackTheme`, which captures one theme, its priority, supporting quotes, and a recommended owner
+- `FeedbackSummary`, which collects all themes and a `release_note_hint`
+
+The `cluster` step passes the whole feedback list to the model and asks for a structured summary.
+
+### What to run
 
 ```bash
 replayt run examples.e07_feedback_clustering:wf \
   --inputs-json '{"product":"analytics dashboard","feedback":["Export to CSV times out on big reports.","Need SSO for Okta.","Dashboard is slow on Mondays."]}'
 ```
 
+### What to expect
+
+Again, the exact wording depends on the model, but the structure should stay stable. `feedback_summary` should contain:
+
+- a list of themes in `themes`
+- for each theme, a `priority`, `representative_quotes`, and `recommended_owner`
+- a single `release_note_hint`
+
+For this sample input, likely themes include performance/export reliability and access management or SSO. This makes the example useful for understanding how replayt captures structured analysis over multiple pieces of text.
+
 ## 8. Travel approval — `examples.e08_travel_approval`
 
-Evaluate travel policy automatically, then pause for manager approval only when policy flags require it. Expect either an automatic pass for policy-compliant trips or, for the sample input, a paused run waiting on `manager_review`, which shows how approval gates surface in normal CLI usage.
+This example introduces a human approval gate.
+
+### What the code does
+
+The workflow has three important phases:
+
+- `policy_check` validates the trip request and computes policy flags
+- `manager_review` either auto-approves, pauses for approval, or routes to rejection based on approval state
+- `book_trip` and `reject_trip` write the final status
+
+The sample input is intentionally chosen to trigger review because it violates two simple policy checks: high estimated cost and short notice.
+
+### What to run
 
 ```bash
 replayt run examples.e08_travel_approval:wf \
@@ -111,9 +300,37 @@ Reject it instead:
 replayt resume examples.e08_travel_approval:wf <run_id> --approval manager_review --reject
 ```
 
+### What to expect
+
+On the first run, replayt should pause with exit code `2`. Before it pauses, the workflow should store:
+
+- `travel_policy.auto_approvable=false`
+- `travel_policy.policy_flags=["high_cost", "late_notice"]`
+
+It then requests approval `manager_review` with a summary that includes the employee, destination, and flags.
+
+If you approve the run, it should resume through `book_trip` and end with `travel_status="approved_for_booking"`.
+
+If you reject the run, it should resume through `reject_trip` and end with `travel_status="rejected"`.
+
+This is one of the best examples for learning how paused workflows appear in normal CLI usage.
+
 ## 9. Incident response — `examples.e09_incident_response`
 
-Combine typed tools with an executive approval gate for sev1 communications. Expect enrichment and decision steps in the log plus, for high-severity incidents, a pause awaiting `exec_comms` approval before any external communication path can complete.
+This example combines typed tools, deterministic severity logic, and an approval gate.
+
+### What the code does
+
+The workflow proceeds through four conceptual stages:
+
+- `assess` validates the incident and assigns severity from the error rate
+- `stabilize` uses tools to page on-call staff and draft a status page update
+- `exec_review` decides whether external communications require approval
+- `announce` or `internal_only` records the final communication plan
+
+For sev1 incidents, the workflow pauses for an executive communications decision. Lower-severity incidents skip that approval path.
+
+### What to run
 
 ```bash
 replayt run examples.e09_incident_response:wf \
@@ -132,27 +349,98 @@ Or keep the response internal-only:
 replayt resume examples.e09_incident_response:wf <run_id> --approval exec_comms --reject
 ```
 
+### What to expect
+
+With `error_rate=12.5`, the sample incident is `sev1`. That means the run should:
+
+- store `severity="sev1"`
+- log a tool call to `page_on_call`
+- log a tool call to `create_statuspage_draft`
+- pause on approval `exec_comms`
+
+If approved, the final context should include `communication_plan="external_statuspage_and_internal_slack"`.
+
+If rejected, the final context should include `communication_plan="internal_updates_only"`.
+
+This tutorial example shows how replayt keeps even high-pressure operational flows explicit and replayable.
+
 ## 10. GitHub issue triage — `examples.issue_triage`
 
-A relatable developer workflow with deterministic validation, LLM classification, and explicit routing. Expect the issue to be classified into a narrow category and routed to a clear next action, so readers can picture how replayt supports developer-facing automations without hiding decisions.
+This example shows how deterministic validation and LLM classification can work together.
+
+### What the code does
+
+The workflow starts with `validate`, which ensures the issue payload exists and checks for obviously incomplete title/body fields. It then moves to `classify`:
+
+- if required fields are missing, the workflow avoids an LLM classification and routes to `respond`
+- otherwise, the model produces a `TriageDecision`
+- if the model says more information is needed, the workflow still routes to `respond`
+- if not, the workflow routes to `route`
+
+The `route` step turns that decision into a smaller `routing` object with queue, label, and priority.
+
+### What to run
 
 ```bash
 replayt run examples.issue_triage:wf \
   --inputs-json '{"issue":{"title":"Crash on save","body":"Open app, click save, stack trace appears, expected file write."}}'
 ```
 
+### What to expect
+
+The sample input is long enough to pass validation, so the interesting behavior happens in classification. The final context should contain one of two outcomes:
+
+- `response_template` if the model decides more information is needed
+- `routing` if the model is confident enough to classify and route
+
+For this particular issue, a bug-style classification and engineering-oriented routing are the most likely result. The key tutorial lesson is that replayt still keeps the control flow explicit even when a model is involved.
+
 ## 11. Refund policy workflow — `examples.refund_policy`
 
-A constrained support decision flow where the output space stays narrow and auditable. Expect a bounded refund decision such as approve, deny, or review, along with the policy reasoning encoded in structured state rather than an untraceable natural-language answer.
+This example shows a constrained customer-support decision with structured LLM output.
+
+### What the code does
+
+The workflow:
+
+- validates `ticket` and `order` in `ingest`
+- asks the model for a schema-valid `RefundDecision` in `decide`
+- copies the relevant fields into `summary_for_agent` in `summarize`
+
+The prompt intentionally narrows the policy space: refund, reship, store credit, deny, or escalate.
+
+### What to run
 
 ```bash
 replayt run examples.refund_policy:wf \
   --inputs-json '{"ticket":"My order arrived damaged and I need a refund.","order":{"order_id":"ORD-1001","amount_cents":12999,"delivered":true,"days_since_delivery":3}}'
 ```
 
+### What to expect
+
+The model still has discretion, but it must answer inside a bounded schema. After the run, `summary_for_agent` should contain:
+
+- `action`
+- `reason_codes`
+- `customer_message`
+
+Because the order was delivered only 3 days ago and the ticket reports damage, a refund-friendly action is plausible under the stated policy. The most important tutorial takeaway is that the output remains structured and reviewable rather than hidden inside prose.
+
 ## 12. Publishing preflight with approval gate — `examples.publishing_preflight`
 
-Check draft copy, generate a structured checklist, and pause for a human publishing decision. Expect the sample draft to trigger a checklist with obvious compliance concerns and then pause for `publish` approval, illustrating how replayt handles human-in-the-loop content review.
+This example combines structured LLM review with a human publication decision.
+
+### What the code does
+
+The `checklist` state asks the model to evaluate a draft against a strict checklist and return a `ChecklistResult` object. The workflow stores that result, builds an `approval_summary`, and then moves into `approval`.
+
+The `approval` state behaves much like the travel example:
+
+- if already approved, continue to `finalize`
+- if rejected, continue to `abort`
+- otherwise pause and request `publish`
+
+### What to run
 
 ```bash
 replayt run examples.publishing_preflight:wf \
@@ -170,6 +458,16 @@ Reject it instead:
 ```bash
 replayt resume examples.publishing_preflight:wf <run_id> --approval publish --reject
 ```
+
+### What to expect
+
+The sample draft is intentionally risky, so the checklist should likely report `passes=false` and one or more issues related to unsupported claims or inappropriate guarantees. The first run should then pause for `publish` approval.
+
+If approved, the resumed run should end with `publish_status="approved"`.
+
+If rejected, the resumed run should end with `publish_status="aborted"`.
+
+This is a good tutorial example for content review pipelines where an LLM can prepare structured guidance, but a human still makes the final go/no-go decision.
 
 ## Python file target
 
