@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Docs:** README above-the-fold positioning—hook line, **The problem** / **replayt** sections, **Why not LangGraph?**, tighter “in five seconds” intro, replay-emphasized core loop and design principle; **[`docs/COMPARISON.md`](docs/COMPARISON.md)** adds **Why not LangGraph?** and dedupes the agent-framework section; demo SVG titles/captions stress offline **replay**.
+
 ## 0.4.0 — 2026-03-21
 
 - **LLM defaults (breaking):** With **`REPLAYT_PROVIDER`** unset, **`LLMSettings` / `from_env`** target **OpenRouter** at `https://openrouter.ai/api/v1` with model **`anthropic/claude-sonnet-4.6`** (OpenRouter slug), not OpenAI’s host or **`gpt-4o-mini`**. Set **`REPLAYT_PROVIDER=openai`** and/or **`OPENAI_BASE_URL`** to use OpenAI. **`openrouter`** preset uses the same default model. **`replayt doctor`** shows **`(unset, OpenRouter preset)`** when provider is unset; **`test_from_env_default_uses_openrouter`** locks in the default.

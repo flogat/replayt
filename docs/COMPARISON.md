@@ -12,9 +12,13 @@ replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this 
 
 ## “Agent” or planner frameworks (e.g. LangGraph-style loops)
 
-**Those stacks** stress flexible graphs, tool routing, and demos that feel autonomous.
+### Why not LangGraph?
 
-**replayt** keeps transitions in code you can read, avoids planners rewriting edges, and **`replayt replay`** follows a **recorded** timeline without calling the provider again. If you use another framework, call it **inside one step**, validate with Pydantic, then `return "next_state"` — see **Pattern: framework in a sandbox step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+[LangGraph](https://github.com/langchain-ai/langgraph) is a good fit when the **framework** should own exploration, dynamic graph mutation, or long-lived autonomous sessions.
+
+**replayt** is smaller on purpose: **no** bundled agents, **no** planners, **no** hidden loops—just explicit states and **`replayt replay`** over a **recorded** JSONL timeline (no new provider calls). Agent-style stacks stress flexible graphs, tool routing, and demos that feel autonomous; **replayt** keeps transitions in code you can read so the path stays inspectable.
+
+**Compose, don’t fork:** other frameworks belong **inside one `@wf.step`** when you need them—validate one Pydantic outcome, then `return "next_state"` — **Pattern: framework in a sandbox step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
 **Prefer the other tool when:** You want the framework to own exploration, dynamic graph mutation, or long-lived autonomous sessions.
 

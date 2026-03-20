@@ -1,24 +1,52 @@
+> **If you can't replay it, you can't trust it.**
+
 # replayt
 
-> **Deterministic control flow for LLM workflows you can replay.**
+**replayt** is a tiny Python library for **deterministic LLM workflows you can replay**.
 
 *PyPI status: **Beta** — pin versions in production; minor API or CLI details may still change between releases.*
 
 <p align="center">
-  <img src="docs/demo.svg" alt="replayt demo: run, inspect, replay" width="820"/>
+  <img src="docs/demo.svg" alt="replayt demo: run a workflow, inspect JSONL, replay the recorded timeline step by step without calling the provider" width="820"/>
 </p>
 
-### Mental model (~60 seconds)
+## The problem
+
+Most LLM workflows:
+
+- branch **implicitly**
+- **fail silently**
+- **cannot be replayed**
+- are **impossible to debug** after the fact
+
+## replayt
+
+replayt makes every step **explicit**, **logged**, and **replayable**.
+
+### In five seconds
 
 - You define **states** in code (or a small YAML subset); each handler **returns the next state** explicitly.
 - Every run appends **typed events** to local **JSONL** (optional **SQLite** mirror).
 - **LLM** work uses **Pydantic-validated** outputs when you call `ctx.llm`—those land in the log as structured events.
-- **`replayt replay`** / **`replayt report`** walk the **recorded** timeline **without** calling the provider again (not bitwise regeneration; see [docs/SCOPE.md](docs/SCOPE.md)).
+- **`replayt replay`** and **`replayt report`** walk the **recorded** timeline **without** calling the provider again (not bitwise regeneration; see [docs/SCOPE.md](docs/SCOPE.md)).
 - **Approvals** pause with exit code **`2`**; **`replayt resume`** continues the same run.
 
-**replayt** is a small Python library and CLI for teams that want **obvious control flow and a durable audit trail** around LLM steps, without building a full agent platform or hosted control plane.
+A small **CLI** (`run`, `inspect`, **`replay`**, `report`, `resume`, …) sits alongside the library—same mental model.
 
-**Where it fits**
+### Why not LangGraph?
+
+[LangGraph](https://github.com/langchain-ai/langgraph) is powerful, but built for long-running agent systems.
+
+**replayt** is intentionally smaller:
+
+- **no** bundled agents
+- **no** planners
+- **no** hidden loops
+- **just** explicit workflows you can **replay**
+
+For plain Python, Temporal, hosted stacks, and migration notes, see [docs/COMPARISON.md](docs/COMPARISON.md).
+
+### Where it fits
 
 | Topic | **Plain Python** (`if` / `else`, ad hoc logging) | **Agent / planner stacks** | **replayt** |
 | --- | --- | --- | --- |
@@ -27,11 +55,11 @@
 | **Human gates** | Custom | Often bolted on | **First-class** pause / resume with exit code `2` |
 | **Tradeoff** | No conventions | Harder to answer “what happened?” | You model a **finite run**—not a distributed workflow engine |
 
-The core idea is simple:
+The core idea:
 
-> If a workflow matters, it should be explicit, inspectable, and replayable.
+> If a workflow matters, it should be explicit, inspectable, and **replayable**.
 
-Transitions and branching are **your code**; the model does not silently rewrite the graph. Structured outputs are **validated** (Pydantic) and **logged**. **Timeline replay** (`replayt replay`, `replayt report`) walks the **recorded** history without calling the provider again—it is not a promise of bitwise-identical regeneration from the API (see [docs/SCOPE.md](docs/SCOPE.md)).
+Transitions and branching are **your code**; the model does not silently rewrite the graph. Structured outputs are **validated** (Pydantic) and **logged**. **Timeline replay** (`replayt replay`, `replayt report`) walks the **recorded** history without calling the provider again—see [docs/SCOPE.md](docs/SCOPE.md).
 
 **Start here:** [Five-minute quickstart](docs/QUICKSTART.md) · [Tutorial (14 workflows)](src/replayt_examples/README.md) · [Production checklist](docs/PRODUCTION.md) · [Recipes (LLM, CI)](docs/RECIPES.md) · [Composition patterns](docs/EXAMPLES_PATTERNS.md) · [Vs other tools](docs/COMPARISON.md)
 
@@ -46,9 +74,10 @@ replayt run replayt_examples.e01_hello_world:wf --inputs-json '{"customer_name":
 # or: replayt try
 replayt inspect <run_id>
 replayt replay <run_id>
+# step through every decision the workflow recorded (offline; no new LLM calls)
 ```
 
-That is the whole loop; everything else is detail.
+That is the whole loop; **replay** is why the log exists.
 
 replayt gives you a small, strict workflow runner where:
 
@@ -58,11 +87,11 @@ replayt gives you a small, strict workflow runner where:
 - tool calls are typed and logged
 - approval gates are first-class
 - run history is stored locally
-- past runs can be inspected and replayed step by step
+- past runs can be **inspected and replayed** step by step
 
 If you cannot explain **what happened**, **why it happened**, and **how to replay it**, the workflow is not done yet.
 
-### Architecture (one glance)
+### Architecture (one glance; everything serves the replay log)
 
 Source: [`docs/architecture.mmd`](docs/architecture.mmd) (open in GitHub or any Mermaid viewer).
 
@@ -98,29 +127,19 @@ flowchart LR
 
 ## Why replayt exists
 
-Most LLM tooling targets autonomy and fast demos. Teams shipping real workflows often need **boring** systems: explicit branches, schema-shaped outputs, and logs you can diff, approve against, and replay.
-
-replayt is aimed at that job.
+Most tooling optimizes for autonomy and fast demos. Teams shipping real workflows need **boring** systems: explicit branches, schema-shaped outputs, and a log you can diff, approve against, and **`replayt replay`**.
 
 <p align="center">
-  <img src="docs/demo-why.svg" alt="typical agent framework vs replayt" width="820"/>
+  <img src="docs/demo-why.svg" alt="comparison: implicit agent planner vs replayt explicit states and offline replay" width="820"/>
 </p>
 
-replayt sticks to a small, fixed set of rules:
-
-- define the workflow explicitly
-- validate meaningful outputs strictly
-- log the run locally
-- inspect every important event
-- replay the exact execution history later
-
-The goal is that you can always explain what happened and why.
+Fixed rules: explicit workflow, strict validation, local log, inspect every important event, **replay the recorded timeline later**.
 
 ---
 
 ## What replayt is
 
-replayt is a **finite-state-machine-first runtime for LLM workflows**.
+**Replay-first:** replayt is a **finite-state-machine-first runtime for LLM workflows**—the run log is the product, not an afterthought.
 
 A workflow can include:
 
@@ -195,8 +214,8 @@ Every meaningful model output should validate against a clear schema. Structured
 ### 4. Typed tool calls over free-form execution
 Tool use should be constrained, validated, and logged as part of the run history.
 
-### 5. Inspectability is part of the product
-Logging and replay are not internal implementation details. They are part of the reason the tool exists.
+### 5. Replay is part of the product
+If you cannot **`replayt replay`** a run from disk, the audit story is incomplete. Logging exists so you can **inspect and replay** the exact recorded path—not as an implementation detail.
 
 ### 6. Local-first by default
 No account. No hosted dependency. No cloud requirement in v1.
@@ -239,7 +258,7 @@ A new user should be able to understand the architecture quickly and feel that t
 When things go wrong, the run log is the debugging tool:
 
 <p align="center">
-  <img src="docs/demo-debug.svg" alt="replayt debugging a failed run" width="820"/>
+  <img src="docs/demo-debug.svg" alt="replayt: inspect and replay a failed run from JSONL, offline" width="820"/>
 </p>
 
 ### CLI
@@ -292,11 +311,12 @@ replayt run replayt_examples.issue_triage:wf \
   --inputs-json '{"issue":{"title":"Crash on save","body":"Steps: open app, click save, crash. Expected: file writes successfully."}}'
 ```
 
-### Inspect the run
+### Inspect and replay the run
 
 ```bash
 replayt inspect <run_id>
 replayt replay <run_id>
+# step through the recorded timeline (same events; no new LLM calls)
 replayt report <run_id> --out report.html   # self-contained HTML summary
 replayt runs
 ```
@@ -423,7 +443,7 @@ def compute(ctx):
 ## Approval gate example
 
 <p align="center">
-  <img src="docs/demo-approval.svg" alt="replayt approval gate: pause, review, resume" width="820"/>
+  <img src="docs/demo-approval.svg" alt="replayt approval gate: pause and resume; replay shows the gate in the timeline" width="820"/>
 </p>
 
 ```python

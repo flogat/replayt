@@ -37,7 +37,7 @@
   <circle class="dot-r" cx="20" cy="19" r="6"/>
   <circle class="dot-y" cx="40" cy="19" r="6"/>
   <circle class="dot-g" cx="60" cy="19" r="6"/>
-  <text class="title-txt" x="410" y="24">what happens when your LLM workflow runs?</text>
+  <text class="title-txt" x="410" y="24">without a replayable log, you cannot trust what happened</text>
 
   <!-- Center divider -->
   <line x1="410" y1="56" x2="410" y2="510" class="divider"/>

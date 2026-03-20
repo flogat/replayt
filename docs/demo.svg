@@ -46,7 +46,7 @@
   <circle class="dot-r" cx="20" cy="19" r="6"/>
   <circle class="dot-y" cx="40" cy="19" r="6"/>
   <circle class="dot-g" cx="60" cy="19" r="6"/>
-  <text class="title-txt" x="410" y="24">replayt &#8212; run &#183; inspect &#183; replay</text>
+  <text class="title-txt" x="410" y="24">replayt &#8212; run, then replay every decision from the log</text>
 
   <!-- =========== STEP 1: run =========== -->
 
@@ -137,7 +137,7 @@
     <rect class="hl-bg" x="28" y="471" width="760" height="18"/>
     <text x="32" y="482">
       <tspan class="dim">0007  </tspan><tspan class="ev-type">structured_output  </tspan><tspan class="ev-json">{"approved": true, "amount": 49.99}</tspan>
-      <tspan class="note">  &#8592; same result</tspan>
+      <tspan class="note">  &#8592; same recorded path</tspan>
     </text>
     <text x="32" y="500">
       <tspan class="dim">0012  </tspan><tspan class="ev-type">run_completed</tspan>
