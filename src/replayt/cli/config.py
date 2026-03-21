@@ -26,6 +26,7 @@ SUPPORTED_CONFIG_KEYS = frozenset(
 
 _PROJECT_CONFIG: dict[str, Any] | None = None
 _PROJECT_CONFIG_PATH: str | None = None
+_PROJECT_CONFIG_CWD: str | None = None
 
 DEFAULT_LOG_DIR = Path(".replayt/runs")
 
@@ -69,9 +70,11 @@ def load_project_config() -> tuple[dict[str, Any], str | None]:
 
 
 def get_project_config() -> tuple[dict[str, Any], str | None]:
-    global _PROJECT_CONFIG, _PROJECT_CONFIG_PATH  # noqa: PLW0603
-    if _PROJECT_CONFIG is None:
+    global _PROJECT_CONFIG, _PROJECT_CONFIG_PATH, _PROJECT_CONFIG_CWD  # noqa: PLW0603
+    cwd = str(Path.cwd().resolve())
+    if _PROJECT_CONFIG is None or _PROJECT_CONFIG_CWD != cwd:
         _PROJECT_CONFIG, _PROJECT_CONFIG_PATH = load_project_config()
+        _PROJECT_CONFIG_CWD = cwd
     return _PROJECT_CONFIG, _PROJECT_CONFIG_PATH
 
 
