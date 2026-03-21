@@ -1,6 +1,6 @@
 # Five-minute quickstart
 
-This page is the shortest path from zero to **run → inspect → understand the log**. For a full progressive tutorial (many workflows, patterns, and integrations), use [`src/replayt_examples/README.md`](../src/replayt_examples/README.md).
+Use this page to go from install to **run -> inspect -> replay**. For a full tutorial with more workflows and patterns, use [`src/replayt_examples/README.md`](../src/replayt_examples/README.md).
 
 ## 1. Install
 
@@ -60,7 +60,7 @@ replayt report <run_id> --out report.html
 
 ## 4. What “replay” means (timeline playback)
 
-**`replayt replay`** walks the **recorded** JSONL timeline: states, transitions, LLM metadata, tool calls, approvals—**without** calling the provider again. That is **not** a guarantee of bitwise-identical LLM output if you re-ran the same prompt (providers, temperature, and content can drift). For tests, use mocks or fixtures; for audits, trust the **logged** history. See [`SCOPE.md`](SCOPE.md).
+**`replayt replay`** walks the recorded JSONL timeline: states, transitions, LLM metadata, tool calls, and approvals, all **without** calling the provider again. It does **not** promise bitwise-identical LLM output if you run the same prompt again. Providers, temperature, and content can drift. For tests, use mocks or fixtures. For audits, use the **logged** history. See [`SCOPE.md`](SCOPE.md).
 
 ```mermaid
 flowchart LR
@@ -74,7 +74,7 @@ flowchart LR
   B -.-> D
 ```
 
-## 5. Annotated run log (what “inspectable” means)
+## 5. Annotated run log
 
 Each run is an append-only **JSONL** file under `.replayt/runs/` (one line per event). Shapes are defined in [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md). Below is a **trimmed excerpt** from `replayt_examples.e01_hello_world` (line breaks added for reading; on disk each event is one line).
 
@@ -98,12 +98,12 @@ Each run is an append-only **JSONL** file under `.replayt/runs/` (one line per e
 
 Workflows that call an LLM add `llm_request`, `llm_response`, and `structured_output` events; tool usage adds `tool_call` / `tool_result`; approvals add `approval_requested` / `approval_resolved`. Same file throughout.
 
-## 6. Where replayt fits (one glance)
+## 6. Where replayt fits
 
 | Approach | You get… | Tradeoff |
 |----------|----------|----------|
 | **Plain Python** (`if`/`else`, your own prints) | Full flexibility | Ad hoc logs; hard to standardize replay, approvals, and CI. |
-| **Agent / planner frameworks** | Fast demos | Hidden control flow; “what happened?” is often unclear. |
+| **Agent / planner frameworks** | Fast demos | Hidden control flow; it is often hard to answer “what happened?” |
 | **replayt** | Explicit FSM + **schema-shaped** outputs + **local JSONL** + CLI (`inspect`, `replay`, `report`) | You write states and transitions; not a distributed workflow engine. |
 
 ## 7. When a run fails (still inspectable)
@@ -119,7 +119,7 @@ replayt replay <run_id>
 
 You should see `status=failed` and structured error payload on the failing state. See [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md) for `run_failed` / `run_completed`.
 
-## 8. Smallest LLM-shaped step (API key required)
+## 8. Smallest structured LLM step (API key required)
 
 After hello-world, this is the minimal “model output drives context” pattern (inside an existing `Workflow` with `OPENAI_API_KEY` set):
 

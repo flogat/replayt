@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+
 from replayt.workflow import Workflow
 
 
@@ -22,5 +24,6 @@ def workflow_to_mermaid(wf: Workflow) -> str:
 
 
 def m_id(state: str) -> str:
-    safe = "".join(ch if ch.isalnum() else "_" for ch in state)
-    return f"s_{safe}"
+    safe = "".join(ch if ch.isalnum() else "_" for ch in state).strip("_") or "state"
+    digest = hashlib.sha1(state.encode("utf-8")).hexdigest()[:8]
+    return f"s_{safe}_{digest}"

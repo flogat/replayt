@@ -127,6 +127,50 @@ def test_runner_before_after_step_hooks(tmp_path: Path) -> None:
     assert completed_ev["payload"]["status"] == "completed"
 
 
+def test_runner_before_step_hook_failure_emits_terminal_events(tmp_path: Path) -> None:
+    wf = Workflow("hook_fail_before")
+    wf.set_initial("a")
+
+    @wf.step("a")
+    def a(ctx) -> None:
+        return None
+
+    def before(ctx, st: str) -> None:
+        raise ValueError("hook blew up")
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted, before_step=before).run()
+    assert result.status == "failed"
+    assert result.error == "hook blew up"
+    events = store.load_events(result.run_id)
+    failed = next(e for e in events if e["type"] == "run_failed")
+    completed = next(e for e in events if e["type"] == "run_completed")
+    assert failed["payload"]["error"]["type"] == "ValueError"
+    assert completed["payload"]["status"] == "failed"
+
+
+def test_runner_after_step_hook_failure_emits_terminal_events(tmp_path: Path) -> None:
+    wf = Workflow("hook_fail_after")
+    wf.set_initial("a")
+
+    @wf.step("a")
+    def a(ctx) -> None:
+        return None
+
+    def after(ctx, st: str, nxt: str | None) -> None:
+        raise ValueError("hook blew up")
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted, after_step=after).run()
+    assert result.status == "failed"
+    assert result.error == "hook blew up"
+    events = store.load_events(result.run_id)
+    failed = next(e for e in events if e["type"] == "run_failed")
+    completed = next(e for e in events if e["type"] == "run_completed")
+    assert failed["payload"]["error"]["type"] == "ValueError"
+    assert completed["payload"]["status"] == "failed"
+
+
 def test_workflow_meta_in_run_started(tmp_path: Path) -> None:
     wf = Workflow("m", version="2", meta={"pkg": "demo", "git_sha": "abc"})
     wf.set_initial("a")

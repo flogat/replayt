@@ -45,7 +45,7 @@ def main() -> int:
         files = changed_files_vs_base(base)
     except subprocess.CalledProcessError as exc:
         print(f"check_changelog_if_needed: git diff failed: {exc}", file=sys.stderr)
-        return 0
+        return 1
     if not need_changelog_update(files):
         return 0
     preview = files[:25]

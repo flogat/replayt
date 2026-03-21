@@ -37,4 +37,4 @@ replayt graph replayt_examples.issue_triage:wf
 
 ## PyPI publish
 
-Publishing is automated — see the **Releasing a new version** section in [CONTRIBUTING.md](../CONTRIBUTING.md).
+Publishing is automated. See the **Releasing a new version** section in [CONTRIBUTING.md](../CONTRIBUTING.md).

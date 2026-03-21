@@ -6,6 +6,7 @@ import importlib.resources
 import json
 from collections import Counter
 from datetime import datetime, timezone
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any, Literal
 
@@ -229,11 +230,8 @@ def cmd_runs(
     exp_filters = parse_tag_filters(experiment)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     with read_store(log_dir, sqlite) as store:
-        run_ids = sorted(store.list_run_ids(), reverse=True)
         runs_data: list[tuple[str, dict[str, Any]]] = []
-        for rid in run_ids:
-            if len(runs_data) >= limit:
-                break
+        for rid in store.list_run_ids():
             events = store.load_events(rid)
             summary = event_summary(events)
             if tag_filters and not tags_match(summary.get("tags") or {}, tag_filters):
@@ -243,6 +241,14 @@ def cmd_runs(
             if exp_filters and not experiment_filters_match(summary.get("experiment") or {}, exp_filters):
                 continue
             runs_data.append((rid, summary))
+
+    def _run_sort_key(item: tuple[str, dict]) -> tuple:
+        rid, summary = item
+        ts = parse_iso_ts(summary.get("last_ts"))
+        return (ts is not None, ts, rid)
+
+    runs_data.sort(key=_run_sort_key, reverse=True)
+    runs_data = runs_data[:limit]
     for rid, summary in runs_data:
         typer.echo(
             f"{rid}  {summary['status']}  "
@@ -429,7 +435,11 @@ def cmd_diff(
             "b": db["states_visited"],
             "changed": da["states_visited"] != db["states_visited"],
         },
-        "structured_outputs": {"changed": da["structured_outputs"] != db["structured_outputs"]},
+        "structured_outputs": {
+            "a_count": len(da["structured_outputs"]),
+            "b_count": len(db["structured_outputs"]),
+            "changed": da["structured_outputs"] != db["structured_outputs"],
+        },
         "tool_calls": {
             "a_count": len(da["tool_calls"]),
             "b_count": len(db["tool_calls"]),
@@ -443,13 +453,19 @@ def cmd_diff(
     }
 
     if da["structured_outputs"] != db["structured_outputs"]:
-        all_keys = sorted(set(da["structured_outputs"]) | set(db["structured_outputs"]))
         field_diffs: dict[str, Any] = {}
-        for key in all_keys:
-            va = da["structured_outputs"].get(key)
-            vb = db["structured_outputs"].get(key)
+        for idx, (va, vb) in enumerate(
+            zip_longest(da["structured_outputs"], db["structured_outputs"], fillvalue=None),
+            start=1,
+        ):
             if va != vb:
-                field_diffs[key] = {"a": va, "b": vb}
+                schema_name = ""
+                if isinstance(va, dict) and va.get("schema_name"):
+                    schema_name = str(va["schema_name"])
+                elif isinstance(vb, dict) and vb.get("schema_name"):
+                    schema_name = str(vb["schema_name"])
+                label = schema_name or f"output_{idx}"
+                field_diffs[f"{idx}:{label}"] = {"a": va, "b": vb}
         diff_payload["structured_outputs"]["diffs"] = field_diffs
 
     if output == "json":
@@ -467,11 +483,18 @@ def cmd_diff(
     else:
         typer.echo(f"states: {' -> '.join(da['states_visited'])} (same)")
     if da["structured_outputs"] != db["structured_outputs"]:
-        for key in sorted(set(da["structured_outputs"]) | set(db["structured_outputs"])):
-            va = da["structured_outputs"].get(key)
-            vb = db["structured_outputs"].get(key)
+        for idx, (va, vb) in enumerate(
+            zip_longest(da["structured_outputs"], db["structured_outputs"], fillvalue=None),
+            start=1,
+        ):
             if va != vb:
-                typer.echo(f"output[{key}] changed:")
+                schema_name = ""
+                if isinstance(va, dict) and va.get("schema_name"):
+                    schema_name = str(va["schema_name"])
+                elif isinstance(vb, dict) and vb.get("schema_name"):
+                    schema_name = str(vb["schema_name"])
+                label = schema_name or str(idx)
+                typer.echo(f"output[{label}#{idx}] changed:")
                 typer.echo(f"  a: {json.dumps(va, default=str)[:300]}")
                 typer.echo(f"  b: {json.dumps(vb, default=str)[:300]}")
     else:
@@ -500,15 +523,36 @@ def cmd_gc(
     log_dir = resolve_log_dir(log_dir, log_subdir)
     jsonl_store = JSONLStore(log_dir)
     sqlite_store = SQLiteStore(sqlite) if sqlite is not None else None
-    run_ids = jsonl_store.list_run_ids()
+    run_ids = set(jsonl_store.list_run_ids())
+    if sqlite_store is not None:
+        run_ids.update(sqlite_store.list_run_ids())
     deleted = 0
-    for rid in run_ids:
-        events = jsonl_store.load_events(rid)
-        if not events:
+    for rid in sorted(run_ids):
+        copies: list[list[dict[str, Any]]] = []
+        jsonl_events = jsonl_store.load_events(rid)
+        if jsonl_events:
+            copies.append(jsonl_events)
+        if sqlite_store is not None:
+            sqlite_events = sqlite_store.load_events(rid)
+            if sqlite_events:
+                copies.append(sqlite_events)
+        if not copies:
             continue
-        last_ts_raw = events[-1].get("ts")
-        last_ts = parse_iso_ts(last_ts_raw)
-        if last_ts is None or last_ts >= cutoff:
+        last_ts_raw = ""
+        last_ts_values: list[datetime] = []
+        unparseable_copy = False
+        for events in copies:
+            raw_ts = events[-1].get("ts")
+            parsed_ts = parse_iso_ts(raw_ts)
+            if parsed_ts is None:
+                unparseable_copy = True
+                break
+            last_ts_raw = str(raw_ts)
+            last_ts_values.append(parsed_ts)
+        if unparseable_copy or not last_ts_values:
+            continue
+        last_ts = max(last_ts_values)
+        if last_ts >= cutoff:
             continue
         if dry_run:
             typer.echo(f"[dry-run] would delete {rid} (last_event={last_ts_raw})")

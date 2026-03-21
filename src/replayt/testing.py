@@ -73,6 +73,23 @@ class DryRunLLMClient(OpenAICompatClient):
             return {}
         return ""
 
+    @staticmethod
+    def _schema_from_parse_prompt(messages: list[dict[str, Any]]) -> dict[str, Any] | None:
+        if not messages:
+            return None
+        content = messages[0].get("content")
+        if not isinstance(content, str):
+            return None
+        marker = "(return JSON only, no markdown):\n"
+        if marker not in content:
+            return None
+        schema_text = content.split(marker, 1)[1].strip()
+        try:
+            schema = json.loads(schema_text)
+        except json.JSONDecodeError:
+            return None
+        return schema if isinstance(schema, dict) else None
+
     def chat_completions(
         self,
         *,
@@ -90,6 +107,10 @@ class DryRunLLMClient(OpenAICompatClient):
             schema_body = json_schema.get("schema") if isinstance(json_schema, dict) else None
             if isinstance(schema_body, dict):
                 content = json.dumps(self._minimal_json_from_schema(schema_body))
+        else:
+            schema = self._schema_from_parse_prompt(messages)
+            if schema is not None:
+                content = json.dumps(self._minimal_json_from_schema(schema))
         return {
             "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},

@@ -491,6 +491,11 @@ class Runner:
         except RunFailed as e:
             self._emit_payload("run_completed", {"final_state": self._current_state, "status": "failed"})
             return RunResult(self.run_id, "failed", final_state=self._current_state, error=str(e))
+        except Exception as e:  # noqa: BLE001
+            err_detail = _serialize_error(e, include_traceback=self.include_tracebacks)
+            self._emit_payload("run_failed", {"error": err_detail, "state": self._current_state})
+            self._emit_payload("run_completed", {"final_state": self._current_state, "status": "failed"})
+            return RunResult(self.run_id, "failed", final_state=self._current_state, error=str(e))
 
 
 def resolve_approval_on_store(

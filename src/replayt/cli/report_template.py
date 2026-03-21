@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import html
 import json
+from collections import defaultdict, deque
 from datetime import datetime
+from itertools import zip_longest
 from typing import Any, Literal
 
 REPORT_CSS = """
@@ -186,7 +188,7 @@ APPROVAL_ITEM = """\
 </div>"""
 
 
-def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
+def _legacy_aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
     """Single pass over events for HTML reports and diff context (rich approval metadata)."""
 
     workflow_name = ""
@@ -202,9 +204,8 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
     total_tokens = 0
     first_ts: str | None = None
     last_ts: str | None = None
-    approval_requests: dict[str, dict[str, Any]] = {}
-    approval_last: dict[str, bool] = {}
-    approval_resolved_ts: dict[str, str] = {}
+    approvals: list[dict[str, Any]] = []
+    pending_approvals: dict[str, deque[int]] = defaultdict(deque)
 
     for e in events:
         ts = e.get("ts", "")
@@ -255,17 +256,42 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif typ == "approval_requested":
             aid = payload.get("approval_id")
             if aid is not None:
-                approval_requests[str(aid)] = {
-                    "summary": payload.get("summary", ""),
-                    "state": payload.get("state", ""),
-                    "details": payload.get("details") or {},
-                    "requested_ts": ts,
-                }
+                aid_str = str(aid)
+                approvals.append(
+                    {
+                        "approval_id": aid_str,
+                        "summary": payload.get("summary", ""),
+                        "state": payload.get("state", ""),
+                        "details": payload.get("details") or {},
+                        "requested_ts": ts,
+                        "approved": None,
+                        "resolved_ts": None,
+                        "orphan_resolution": False,
+                    }
+                )
+                pending_approvals[aid_str].append(len(approvals) - 1)
         elif typ == "approval_resolved":
             aid = payload.get("approval_id")
             if aid is not None:
-                approval_last[str(aid)] = bool(payload.get("approved"))
-                approval_resolved_ts[str(aid)] = ts
+                aid_str = str(aid)
+                approved = bool(payload.get("approved"))
+                if pending_approvals[aid_str]:
+                    idx = pending_approvals[aid_str].popleft()
+                    approvals[idx]["approved"] = approved
+                    approvals[idx]["resolved_ts"] = ts
+                else:
+                    approvals.append(
+                        {
+                            "approval_id": aid_str,
+                            "summary": "",
+                            "state": "",
+                            "details": {},
+                            "requested_ts": None,
+                            "approved": approved,
+                            "resolved_ts": ts,
+                            "orphan_resolution": True,
+                        }
+                    )
 
     return {
         "workflow_name": workflow_name,
@@ -281,20 +307,14 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
         "total_tokens": total_tokens,
         "first_ts": first_ts,
         "last_ts": last_ts,
-        "approval_requests": approval_requests,
-        "approval_last": approval_last,
-        "approval_resolved_ts": approval_resolved_ts,
+        "approvals": approvals,
     }
 
 
-def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
+def _legacy_collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
     """Parse events into the same shape ``cmd_report`` uses (for single-run and diff reports)."""
 
     agg = aggregate_run_report_data(events)
-    slim_approvals = {
-        aid: {"summary": meta["summary"], "state": meta["state"]}
-        for aid, meta in agg["approval_requests"].items()
-    }
     return {
         "workflow_name": agg["workflow_name"],
         "workflow_version": agg["workflow_version"],
@@ -309,13 +329,28 @@ def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
         "total_tokens": agg["total_tokens"],
         "first_ts": agg["first_ts"],
         "last_ts": agg["last_ts"],
-        "approval_requests": slim_approvals,
-        "approval_last": agg["approval_last"],
+        "approvals": agg["approvals"],
     }
 
 
+def _output_occurrence_label(item: dict[str, Any] | None, index: int) -> str:
+    schema_name = ""
+    if isinstance(item, dict):
+        schema_name = str(item.get("schema_name", "")).strip()
+    base = schema_name or "output"
+    return f"{base} #{index}"
+
+
+def _approval_occurrence_label(item: dict[str, Any] | None, index: int) -> str:
+    approval_id = ""
+    if isinstance(item, dict):
+        approval_id = str(item.get("approval_id", "")).strip()
+    base = approval_id or "approval"
+    return f"{base} #{index}"
+
+
 def _outputs_signature(outputs: list[dict[str, Any]]) -> dict[str, Any]:
-    return {str(o.get("schema_name", "")): o.get("data") for o in outputs}
+    return {str(output.get("schema_name", "")): output.get("data") for output in outputs}
 
 
 REPORT_DIFF_HTML = """\
@@ -373,7 +408,7 @@ REPORT_DIFF_HTML = """\
 </html>"""
 
 
-def build_report_diff_html(
+def _legacy_build_report_diff_html(
     run_a: str,
     run_b: str,
     ctx_a: dict[str, Any],
@@ -436,7 +471,7 @@ def _parse_iso_ts(ts: str | None) -> datetime | None:
         return None
 
 
-def build_run_report_html(
+def _legacy_build_run_report_html(
     run_id: str,
     events: list[dict[str, Any]],
     *,
@@ -565,6 +600,405 @@ def build_run_report_html(
                     approval_id=html.escape(aid),
                     state=html.escape(str(meta.get("state", ""))),
                     summary=html.escape(str(meta.get("summary", ""))),
+                    details_block=details_block,
+                    timing_block=timing_block,
+                    outcome=html.escape(outcome),
+                )
+            )
+        appr_block = APPROVALS_SECTION.format(items="\n".join(items_a))
+        if style == "stakeholder":
+            intro = (
+                '<p class="rp-muted">Human approval gates from the JSONL timeline '
+                "(stakeholder view; tool/token sections omitted below).</p>\n"
+            )
+            approvals_section = intro + appr_block
+        else:
+            approvals_section = appr_block
+
+    if style == "stakeholder":
+        token_section = (
+            '<section class="rp-section"><p class="rp-muted">Tool-call and token usage sections omitted. '
+            "For the full technical report, run "
+            f'<code class="rp-code">replayt report {html.escape(run_id)} --style default</code>'
+            "</p></section>"
+        )
+        report_title = "Run summary"
+    else:
+        token_section = TOKEN_USAGE_SECTION.format(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=total_tokens,
+        )
+        report_title = "Run Report"
+
+    return REPORT_HTML.format(
+        report_title=html.escape(report_title),
+        run_id=html.escape(run_id),
+        workflow_name=html.escape(workflow_name),
+        workflow_version=html.escape(workflow_version),
+        status=html.escape(status),
+        status_class=status_class,
+        duration=html.escape(duration),
+        tags_html=tags_html,
+        meta_html=meta_html,
+        approvals_section=approvals_section,
+        timeline_html=timeline_html,
+        outputs_section=outputs_section,
+        tool_calls_section=tool_calls_section,
+        token_section=token_section,
+    )
+
+
+def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Single pass over events for HTML reports and diff context (rich approval metadata)."""
+
+    workflow_name = ""
+    workflow_version = ""
+    status = "unknown"
+    tags: dict[str, str] = {}
+    run_metadata: dict[str, Any] = {}
+    states: list[dict[str, str]] = []
+    outputs: list[dict[str, Any]] = []
+    tool_calls: list[dict[str, Any]] = []
+    approvals: list[dict[str, Any]] = []
+    pending_approvals: dict[str, deque[int]] = defaultdict(deque)
+    prompt_tokens = 0
+    completion_tokens = 0
+    total_tokens = 0
+    first_ts: str | None = None
+    last_ts: str | None = None
+
+    for event in events:
+        ts = str(event.get("ts", ""))
+        if first_ts is None:
+            first_ts = ts
+        last_ts = ts
+        typ = event.get("type")
+        payload = event.get("payload") or {}
+
+        if typ == "run_started":
+            workflow_name = str(payload.get("workflow_name", ""))
+            workflow_version = str(payload.get("workflow_version", ""))
+            raw_tags = payload.get("tags") or {}
+            tags = raw_tags if isinstance(raw_tags, dict) else {}
+            raw_meta = payload.get("run_metadata") or {}
+            run_metadata = raw_meta if isinstance(raw_meta, dict) else {}
+        elif typ == "state_entered":
+            states.append({"state": str(payload.get("state", "")), "ts": ts})
+        elif typ == "structured_output":
+            outputs.append({"schema_name": payload.get("schema_name", ""), "data": payload.get("data")})
+        elif typ == "tool_call":
+            tool_calls.append(
+                {"tool": payload.get("name", ""), "seq": event.get("seq", ""), "args": payload.get("arguments")}
+            )
+        elif typ == "tool_result":
+            tool_calls.append(
+                {
+                    "tool": payload.get("name", "result"),
+                    "seq": event.get("seq", ""),
+                    "args": payload.get("result"),
+                }
+            )
+        elif typ == "llm_response":
+            usage = payload.get("usage") or {}
+            pt = usage.get("prompt_tokens")
+            ct = usage.get("completion_tokens")
+            tt = usage.get("total_tokens")
+            if isinstance(pt, int):
+                prompt_tokens += pt
+            if isinstance(ct, int):
+                completion_tokens += ct
+            if isinstance(tt, int):
+                total_tokens += tt
+        elif typ == "run_completed":
+            status = str(payload.get("status", status))
+        elif typ == "run_paused":
+            status = "paused"
+        elif typ == "run_failed":
+            status = "failed"
+        elif typ == "approval_requested":
+            aid = payload.get("approval_id")
+            if aid is not None:
+                aid_str = str(aid)
+                approvals.append(
+                    {
+                        "approval_id": aid_str,
+                        "summary": payload.get("summary", ""),
+                        "state": payload.get("state", ""),
+                        "details": payload.get("details") or {},
+                        "requested_ts": ts,
+                        "approved": None,
+                        "resolved_ts": None,
+                        "orphan_resolution": False,
+                    }
+                )
+                pending_approvals[aid_str].append(len(approvals) - 1)
+        elif typ == "approval_resolved":
+            aid = payload.get("approval_id")
+            if aid is not None:
+                aid_str = str(aid)
+                approved = bool(payload.get("approved"))
+                if pending_approvals[aid_str]:
+                    idx = pending_approvals[aid_str].popleft()
+                    approvals[idx]["approved"] = approved
+                    approvals[idx]["resolved_ts"] = ts
+                else:
+                    approvals.append(
+                        {
+                            "approval_id": aid_str,
+                            "summary": "",
+                            "state": "",
+                            "details": {},
+                            "requested_ts": None,
+                            "approved": approved,
+                            "resolved_ts": ts,
+                            "orphan_resolution": True,
+                        }
+                    )
+
+    return {
+        "workflow_name": workflow_name,
+        "workflow_version": workflow_version,
+        "status": status,
+        "tags": tags,
+        "run_metadata": run_metadata,
+        "states": states,
+        "outputs": outputs,
+        "tool_calls": tool_calls,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "total_tokens": total_tokens,
+        "first_ts": first_ts,
+        "last_ts": last_ts,
+        "approvals": approvals,
+    }
+
+
+def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Parse events into the same shape ``cmd_report`` uses (for single-run and diff reports)."""
+
+    agg = aggregate_run_report_data(events)
+    return {
+        "workflow_name": agg["workflow_name"],
+        "workflow_version": agg["workflow_version"],
+        "status": agg["status"],
+        "tags": agg["tags"],
+        "run_metadata": agg["run_metadata"],
+        "states": agg["states"],
+        "outputs": agg["outputs"],
+        "tool_calls": agg["tool_calls"],
+        "prompt_tokens": agg["prompt_tokens"],
+        "completion_tokens": agg["completion_tokens"],
+        "total_tokens": agg["total_tokens"],
+        "first_ts": agg["first_ts"],
+        "last_ts": agg["last_ts"],
+        "approvals": agg["approvals"],
+    }
+
+
+def build_report_diff_html(
+    run_a: str,
+    run_b: str,
+    ctx_a: dict[str, Any],
+    ctx_b: dict[str, Any],
+) -> str:
+    def state_chain(states: list[dict[str, str]]) -> str:
+        return " -> ".join(s["state"] for s in states) if states else "(none)"
+
+    output_rows: list[str] = []
+    for idx, (left, right) in enumerate(zip_longest(ctx_a["outputs"], ctx_b["outputs"], fillvalue=None), start=1):
+        label = _output_occurrence_label(left if left is not None else right, idx)
+        same = left == right
+        cls = "rp-diff-row" if same else "rp-diff-row rp-changed"
+        output_rows.append(
+            f'<p class="{cls}"><span class="rp-label">{html.escape(label)}:</span> '
+            f"{'match' if same else 'different'}</p>"
+            + (
+                ""
+                if same
+                else f'<pre class="rp-pre">A: {html.escape(json.dumps(left, indent=2, default=str)[:1200])}\n\n'
+                f'B: {html.escape(json.dumps(right, indent=2, default=str)[:1200])}</pre>'
+            )
+        )
+    if not output_rows:
+        output_rows.append('<p class="rp-muted">No structured_output events in either run.</p>')
+
+    approval_rows: list[str] = []
+    for idx, (left, right) in enumerate(
+        zip_longest(ctx_a["approvals"], ctx_b["approvals"], fillvalue=None),
+        start=1,
+    ):
+        label = _approval_occurrence_label(left if left is not None else right, idx)
+        same = left == right
+        cls = "rp-diff-row" if same else "rp-diff-row rp-changed"
+        approval_rows.append(
+            f'<p class="{cls}"><span class="rp-label">{html.escape(label)}:</span> '
+            f"{'match' if same else 'different'}</p>"
+            + (
+                ""
+                if same
+                else f'<pre class="rp-pre">A: {html.escape(json.dumps(left, indent=2, default=str)[:1200])}\n\n'
+                f'B: {html.escape(json.dumps(right, indent=2, default=str)[:1200])}</pre>'
+            )
+        )
+    approvals_html = (
+        "\n".join(approval_rows) if approval_rows else '<p class="rp-muted">No approvals in either run.</p>'
+    )
+
+    return REPORT_DIFF_HTML.format(
+        run_a=html.escape(run_a),
+        run_b=html.escape(run_b),
+        wa_name=html.escape(str(ctx_a["workflow_name"])),
+        wa_ver=html.escape(str(ctx_a["workflow_version"])),
+        wa_status=html.escape(str(ctx_a["status"])),
+        wa_states=html.escape(state_chain(ctx_a["states"])),
+        wb_name=html.escape(str(ctx_b["workflow_name"])),
+        wb_ver=html.escape(str(ctx_b["workflow_version"])),
+        wb_status=html.escape(str(ctx_b["status"])),
+        wb_states=html.escape(state_chain(ctx_b["states"])),
+        outputs_diff_rows="\n".join(output_rows),
+        approvals_diff=approvals_html,
+    )
+
+
+def build_run_report_html(
+    run_id: str,
+    events: list[dict[str, Any]],
+    *,
+    style: Literal["default", "stakeholder"] = "default",
+) -> str:
+    """Build the same self-contained HTML as ``replayt report`` (for CLI and bundle export)."""
+
+    agg = aggregate_run_report_data(events)
+    workflow_name = agg["workflow_name"]
+    workflow_version = agg["workflow_version"]
+    status = agg["status"]
+    tags = agg["tags"]
+    run_metadata = agg["run_metadata"]
+    states = agg["states"]
+    outputs = agg["outputs"]
+    tool_calls = agg["tool_calls"]
+    prompt_tokens = agg["prompt_tokens"]
+    completion_tokens = agg["completion_tokens"]
+    total_tokens = agg["total_tokens"]
+    first_ts = agg["first_ts"]
+    last_ts = agg["last_ts"]
+    approvals = agg["approvals"]
+
+    duration = "n/a"
+    t0 = _parse_iso_ts(first_ts)
+    t1 = _parse_iso_ts(last_ts)
+    if t0 and t1:
+        delta = t1 - t0
+        secs = delta.total_seconds()
+        if secs < 60:
+            duration = f"{secs:.1f}s"
+        else:
+            duration = f"{secs / 60:.1f}m"
+
+    status_classes = {
+        "completed": "rp-badge-ok",
+        "failed": "rp-badge-err",
+        "paused": "rp-badge-pause",
+    }
+    status_class = status_classes.get(status, "rp-badge-neutral")
+
+    tags_html = ""
+    if tags:
+        tag_strs = ", ".join(f"{html.escape(k)}={html.escape(v)}" for k, v in tags.items())
+        tags_html = f'<p><span class="rp-label">Tags:</span> {tag_strs}</p>'
+    meta_html = ""
+    if run_metadata:
+        meta_html = (
+            '<p><span class="rp-label">Run metadata:</span> '
+            f'<code class="rp-code">{html.escape(json.dumps(run_metadata, default=str)[:4000])}</code></p>'
+        )
+
+    timeline_items: list[str] = []
+    for state_meta in states:
+        dot_class = "rp-dot-muted"
+        if state_meta["state"] == states[-1]["state"] and status == "completed":
+            dot_class = "rp-dot-ok"
+        elif state_meta["state"] == states[-1]["state"] and status == "failed":
+            dot_class = "rp-dot-err"
+        timeline_items.append(
+            TIMELINE_ITEM.format(
+                state=html.escape(state_meta["state"]),
+                ts=html.escape(state_meta["ts"]),
+                dot_class=dot_class,
+            )
+        )
+    timeline_html = (
+        "\n".join(timeline_items)
+        if timeline_items
+        else '<li class="rp-tl-item"><p class="rp-muted">No states recorded</p></li>'
+    )
+
+    outputs_section = ""
+    if outputs:
+        items = []
+        for output in outputs:
+            items.append(
+                OUTPUT_ITEM.format(
+                    schema_name=html.escape(str(output["schema_name"])),
+                    data_json=html.escape(json.dumps(output["data"], indent=2, default=str)),
+                )
+            )
+        outputs_section = OUTPUTS_SECTION.format(items="\n".join(items))
+
+    tool_calls_section = ""
+    if tool_calls and style == "default":
+        items = []
+        for tool_call in tool_calls:
+            items.append(
+                TOOL_CALL_ITEM.format(
+                    tool=html.escape(str(tool_call["tool"])),
+                    seq=html.escape(str(tool_call["seq"])),
+                    detail_json=html.escape(json.dumps(tool_call.get("args"), indent=2, default=str)),
+                )
+            )
+        tool_calls_section = TOOL_CALLS_SECTION.format(items="\n".join(items))
+
+    approvals_section = ""
+    if approvals:
+        items_a: list[str] = []
+        for approval in approvals:
+            approved = approval.get("approved")
+            if approved is True:
+                outcome = "Approved"
+            elif approved is False:
+                outcome = "Rejected"
+            else:
+                outcome = "Pending (no resolution in this log)"
+            if approval.get("orphan_resolution"):
+                outcome += " [missing approval_requested event]"
+            details = approval.get("details") or {}
+            if isinstance(details, dict) and details:
+                raw_details = json.dumps(details, ensure_ascii=False, default=str)
+                preview = html.escape(raw_details[:4000])
+                if len(raw_details) > 4000:
+                    preview += "..."
+                details_block = (
+                    f'<p><span class="rp-label">Details:</span></p><pre class="rp-pre">{preview}</pre>'
+                )
+            else:
+                details_block = ""
+            requested_ts = str(approval.get("requested_ts") or "")
+            resolved_ts = str(approval.get("resolved_ts") or "")
+            if requested_ts or resolved_ts:
+                timing_block = (
+                    "<p><span class=\"rp-label\">Timeline:</span> "
+                    f"requested <code class=\"rp-code\">{html.escape(requested_ts or '-')}</code>"
+                    " -> "
+                    f"resolved <code class=\"rp-code\">{html.escape(resolved_ts or '-')}</code></p>"
+                )
+            else:
+                timing_block = ""
+            items_a.append(
+                APPROVAL_ITEM.format(
+                    approval_id=html.escape(str(approval.get("approval_id", ""))),
+                    state=html.escape(str(approval.get("state", ""))),
+                    summary=html.escape(str(approval.get("summary", ""))),
                     details_block=details_block,
                     timing_block=timing_block,
                     outcome=html.escape(outcome),

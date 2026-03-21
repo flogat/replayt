@@ -390,6 +390,51 @@ def test_cli_runs_and_doctor(tmp_path: Path) -> None:
     assert "replayt" in doctor.stdout.lower()
 
 
+def test_cli_runs_orders_by_last_event_timestamp(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    old_lines = [
+        {
+            "ts": "2026-01-01T00:00:00+00:00",
+            "run_id": "zzz-old",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-01-01T00:01:00+00:00",
+            "run_id": "zzz-old",
+            "seq": 2,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    new_lines = [
+        {
+            "ts": "2026-03-01T00:00:00+00:00",
+            "run_id": "aaa-new",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-01T00:01:00+00:00",
+            "run_id": "aaa-new",
+            "seq": 2,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    (log_dir / "zzz-old.jsonl").write_text("\n".join(json.dumps(x) for x in old_lines) + "\n", encoding="utf-8")
+    (log_dir / "aaa-new.jsonl").write_text("\n".join(json.dumps(x) for x in new_lines) + "\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--limit", "1"])
+    assert result.exit_code == 0
+    first_line = result.stdout.strip().splitlines()[0]
+    assert first_line.startswith("aaa-new")
+
+
 def test_cli_inspect_and_replay_can_read_from_sqlite(tmp_path: Path) -> None:
     workflow_path = tmp_path / "sqlite_flow.py"
     workflow_path.write_text(
@@ -627,6 +672,36 @@ def ask(ctx):
     assert "status=completed" in result.stdout
 
 
+def test_dry_run_with_llm_parse(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "dry_parse_flow.py"
+    workflow_path.write_text(
+        """
+from pydantic import BaseModel
+from replayt.workflow import Workflow
+
+class Pick(BaseModel):
+    label: str
+
+wf = Workflow("dry_parse")
+wf.set_initial("ask")
+
+@wf.step("ask")
+def ask(ctx):
+    out = ctx.llm.parse(Pick, messages=[{"role": "user", "content": "hello"}])
+    ctx.set("response", out.label)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["run", str(workflow_path), "--log-dir", str(tmp_path), "--dry-run"],
+    )
+    assert result.exit_code == 0
+    assert "status=completed" in result.stdout
+
+
 def test_report_generates_html(tmp_path: Path) -> None:
     workflow_path = tmp_path / "report_flow.py"
     workflow_path.write_text(
@@ -727,6 +802,82 @@ def start(ctx):
     assert payload["run_a"] == id_a
     assert payload["run_b"] == id_b
     assert "status" in payload
+
+
+def test_diff_preserves_multiple_structured_outputs_with_same_schema_name(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    run_a = [
+        {
+            "ts": "2026-03-01T00:00:00+00:00",
+            "run_id": "run-a",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-01T00:00:01+00:00",
+            "run_id": "run-a",
+            "seq": 2,
+            "type": "structured_output",
+            "payload": {"state": "first", "schema_name": "Decision", "data": {"label": "A"}},
+        },
+        {
+            "ts": "2026-03-01T00:00:02+00:00",
+            "run_id": "run-a",
+            "seq": 3,
+            "type": "structured_output",
+            "payload": {"state": "second", "schema_name": "Decision", "data": {"label": "same"}},
+        },
+        {
+            "ts": "2026-03-01T00:00:03+00:00",
+            "run_id": "run-a",
+            "seq": 4,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    run_b = [
+        {
+            "ts": "2026-03-02T00:00:00+00:00",
+            "run_id": "run-b",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-02T00:00:01+00:00",
+            "run_id": "run-b",
+            "seq": 2,
+            "type": "structured_output",
+            "payload": {"state": "first", "schema_name": "Decision", "data": {"label": "B"}},
+        },
+        {
+            "ts": "2026-03-02T00:00:02+00:00",
+            "run_id": "run-b",
+            "seq": 3,
+            "type": "structured_output",
+            "payload": {"state": "second", "schema_name": "Decision", "data": {"label": "same"}},
+        },
+        {
+            "ts": "2026-03-02T00:00:03+00:00",
+            "run_id": "run-b",
+            "seq": 4,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    (log_dir / "run-a.jsonl").write_text("\n".join(json.dumps(x) for x in run_a) + "\n", encoding="utf-8")
+    (log_dir / "run-b.jsonl").write_text("\n".join(json.dumps(x) for x in run_b) + "\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["diff", "run-a", "run-b", "--log-dir", str(log_dir), "--output", "json"])
+    assert result.exit_code == 0
+    payload = json.loads(result.stdout)
+    assert payload["structured_outputs"]["changed"] is True
+    assert payload["structured_outputs"]["a_count"] == 2
+    assert payload["structured_outputs"]["b_count"] == 2
+    assert "1:Decision" in payload["structured_outputs"]["diffs"]
 
 
 def test_diff_command_with_sqlite(tmp_path: Path) -> None:
@@ -932,6 +1083,147 @@ def s(ctx):
     html = out.read_text(encoding="utf-8")
     assert "Run comparison" in html
     assert id_a in html and id_b in html
+
+
+def test_cli_report_diff_preserves_repeated_outputs_and_approvals(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    run_a = [
+        {
+            "ts": "2026-03-01T00:00:00+00:00",
+            "run_id": "dup-a",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-01T00:00:01+00:00",
+            "run_id": "dup-a",
+            "seq": 2,
+            "type": "approval_requested",
+            "payload": {"approval_id": "ship", "state": "gate-1", "summary": "First approval"},
+        },
+        {
+            "ts": "2026-03-01T00:00:02+00:00",
+            "run_id": "dup-a",
+            "seq": 3,
+            "type": "approval_resolved",
+            "payload": {"approval_id": "ship", "approved": True},
+        },
+        {
+            "ts": "2026-03-01T00:00:03+00:00",
+            "run_id": "dup-a",
+            "seq": 4,
+            "type": "approval_requested",
+            "payload": {"approval_id": "ship", "state": "gate-2", "summary": "Second approval"},
+        },
+        {
+            "ts": "2026-03-01T00:00:04+00:00",
+            "run_id": "dup-a",
+            "seq": 5,
+            "type": "approval_resolved",
+            "payload": {"approval_id": "ship", "approved": False},
+        },
+        {
+            "ts": "2026-03-01T00:00:05+00:00",
+            "run_id": "dup-a",
+            "seq": 6,
+            "type": "structured_output",
+            "payload": {"schema_name": "Decision", "data": {"value": "alpha"}},
+        },
+        {
+            "ts": "2026-03-01T00:00:06+00:00",
+            "run_id": "dup-a",
+            "seq": 7,
+            "type": "structured_output",
+            "payload": {"schema_name": "Decision", "data": {"value": "stable"}},
+        },
+        {
+            "ts": "2026-03-01T00:00:07+00:00",
+            "run_id": "dup-a",
+            "seq": 8,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    run_b = [
+        {
+            "ts": "2026-03-02T00:00:00+00:00",
+            "run_id": "dup-b",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-02T00:00:01+00:00",
+            "run_id": "dup-b",
+            "seq": 2,
+            "type": "approval_requested",
+            "payload": {"approval_id": "ship", "state": "gate-1", "summary": "First approval"},
+        },
+        {
+            "ts": "2026-03-02T00:00:02+00:00",
+            "run_id": "dup-b",
+            "seq": 3,
+            "type": "approval_resolved",
+            "payload": {"approval_id": "ship", "approved": False},
+        },
+        {
+            "ts": "2026-03-02T00:00:03+00:00",
+            "run_id": "dup-b",
+            "seq": 4,
+            "type": "approval_requested",
+            "payload": {"approval_id": "ship", "state": "gate-2", "summary": "Second approval"},
+        },
+        {
+            "ts": "2026-03-02T00:00:04+00:00",
+            "run_id": "dup-b",
+            "seq": 5,
+            "type": "approval_resolved",
+            "payload": {"approval_id": "ship", "approved": False},
+        },
+        {
+            "ts": "2026-03-02T00:00:05+00:00",
+            "run_id": "dup-b",
+            "seq": 6,
+            "type": "structured_output",
+            "payload": {"schema_name": "Decision", "data": {"value": "beta"}},
+        },
+        {
+            "ts": "2026-03-02T00:00:06+00:00",
+            "run_id": "dup-b",
+            "seq": 7,
+            "type": "structured_output",
+            "payload": {"schema_name": "Decision", "data": {"value": "stable"}},
+        },
+        {
+            "ts": "2026-03-02T00:00:07+00:00",
+            "run_id": "dup-b",
+            "seq": 8,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    for rid, events in (("dup-a", run_a), ("dup-b", run_b)):
+        (log_dir / f"{rid}.jsonl").write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n",
+            encoding="utf-8",
+        )
+
+    runner = CliRunner()
+    report = runner.invoke(app, ["report", "dup-a", "--log-dir", str(log_dir)])
+    assert report.exit_code == 0
+    assert "First approval" in report.stdout
+    assert "Second approval" in report.stdout
+    assert report.stdout.count("Approval ID:</span> <code class=\"rp-code\">ship</code>") == 2
+
+    diff = runner.invoke(app, ["report-diff", "dup-a", "dup-b", "--log-dir", str(log_dir)])
+    assert diff.exit_code == 0
+    assert "Decision #1" in diff.stdout
+    assert "Decision #2" in diff.stdout
+    assert "ship #1" in diff.stdout
+    assert "ship #2" in diff.stdout
+    assert diff.stdout.count("different") >= 2
 
 
 def test_replayt_log_dir_env_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -1481,6 +1773,43 @@ def test_cli_gc_skips_delete_when_last_event_ts_unparseable(tmp_path: Path) -> N
     assert "deleted 0 run(s)" in out.stdout
 
 
+def test_cli_gc_deletes_sqlite_only_runs(tmp_path: Path) -> None:
+    from replayt.persistence import SQLiteStore
+
+    log_dir = tmp_path / "runs"
+    db_path = tmp_path / "events.sqlite3"
+    store = SQLiteStore(db_path)
+    try:
+        store.append_event(
+            "sqlite-old",
+            ts="2000-01-01T00:00:00+00:00",
+            typ="run_started",
+            payload={"workflow_name": "w", "workflow_version": "1"},
+        )
+        store.append_event(
+            "sqlite-old",
+            ts="2000-01-02T00:00:00+00:00",
+            typ="run_completed",
+            payload={"status": "completed"},
+        )
+    finally:
+        store.close()
+
+    runner = CliRunner()
+    out = runner.invoke(
+        app,
+        ["gc", "--log-dir", str(log_dir), "--sqlite", str(db_path), "--older-than", "1d"],
+    )
+    assert out.exit_code == 0
+    assert "deleted sqlite-old" in out.stdout
+
+    store = SQLiteStore(db_path)
+    try:
+        assert store.load_events("sqlite-old") == []
+    finally:
+        store.close()
+
+
 def test_cli_run_timeout_appends_run_interrupted_to_sqlite_mirror(tmp_path: Path, monkeypatch) -> None:
     from replayt.cli.commands import run as run_cmd
     from replayt.persistence import JSONLStore, SQLiteStore
@@ -1519,4 +1848,3 @@ def test_cli_run_timeout_appends_run_interrupted_to_sqlite_mirror(tmp_path: Path
 
     ev_j = JSONLStore(tmp_path).load_events("tout1")
     assert any(e["type"] == "run_interrupted" for e in ev_j)
-

@@ -26,7 +26,7 @@ jobs:
         run: replayt ci CHANGE_ME_MODULE:wf --dry-check --strict-graph --inputs-json '{}'
 """
 
-INIT_WORKFLOW_PY = '''"""Scaffolded replayt workflow — run with: replayt run workflow.py --inputs-json '{}' """
+INIT_WORKFLOW_PY = '''"""Scaffolded replayt workflow. Run with: replayt run workflow.py --inputs-json '{}'."""
 
 from pathlib import Path
 
@@ -53,13 +53,13 @@ INIT_ENV_EXAMPLE = """# Copy to .env and load before running (replayt does not r
 # Example (bash): set -a && source .env && set +a
 OPENAI_API_KEY=
 
-# Optional — OpenAI-compatible API base (overrides REPLAYT_PROVIDER preset default).
+# Optional - OpenAI-compatible API base (overrides REPLAYT_PROVIDER preset default).
 # OPENAI_BASE_URL=https://openrouter.ai/api/v1
 
-# Optional — default model (overrides provider preset default).
+# Optional - default model (overrides provider preset default).
 # REPLAYT_MODEL=anthropic/claude-sonnet-4.6
 
-# Optional — openai | ollama | groq | together | openrouter | anthropic (see README).
+# Optional - openai | ollama | groq | together | openrouter | anthropic (see README).
 # REPLAYT_PROVIDER=openrouter
 """
 

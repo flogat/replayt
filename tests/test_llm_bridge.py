@@ -4,7 +4,6 @@ import json
 from contextlib import contextmanager
 from unittest.mock import patch
 
-import httpx
 import pytest
 from pydantic import BaseModel
 
@@ -27,6 +26,19 @@ class _FakeStreamResp:
 
     def iter_bytes(self):
         yield self._body
+
+
+class _FakeHTTPClient:
+    def __init__(self, responder) -> None:
+        self._responder = responder
+        self.calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    def stream(self, *args, **kwargs):
+        self.calls.append((args, kwargs))
+        return self._responder(*args, **kwargs)
+
+    def close(self) -> None:
+        return None
 
 
 @contextmanager
@@ -295,52 +307,41 @@ def test_extract_json_object_too_many_braces_aborts() -> None:
 
 def test_openai_compat_invalid_json_body_raises() -> None:
     body = b"<html>not json</html>"
-    client = OpenAICompatClient(LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"))
-    with patch.object(
-        httpx.Client,
-        "stream",
-        side_effect=lambda *a, **k: _stream_cm(_FakeStreamResp(body)),
-    ):
-        with pytest.raises(RuntimeError, match="not valid JSON"):
-            client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"),
+        http_client=_FakeHTTPClient(lambda *a, **k: _stream_cm(_FakeStreamResp(body))),
+    )
+    with pytest.raises(RuntimeError, match="not valid JSON"):
+        client.chat_completions(messages=[{"role": "user", "content": "x"}])
 
 
 def test_openai_compat_omits_authorization_without_api_key() -> None:
     body = b'{"choices":[{"message":{"content":"{}"}}]}'
-    client = OpenAICompatClient(LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"))
-    with patch.object(
-        httpx.Client,
-        "stream",
-        side_effect=lambda *a, **k: _stream_cm(_FakeStreamResp(body)),
-    ) as stream:
-        client.chat_completions(messages=[{"role": "user", "content": "x"}])
-    hdrs = stream.call_args.kwargs["headers"]
+    fake_http = _FakeHTTPClient(lambda *a, **k: _stream_cm(_FakeStreamResp(body)))
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"),
+        http_client=fake_http,
+    )
+    client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    hdrs = fake_http.calls[0][1]["headers"]
     assert "Authorization" not in hdrs
 
 
 def test_openai_compat_rejects_response_over_max_bytes() -> None:
     client = OpenAICompatClient(
-        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", max_response_bytes=10)
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", max_response_bytes=10),
+        http_client=_FakeHTTPClient(lambda *a, **k: _stream_cm(_FakeStreamResp(b"x" * 20))),
     )
-    with patch.object(
-        httpx.Client,
-        "stream",
-        side_effect=lambda *a, **k: _stream_cm(_FakeStreamResp(b"x" * 20)),
-    ):
-        with pytest.raises(RuntimeError, match="max_response_bytes"):
-            client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    with pytest.raises(RuntimeError, match="max_response_bytes"):
+        client.chat_completions(messages=[{"role": "user", "content": "x"}])
 
 
 def test_openai_compat_rejects_content_length_over_max_bytes() -> None:
     client = OpenAICompatClient(
-        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", max_response_bytes=10)
-    )
-    with patch.object(
-        httpx.Client,
-        "stream",
-        side_effect=lambda *a, **k: _stream_cm(
-            _FakeStreamResp(b"{}", headers={"content-length": "999"})
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", max_response_bytes=10),
+        http_client=_FakeHTTPClient(
+            lambda *a, **k: _stream_cm(_FakeStreamResp(b"{}", headers={"content-length": "999"}))
         ),
-    ):
-        with pytest.raises(RuntimeError, match="Content-Length"):
-            client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    )
+    with pytest.raises(RuntimeError, match="Content-Length"):
+        client.chat_completions(messages=[{"role": "user", "content": "x"}])

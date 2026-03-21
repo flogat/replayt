@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 TEMPLATE_BASIC = '''\
-"""Scaffolded replayt workflow — run with: replayt run workflow.py --inputs-json '{}' """
+"""Scaffolded replayt workflow. Run with: replayt run workflow.py --inputs-json '{}'."""
 
 from pathlib import Path
 
@@ -27,7 +27,7 @@ if __name__ == "__main__":
 '''
 
 TEMPLATE_APPROVAL = '''\
-"""Workflow with an approval gate — run, then approve with: replayt resume workflow.py RUN_ID --approval review"""
+"""Workflow with an approval gate. Run it, then approve with: replayt resume workflow.py RUN_ID --approval review."""
 
 from pathlib import Path
 
@@ -58,7 +58,7 @@ if __name__ == "__main__":
 '''
 
 TEMPLATE_TOOL_USING = '''\
-"""Workflow that registers and uses typed tools — run with: replayt run workflow.py --inputs-json '{}' """
+"""Workflow that registers and uses typed tools. Run with: replayt run workflow.py --inputs-json '{}'."""
 
 from pathlib import Path
 
@@ -88,7 +88,7 @@ if __name__ == "__main__":
 '''
 
 TEMPLATE_YAML = '''\
-# Declarative YAML workflow — run with: replayt run workflow.yaml
+# Declarative YAML workflow. Run with: replayt run workflow.yaml
 # Requires: pip install replayt[yaml]
 
 name: yaml_workflow

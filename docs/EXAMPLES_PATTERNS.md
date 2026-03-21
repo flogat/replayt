@@ -1,6 +1,6 @@
 # Examples: composition patterns
 
-These recipes are **not** built into replayt core. Use them to wire up queues, UIs, other SDKs, and analytics while core stays small: explicit states, local logs, no hosted platform.
+These recipes are **not** built into replayt core. Use them to wire up queues, UIs, other SDKs, and analytics around explicit states and local logs.
 
 **Tutorial first:** work through sections 1–14 in [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) in order. Return here when you need a reference pattern.
 
@@ -8,7 +8,7 @@ These recipes are **not** built into replayt core. Use them to wire up queues, U
 
 ## Patterns (composition, not core features)
 
-Same idea as the intro above: patterns you implement yourself, not features shipped inside replayt.
+These are patterns you implement yourself, not features shipped inside replayt.
 
 ### Pattern: approval bridge (local UI)
 
@@ -524,7 +524,7 @@ datasette .replayt/runs.db
 3. **DuckDB ad-hoc analytics:** Query JSONL logs directly (see DuckDB pattern above).
 4. **Approval bridge:** See the FastAPI approval bridge pattern above for a minimal custom approval API.
 
-Pick the mix that fits your org.
+Choose the pieces that fit your setup.
 
 ### Pattern: static graph with dynamic data (no runtime state creation)
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 from pathlib import Path
 
 
@@ -29,3 +30,15 @@ def test_need_changelog_update() -> None:
     assert not gate.need_changelog_update(["src/replayt/foo.py", "CHANGELOG.md"])
     assert gate.need_changelog_update(["src/replayt/foo.py"])
     assert gate.need_changelog_update(["src/replayt_examples/x.py", "docs/foo.md"])
+
+
+def test_main_fails_closed_when_git_diff_errors(monkeypatch) -> None:
+    gate = _load_script()
+    monkeypatch.setenv("GITHUB_EVENT_NAME", "pull_request")
+    monkeypatch.setenv("GITHUB_BASE_REF", "main")
+
+    def boom(base_branch: str) -> list[str]:
+        raise subprocess.CalledProcessError(2, ["git", "diff", "--name-only", f"origin/{base_branch}...HEAD"])
+
+    monkeypatch.setattr(gate, "changed_files_vs_base", boom)
+    assert gate.main() == 1

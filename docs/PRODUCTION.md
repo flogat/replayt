@@ -1,6 +1,6 @@
 # Production checklist
 
-How to run replayt safely in real environments: one finite run, logs you control, and clear exit semantics. For scope boundaries (“what we won’t add to core”), see [`SCOPE.md`](SCOPE.md).
+This page covers one finite run per process, log handling, and exit semantics. For scope boundaries (“what we won’t add to core”), see [`SCOPE.md`](SCOPE.md).
 
 ## Process model
 

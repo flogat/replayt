@@ -1,6 +1,6 @@
-# How replayt compares (mental migration guide)
+# How replayt compares
 
-replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this page to map tools you already know; it is a migration guide, not a feature parity matrix.
+replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this page to map it to tools you already know. It is a migration guide, not a feature parity matrix.
 
 ## Plain Python (`if` / `else` + prints)
 
@@ -12,13 +12,13 @@ replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this 
 
 ## “Agent” or planner frameworks (e.g. LangGraph-style loops)
 
-### Why not LangGraph?
+### LangGraph and similar frameworks
 
-[LangGraph](https://github.com/langchain-ai/langgraph) is a good fit when the **framework** should own exploration, dynamic graph mutation, or long-lived autonomous sessions.
+[LangGraph](https://github.com/langchain-ai/langgraph) fits when you want the **framework** to own exploration, dynamic graph mutation, or long-lived autonomous sessions.
 
-**replayt** is smaller on purpose: **no** bundled agents, **no** planners, **no** hidden loops—just explicit states and **`replayt replay`** over a **recorded** JSONL timeline (no new provider calls). Agent-style stacks stress flexible graphs, tool routing, and demos that feel autonomous; **replayt** keeps transitions in code you can read so the path stays inspectable.
+**replayt** keeps transitions in code you can read, stores the run in JSONL, and replays that recorded timeline with **`replayt replay`**.
 
-**Compose, don’t fork:** other frameworks belong **inside one `@wf.step`** when you need them—validate one Pydantic outcome, then `return "next_state"` — **Pattern: framework in a sandbox step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+**If you need another framework:** keep it **inside one `@wf.step`**. Validate one Pydantic outcome, then `return "next_state"`; see **Pattern: framework in a sandbox step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
 **Prefer the other tool when:** You want the framework to own exploration, dynamic graph mutation, or long-lived autonomous sessions.
 
@@ -26,15 +26,15 @@ replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this 
 
 **Temporal and similar engines** ship durable timers, cluster-scale orchestration, and activity retries across process boundaries.
 
-**replayt** runs **one finite run per process** (or one `Runner.run` per queue message), keeps logs local, and supports human approval pause/resume. Cross-job retries, concurrency, and backpressure belong in **your** scheduler (Celery, Airflow, K8s Jobs, SQS) — see **Pattern: queue worker** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+**replayt** runs **one finite run per process** (or one `Runner.run` per queue message), keeps logs local, and supports human approval pause/resume. Cross-job retries, concurrency, and backpressure belong in **your** scheduler (Celery, Airflow, K8s Jobs, SQS); see **Pattern: queue worker** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
 **Use Temporal when:** You need distributed durability and workflow code that survives worker crashes as a first-class product feature.
 
 ## Hosted LLM “platforms” and observability suites
 
-**Hosted stacks** usually mean accounts, dashboards, and traces on someone else’s infrastructure.
+**Hosted stacks** usually mean accounts, dashboards, and traces in a vendor service.
 
-**replayt** stores run history in files you own (JSONL, optional SQLite); core has no cloud requirement. The client is **OpenAI-compatible**; provider and base URL come from environment variables (defaults favor OpenRouter when unset — see [`CONFIG.md`](CONFIG.md)). To feed a vendor pipeline, forward events yourself — **Pattern: custom EventStore for external sinks** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+**replayt** stores run history in files you own (JSONL, optional SQLite); core has no cloud requirement. The client is **OpenAI-compatible**; provider and base URL come from environment variables (defaults favor OpenRouter when unset; see [`CONFIG.md`](CONFIG.md)). To feed a vendor pipeline, forward events yourself; see **Pattern: custom EventStore for external sinks** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
 **Use hosted observability when:** Policy mandates a vendor for telemetry; replayt can still be the engine if JSONL remains the source of truth.
 
@@ -48,4 +48,4 @@ replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this 
 | Autonomous multi-hour agent | No | A different product shape |
 | One-run audit trail on disk | Yes | `JSONLStore`, optional SQLite |
 
-For scope and “we won’t add X to core,” see [`SCOPE.md`](SCOPE.md).
+For scope and the things we keep out of core, see [`SCOPE.md`](SCOPE.md).

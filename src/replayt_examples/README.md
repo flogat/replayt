@@ -1,17 +1,17 @@
 # Examples
 
-These examples are meant to be read like a tutorial, not just a command catalog.
+Work through these examples in order.
 
-Each section below tries to answer four questions:
+Each section answers four questions:
 
 - **Why does this example exist?**
 - **What does the workflow code do?**
 - **What command should you run?**
 - **What should you expect to see after it runs?**
 
-If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTART.md), then read the sections below **in order**. There are **14** runnable workflows here (sections 1–12, plus OpenAI and Anthropic SDK examples). They move from a two-step deterministic run to LLM-backed classification, typed tools, retries, and approval gates. By the later sections, you should be comfortable opening each source file, reading the state handlers, and mapping that code to the events you see in `inspect` and `replay`.
+If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTART.md), then read the sections below **in order**. There are **14** runnable workflows here (sections 1–12, plus OpenAI and Anthropic SDK examples). They move from a two-step deterministic run to LLM-backed classification, typed tools, retries, and approval gates. By the end, you should be comfortable opening each source file, reading the state handlers, and matching that code to the events you see in `inspect` and `replay`.
 
-**Patterns and recipes** (approval bridge, batch driver, async apps, dashboards, encryption sketches, …) are in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)**—kept separate so this page reads as a straight-line tutorial.
+**Patterns and recipes** (approval bridge, batch driver, async apps, dashboards, encryption sketches, and more) are in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** so this page can stay a straight-line tutorial.
 
 <p align="center">
   <img src="../../docs/demo-why.svg" alt="typical agent framework vs replayt" width="820"/>
@@ -50,18 +50,18 @@ See [`README.md`](../../README.md) for Windows activation lines, `replayt doctor
 
 ## Tests without a live LLM (CI and pytest)
 
-Sections **1–5** of this tutorial need **no API key**. For LLM-backed workflows in **automated tests**, use **`MockLLMClient`** with **`run_with_mock`** (or mock `httpx`) and assert on context or JSONL events—see **Pattern: golden path test (pytest)** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md). For **`replayt validate`** and CI exit codes, see [`docs/RECIPES.md`](../../docs/RECIPES.md).
+Sections **1–5** of this tutorial need **no API key**. For LLM-backed workflows in **automated tests**, use **`MockLLMClient`** with **`run_with_mock`** (or mock `httpx`) and assert on context or JSONL events; see **Pattern: golden path test (pytest)** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md). For **`replayt validate`** and CI exit codes, see [`docs/RECIPES.md`](../../docs/RECIPES.md).
 
 ## Beyond core: streaming, hooks, approvals, and logs
 
-replayt keeps explicit states, append-only **JSONL**, and structured LLM outputs. Use **`ctx.llm.with_settings(...)`** for per-call overrides; they show up under **`effective`** on **`llm_request`** events. Core does **not** log per-token streams (too noisy for replay); stream inside a step, then store a **Pydantic-validated** result or a short summary. **`replayt resume`** covers many approval flows; richer UIs read the same JSONL and resolve gates in **your** app. Notifications, trace IDs, and policy hooks belong in wrappers or callbacks—one FSM, not a second hidden engine. Strong audit packets mean hashing, encrypting, or archiving **your** logs; the runtime cannot prove integrity if an attacker can write the log directory (see **Security and trust boundaries** in [`README.md`](../../README.md)).
+replayt keeps explicit states, append-only **JSONL**, and structured LLM outputs. Use **`ctx.llm.with_settings(...)`** for per-call overrides; they show up under **`effective`** on **`llm_request`** events. Core does **not** log per-token streams because that is too noisy for replay. Stream inside a step, then store a **Pydantic-validated** result or a short summary. **`replayt resume`** covers many approval flows; richer UIs can read the same JSONL and resolve gates in **your** app. Notifications, trace IDs, and policy hooks belong in wrappers or callbacks. If you need stronger audit handoff, hash, encrypt, or archive **your** logs; the runtime cannot prove integrity if an attacker can write the log directory (see **Security and trust boundaries** in [`README.md`](../../README.md)).
 
 **Composition patterns** (copy the names into EXAMPLES_PATTERNS search):
 
 - **Pattern: stream inside step, log structured summary** — streaming UX without core token events.
 - **Pattern: approval bridge (local UI)** — web or chat approvals while replayt stays the engine.
-- **Pattern: webhook / lifecycle callbacks** — notifications and policy hooks without an observability platform in core.
-- **Pattern: encrypted run logs** and **Pattern: post-hoc PII scrub on JSONL files** — stronger disk posture and redaction.
+- **Pattern: webhook / lifecycle callbacks** — notifications and policy hooks without turning core into an observability platform.
+- **Pattern: encrypted run logs** and **Pattern: post-hoc PII scrub on JSONL files** — tighter disk handling and redaction.
 
 Share a read-only timeline for review without building a server:
 
@@ -79,11 +79,11 @@ For **in-process** trace IDs or policy logging, use **`Runner(..., before_step=.
 
 ### Framework-style agents, streaming, and planner loops (feature 10 / composition)
 
-**Why no built-in streaming / LangChain / LangGraph in the runner?** replayt keeps **explicit** states and append-only JSONL; per-token log lines and hidden planners are out of scope ([**docs/SCOPE.md**](../../docs/SCOPE.md)). Supported shape: **one step** wraps the other SDK or graph; **one** validated exit shape picks the next state.
+replayt keeps **explicit** states and append-only JSONL. Per-token log lines and hidden planners are out of scope ([**docs/SCOPE.md**](../../docs/SCOPE.md)). The supported shape is simple: **one step** wraps the other SDK or graph, and **one** validated exit shape picks the next state.
 
 ### LangGraph (and similar frameworks) — **composition**, not core
 
-replayt will not ship LangGraph inside the runner; that would hide control flow next to an explicit FSM (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). **Recommended shape:** run LangGraph **inside one `@wf.step`**, then move replayt forward from **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, or tools—not every planner tick.
+replayt will not ship LangGraph inside the runner because that would hide control flow next to an explicit FSM (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). The supported shape is to run LangGraph **inside one `@wf.step`**, then move replayt forward from **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log the **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, or tools, not every planner tick.
 
 Install graph libraries in **your** project only:
 
@@ -129,7 +129,7 @@ This example has only two states: `greet` and `done`.
 - It transitions directly to `done`.
 - `done` sets `completed=true` and returns `None`, which ends the workflow.
 
-This is the example to use when you want to understand the core replayt model: a named state reads context, writes context, and returns the next state explicitly.
+Use this example to learn the core replayt model: a named state reads context, writes context, and returns the next state explicitly.
 
 ### What to run
 The smallest workflow in the tutorial set. It writes a greeting and a next action into context so you can inspect and replay the run.
@@ -336,7 +336,7 @@ The exact wording will vary by model, but the outcome should still be predictabl
 - talking points that help the seller prepare for the next conversation
 - a concise `next_step`
 
-That is the gap between free-form model text and schema-shaped output that can drive the next step.
+The output stays structured, so you can use it in the next step.
 
 ## 7. Customer feedback clustering — `replayt_examples.e07_feedback_clustering`
 
@@ -472,7 +472,7 @@ If approved, the final context should include `communication_plan="external_stat
 
 If rejected, the final context should include `communication_plan="internal_updates_only"`.
 
-High-pressure operational flows stay explicit and replayable here too.
+The same model works for incident response too.
 
 ## 10. GitHub issue triage — `replayt_examples.issue_triage`
 
@@ -598,7 +598,7 @@ If approved, the resumed run should end with `publish_status="approved"`.
 
 If rejected, the resumed run should end with `publish_status="aborted"`.
 
-Fits content review pipelines where an LLM can prepare structured guidance and a human still makes the final go/no-go decision.
+This pattern works for content review pipelines where an LLM prepares structured guidance and a human still makes the final decision.
 
 ## Python file target
 
@@ -635,7 +635,7 @@ replayt run replayt_examples.e10_openai_sdk_integration:wf \
 
 ## 14. Anthropic native SDK — `replayt_examples.e11_anthropic_native`
 
-A workaround pattern for developers who want `anthropic.Anthropic()` directly instead of an OpenAI-compatible proxy. LLM traffic from native SDKs is **not** auto-logged by replayt — validated `ctx.set` outputs are your audit surface. Requires `pip install anthropic`.
+A workaround pattern for developers who want `anthropic.Anthropic()` directly instead of an OpenAI-compatible proxy. LLM traffic from native SDKs is **not** auto-logged by replayt; validated `ctx.set` outputs are your audit surface. Requires `pip install anthropic`.
 
 ```bash
 replayt run replayt_examples.e11_anthropic_native:wf \
@@ -645,4 +645,4 @@ replayt run replayt_examples.e11_anthropic_native:wf \
 
 ---
 
-**Composition patterns** (approval bridge, batch drivers, async/Webhook workarounds, DuckDB, encryption sketches, …) live in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** so this file stays a linear tutorial.
+**Composition patterns** (approval bridge, batch drivers, async/Webhook workarounds, DuckDB, encryption sketches, and more) live in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** so this file stays a linear tutorial.

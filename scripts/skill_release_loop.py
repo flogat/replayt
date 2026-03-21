@@ -12,13 +12,14 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TextIO
 
 # Ralph-style pipeline: ideation → review → remediation → doc tone (docs last, after code settles).
-DEFAULT_SKILLS = ("createfeatures", "improvedoc", "reviewcodebase", "deslopdoc")
+DEFAULT_SKILLS = ("createfeatures", "improvedoc", "deslopdoc", "reviewcodebase")
 DEFAULT_TASK = (
     "Run the repository skill loop in this order: createfeatures (new feature ideas), improvedoc "
-    "(deep code review), reviewcodebase (review plus apply fixes in-repo), deslopdoc (de-AI / "
-    "humanize documentation). Apply changes directly in the working tree, keep CHANGELOG.md "
+    "(docs and repo improvements), deslopdoc (de-AI / humanize documentation), reviewcodebase "
+    "(review plus apply fixes in-repo). Apply changes directly in the working tree, keep CHANGELOG.md "
     "updated under Unreleased, and leave the workspace ready for the outer release loop to bump "
     "the patch version, create the tag, and push once all checks pass."
 )
@@ -52,7 +53,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "The script is backend-agnostic. --skill-command runs once per skill and can use placeholders:\n"
             "  {skill} {skill_path} {prompt_file} {log_file} {repo} {iteration} {max_iterations}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
-            "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT."
+            "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
+            "Progress: prints configuration, a decision-tree summary, each command and log path, streamed "
+            "child output (unless --quiet), and explicit decision lines after checks. Use --quiet for logs only."
         ),
     )
     parser.add_argument(
@@ -120,6 +123,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="Print the planned commands without executing them.",
+    )
+    parser.add_argument(
+        "--quiet",
+        action="store_true",
+        help="Do not stream child-process output to the terminal (logs are still written).",
     )
     args = parser.parse_args(argv)
     if args.max_iterations < 1:
@@ -236,6 +244,31 @@ def render_command(template: str, context: dict[str, str]) -> str:
         raise LoopError(f"Unknown placeholder in command template: {exc.args[0]}") from exc
 
 
+def progress_line(message: str, *, dest: TextIO = sys.stdout, end: str = "\n") -> None:
+    print(message, file=dest, end=end, flush=True)
+
+
+def progress_banner(title: str, *, dest: TextIO = sys.stdout) -> None:
+    progress_line("", dest=dest)
+    progress_line(f"=== {title} ===", dest=dest)
+
+
+def describe_skill_env_snippet(env: dict[str, str], *, task_max: int = 160) -> str:
+    keys = (
+        "REPO_ROOT",
+        "SKILL_NAME",
+        "SKILL_ITERATION",
+        "SKILL_PROMPT_FILE",
+        "SKILL_LOG_FILE",
+    )
+    lines = [f"{k}={env.get(k, '')}" for k in keys]
+    task = env.get("SKILL_TASK", "")
+    if len(task) > task_max:
+        task = task[: task_max - 3] + "..."
+    lines.append(f"SKILL_TASK={task}")
+    return "\n".join(lines)
+
+
 def run_shell_command(
     command: str,
     repo: Path,
@@ -243,29 +276,58 @@ def run_shell_command(
     *,
     log_path: Path | None = None,
     dry_run: bool = False,
+    stream_to_terminal: bool = True,
+    progress_label: str = "",
+    expect_success: bool = True,
 ) -> subprocess.CompletedProcess[str]:
     if dry_run:
-        print(f"[dry-run] {command}")
+        label = f"{progress_label} " if progress_label else ""
+        progress_line(f"[dry-run] {label}{command}")
         return subprocess.CompletedProcess(command, 0, "", "")
     if log_path is not None:
         log_path.parent.mkdir(parents=True, exist_ok=True)
+        prefix = f"[{progress_label}] " if progress_label else ""
+        progress_line(f"{prefix}Command: {command}")
+        progress_line(f"{prefix}Log file: {log_path}")
+        if progress_label.startswith("skill:"):
+            progress_line(f"{prefix}Environment (subset):")
+            for line in describe_skill_env_snippet(env).splitlines():
+                progress_line(f"{prefix}{line}")
+
         with log_path.open("w", encoding="utf-8") as handle:
             handle.write(f"$ {command}\n\n")
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 command,
                 cwd=repo,
                 env=env,
                 shell=True,
-                text=True,
-                stdout=handle,
+                stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
             )
-        if result.returncode != 0:
-            raise LoopError(f"Command failed with exit code {result.returncode}: {command}\nSee {log_path}")
-        return subprocess.CompletedProcess(command, result.returncode, "", "")
+            assert proc.stdout is not None
+            for line in proc.stdout:
+                handle.write(line)
+                if stream_to_terminal:
+                    progress_line(f"{prefix}{line}", end="")
+            return_code = proc.wait()
+
+        if return_code != 0:
+            progress_line(f"{prefix}Exit code: {return_code} (failure)")
+            if expect_success:
+                raise LoopError(
+                    f"Command failed with exit code {return_code}: {command}\nSee {log_path}"
+                )
+        else:
+            progress_line(f"{prefix}Exit code: 0 (success)")
+        return subprocess.CompletedProcess(command, return_code, "", "")
+
     result = subprocess.run(command, cwd=repo, env=env, shell=True, text=True)
     if result.returncode != 0:
-        raise LoopError(f"Command failed with exit code {result.returncode}: {command}")
+        if expect_success:
+            raise LoopError(f"Command failed with exit code {result.returncode}: {command}")
     return result
 
 
@@ -276,6 +338,10 @@ def run_skill_iteration(
     run_dir: Path,
     iteration: int,
 ) -> None:
+    progress_banner(f"Iteration {iteration}/{args.max_iterations}: skills")
+    progress_line(
+        "Decision: run each skill in sequence; each step invokes --skill-command with a fresh prompt file."
+    )
     for skill in skills:
         stem = f"iter-{iteration:02d}-{skill.name}"
         prompt_path = run_dir / f"{stem}.prompt.md"
@@ -308,34 +374,68 @@ def run_skill_iteration(
                 "task": args.task,
             },
         )
-        print(f"Running skill {skill.name} ({iteration}/{args.max_iterations})")
-        run_shell_command(command, repo, env, log_path=log_path, dry_run=args.dry_run)
+        progress_banner(f"Skill: {skill.name}")
+        progress_line(f"Prompt written: {prompt_path}")
+        progress_line(f"Skill definition: {skill.path}")
+        run_shell_command(
+            command,
+            repo,
+            env,
+            log_path=log_path,
+            dry_run=args.dry_run,
+            stream_to_terminal=not args.quiet,
+            progress_label=f"skill:{skill.name}",
+        )
 
 
 def run_checks(repo: Path, args: argparse.Namespace, run_dir: Path, iteration: int) -> bool:
+    progress_banner(f"Iteration {iteration}/{args.max_iterations}: checks")
+    progress_line(
+        f"Decision: run {len(args.checks)} check command(s) in order; all must exit 0 to finish the loop "
+        "successfully."
+    )
     for index, template in enumerate(args.checks, start=1):
         log_path = run_dir / f"iter-{iteration:02d}-check-{index:02d}.log"
         env = os.environ.copy()
         env["REPO_ROOT"] = str(repo)
         command = render_command(template, {"repo": str(repo), "iteration": str(iteration)})
-        print(f"Running check {index}/{len(args.checks)} after iteration {iteration}")
+        progress_banner(f"Check {index}/{len(args.checks)}")
         if args.dry_run:
-            run_shell_command(command, repo, env, log_path=log_path, dry_run=True)
+            run_shell_command(
+                command,
+                repo,
+                env,
+                log_path=log_path,
+                dry_run=True,
+                progress_label=f"check:{iteration:02d}-{index:02d}",
+            )
+            progress_line("Decision: dry-run assumes this check would pass.")
             continue
-        result = subprocess.run(
+        completed = run_shell_command(
             command,
-            cwd=repo,
-            env=env,
-            shell=True,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            repo,
+            env,
+            log_path=log_path,
+            stream_to_terminal=not args.quiet,
+            progress_label=f"check:{iteration:02d}-{index:02d}",
+            expect_success=False,
         )
-        log_path.write_text(f"$ {command}\n\n{result.stdout}", encoding="utf-8")
-        if result.returncode != 0:
-            print(f"Check failed: {command}")
-            print(f"See {log_path}")
+        if completed.returncode != 0:
+            progress_line(
+                f"Decision: check {index}/{len(args.checks)} failed (exit {completed.returncode}) -> "
+                "stop this iteration without releasing."
+            )
+            if iteration < args.max_iterations:
+                progress_line(f"Next: start iteration {iteration + 1} (skills run again from the top).")
+            else:
+                progress_line("Next: no further iterations allowed (--max-iterations exhausted).")
+            progress_line(f"Full output: {log_path}")
             return False
+        progress_line(f"Decision: check {index}/{len(args.checks)} passed -> continue.")
+    progress_line(
+        f"Decision: all checks passed on iteration {iteration} -> exit skill/check loop "
+        "(proceed to dry-run summary or release gates)."
+    )
     return True
 
 
@@ -477,9 +577,39 @@ def main(argv: list[str] | None = None) -> int:
         args.checks = default_check_commands(repo)
     skills = [load_skill(skill_root, name) for name in args.skills]
 
+    progress_banner("skill_release_loop: configuration")
+    progress_line(f"Repository: {repo}")
+    progress_line(f"Run directory: {run_dir}")
+    progress_line(f"Skill root: {skill_root}")
+    progress_line(f"Skill pipeline: {' -> '.join(s.name for s in skills)}")
+    progress_line(f"Max iterations: {args.max_iterations}")
+    progress_line(f"Dry run: {args.dry_run}")
+    progress_line(f"Skip push: {args.skip_push}")
+    progress_line(f"Allow dirty worktree: {args.allow_dirty}")
+    progress_line(f"Quiet (no streamed child output): {args.quiet}")
+    progress_line(f"Skill command template:\n  {args.skill_command}")
+    for i, check_cmd in enumerate(args.checks, start=1):
+        progress_line(f"Check {i} template:\n  {check_cmd}")
+
+    progress_banner("Preflight")
+    progress_line("Decision: verify git repo (and clean worktree unless --allow-dirty or --dry-run).")
     ensure_repo_preflight(repo, args.allow_dirty, args.dry_run)
+    progress_line("Preflight: OK")
     if not args.skip_push:
+        progress_line(f"Decision: verify remote {args.remote!r} exists (push requested).")
         ensure_remote(repo, args.remote)
+        progress_line("Preflight: remote OK")
+    else:
+        progress_line("Decision: skip remote check (--skip-push).")
+
+    progress_banner("Skill/check loop")
+    progress_line(
+        "Decision tree: FOR iteration = 1 .. max_iterations: "
+        "RUN all skills in order -> RUN all checks in order. "
+        "IF every check exits 0 THEN break with success. "
+        "ELSE IF iteration == max_iterations THEN fail. "
+        "ELSE next iteration."
+    )
 
     passed_iteration: int | None = None
     for iteration in range(1, args.max_iterations + 1):
@@ -490,23 +620,43 @@ def main(argv: list[str] | None = None) -> int:
             break
 
     if passed_iteration is None:
+        progress_banner("skill_release_loop: stopped")
+        progress_line(
+            f"Decision: checks did not all pass within {args.max_iterations} iteration(s) -> "
+            "abort (no version bump, no tag, no push)."
+        )
         raise LoopError(f"Checks did not pass after {args.max_iterations} iteration(s)")
 
+    if args.dry_run:
+        progress_banner("skill_release_loop: dry-run complete")
+        progress_line(
+            f"Decision: iteration {passed_iteration} succeeded under dry-run rules -> "
+            "skip change detection, version bump, commit, tag, and push."
+        )
+        return 0
+
+    progress_banner("Release gates (post-loop)")
+    progress_line(
+        f"Decision: iteration {passed_iteration} cleared checks -> validate release prerequisites, "
+        "then bump patch version and create commit/tag."
+    )
+
     changed_files = git_changed_files(repo)
+    progress_line(f"Gate 1: working tree differs from HEAD in {len(changed_files)} path(s).")
     if not changed_files:
         raise LoopError("The skill loop produced no repository changes")
     if "CHANGELOG.md" not in changed_files:
         raise LoopError("CHANGELOG.md must be updated during the skill loop before a release can be cut")
+    progress_line("Gate 2: CHANGELOG.md is among changed paths -> OK")
 
     version = current_version(repo)
     new_version = bump_patch(version)
     tag_name = f"v{new_version}"
+    progress_line(f"Gate 3: bump {version!r} -> {new_version!r}; tag {tag_name!r} must not exist yet.")
     ensure_tag_absent(repo, tag_name)
+    progress_line("Gate 3: OK")
 
-    print(f"Checks passed after iteration {passed_iteration}; releasing {version} -> {new_version}")
-    if args.dry_run:
-        print(f"[dry-run] Would update CHANGELOG.md, bump version files, create {tag_name}, and push to {args.remote}")
-        return 0
+    progress_line(f"Releasing: {version} -> {new_version} (iteration {passed_iteration} was last skill/check cycle).")
 
     finalize_changelog(repo, new_version, dt.date.today())
     replace_version(repo, new_version)
@@ -514,10 +664,12 @@ def main(argv: list[str] | None = None) -> int:
     create_tag(repo, tag_name)
     if not args.skip_push:
         branch = args.branch or current_branch(repo)
+        progress_line(f"Decision: push branch {branch!r} and tag {tag_name!r} to {args.remote!r}.")
         push_release(repo, args.remote, branch, tag_name)
-        print(f"Pushed {branch} and {tag_name} to {args.remote}")
+        progress_line(f"Done: pushed {branch} and {tag_name} to {args.remote}.")
     else:
-        print(f"Created local release commit and tag {tag_name}; push skipped")
+        progress_line("Decision: --skip-push -> leave commit and tag local only.")
+        progress_line(f"Done: created local commit and tag {tag_name}.")
     return 0
 
 

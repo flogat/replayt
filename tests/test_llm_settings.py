@@ -33,6 +33,12 @@ def test_from_env_default_uses_openrouter(monkeypatch) -> None:
     assert s.model == "anthropic/claude-sonnet-4.6"
 
 
+def test_for_provider_openai_uses_openai_model_slug() -> None:
+    s = LLMSettings.for_provider("openai")
+    assert s.base_url == "https://api.openai.com/v1"
+    assert s.model == "gpt-4o-mini"
+
+
 def test_from_env_rejects_non_integer_max_response_bytes(monkeypatch) -> None:
     monkeypatch.setenv("REPLAYT_LLM_MAX_RESPONSE_BYTES", "not-a-number")
     monkeypatch.delenv("REPLAYT_PROVIDER", raising=False)

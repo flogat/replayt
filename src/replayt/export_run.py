@@ -22,6 +22,8 @@ def sanitize_event(event: dict[str, Any], mode: LogMode) -> dict[str, Any]:
     p = dict(payload)
     if typ == "run_started":
         p["inputs"] = {}
+    elif typ == "context_snapshot":
+        p["data"] = {"_redacted": True}
     elif typ == "llm_request":
         p.pop("messages", None)
         if mode == LogMode.structured_only:

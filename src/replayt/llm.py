@@ -5,7 +5,7 @@ import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, ClassVar, TypeVar
+from typing import Any, ClassVar, Protocol, TypeVar
 
 import httpx
 from pydantic import BaseModel
@@ -18,6 +18,12 @@ from replayt.llm_coercion import (
 from replayt.types import LogMode
 
 T = TypeVar("T", bound=BaseModel)
+
+
+class _HTTPStreamClient(Protocol):
+    def stream(self, method: str, url: str, **kwargs: Any) -> Any: ...
+
+    def close(self) -> None: ...
 
 
 # Cap `{` probes so pathological multi-megabyte text cannot burn CPU in raw_decode attempts.
@@ -92,7 +98,7 @@ class LLMSettings:
     max_schema_json_chars: int = 250_000
 
     _provider_presets: ClassVar[dict[str, tuple[str, str]]] = {
-        "openai": ("https://api.openai.com/v1", "claude-sonnet-4.6"),
+        "openai": ("https://api.openai.com/v1", "gpt-4o-mini"),
         "ollama": ("http://127.0.0.1:11434/v1", "llama3.2"),
         "groq": ("https://api.groq.com/openai/v1", "llama-3.1-8b-instant"),
         "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.1-8B-Instruct-Turbo"),
@@ -189,14 +195,21 @@ def _read_response_body_capped(response: httpx.Response, max_bytes: int) -> byte
 class OpenAICompatClient:
     """Minimal chat.completions client for OpenAI-compatible servers."""
 
-    def __init__(self, settings: LLMSettings | None = None) -> None:
+    def __init__(
+        self,
+        settings: LLMSettings | None = None,
+        *,
+        http_client: _HTTPStreamClient | None = None,
+        http_client_factory: Callable[[float], _HTTPStreamClient] | None = None,
+    ) -> None:
         self.settings = settings or LLMSettings.from_env()
-        self._http: httpx.Client | None = None
+        self._http: _HTTPStreamClient | None = http_client
+        self._http_client_factory = http_client_factory or (lambda timeout: httpx.Client(timeout=timeout))
 
     @property
-    def _client(self) -> httpx.Client:
+    def _client(self) -> _HTTPStreamClient:
         if self._http is None:
-            self._http = httpx.Client(timeout=self.settings.timeout_seconds)
+            self._http = self._http_client_factory(self.settings.timeout_seconds)
         return self._http
 
     def close(self) -> None:

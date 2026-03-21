@@ -1,6 +1,6 @@
 # Scope: what stays out of core (and what to do instead)
 
-replayt stays small on purpose. These are common asks that **do not belong in the core library**; compose them in **your** app or ops stack.
+replayt keeps core scope narrow. These are common asks that **do not belong in the core library**; build them in **your** app or ops stack.
 
 For a short overview and positioning, see the [README](../README.md). This page is the long-form **maintainer contract** for scope boundaries.
 

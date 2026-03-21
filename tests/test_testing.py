@@ -99,6 +99,27 @@ def test_dry_run_client_in_workflow(tmp_path: Path) -> None:
     assert r.status == "completed"
 
 
+def test_dry_run_client_infers_schema_from_parse_prompt() -> None:
+    client = DryRunLLMClient()
+    result = client.chat_completions(
+        messages=[
+            {
+                "role": "system",
+                "content": (
+                    "You must respond with a single JSON object that validates against this JSON Schema "
+                    '(return JSON only, no markdown):\n'
+                    '{"type":"object","properties":{"label":{"type":"string"}},"required":["label"]}'
+                ),
+            },
+            {"role": "user", "content": "pick one"},
+        ]
+    )
+    import json
+
+    content = json.loads(result["choices"][0]["message"]["content"])
+    assert content == {"label": ""}
+
+
 def test_dry_run_client_handles_nested_ref_schema() -> None:
     client = DryRunLLMClient()
     response_format = {

@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import importlib.util
-import pytest
 import subprocess
 import sys
 import textwrap
 from datetime import date
 from pathlib import Path
+
+import pytest
 
 
 def _load_script():
@@ -147,6 +148,50 @@ def test_bump_patch_and_alias() -> None:
     assert mod.bump_patch("1.2.3") == "1.2.4"
 
 
+def test_dry_run_completes_without_worktree_changes(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    for skill in ("createfeatures", "improvedoc", "deslopdoc", "reviewcodebase"):
+        _write(repo / ".cursor" / "skills" / skill / "SKILL.md", f"# {skill}\n")
+    _write(
+        repo / "CHANGELOG.md",
+        """
+        # Changelog
+
+        ## Unreleased
+
+        - Note.
+        """,
+    )
+    _write(
+        repo / "pyproject.toml",
+        """
+        [project]
+        name = "x"
+        version = "1.0.0"
+        """,
+    )
+    _write(repo / "src" / "replayt" / "__init__.py", '__version__ = "1.0.0"\n')
+    _git(repo, "init")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    monkeypatch.chdir(repo)
+    rc = mod.main(
+        [
+            "--dry-run",
+            "--skip-push",
+            "--max-iterations",
+            "1",
+            "--check",
+            "python -c \"raise SystemExit(0)\"",
+        ]
+    )
+    assert rc == 0
+
+
 def test_default_task_and_skill_command(tmp_path: Path, monkeypatch) -> None:
     mod = _load_script()
     repo = tmp_path / "repo"
@@ -154,6 +199,7 @@ def test_default_task_and_skill_command(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.chdir(repo)
     args = mod.parse_args([])
     assert "createfeatures" in args.task
+    assert args.skills == ["createfeatures", "improvedoc", "deslopdoc", "reviewcodebase"]
     assert args.skill_command is None
     assert args.checks is None
 
@@ -219,12 +265,12 @@ def test_release_loop_runs_until_checks_pass_and_tags_release(tmp_path: Path, mo
     assert order == [
         "1:createfeatures",
         "1:improvedoc",
-        "1:reviewcodebase",
         "1:deslopdoc",
+        "1:reviewcodebase",
         "2:createfeatures",
         "2:improvedoc",
-        "2:reviewcodebase",
         "2:deslopdoc",
+        "2:reviewcodebase",
     ]
 
     assert _git(repo, "log", "-1", "--pretty=%s") == "release: v0.4.1"

@@ -26,3 +26,16 @@ def test_sanitize_tool_call_redacts_arguments() -> None:
     ev = {"type": "tool_call", "payload": {"name": "t", "arguments": {"a": 1}}}
     out = sanitize_event(ev, LogMode.redacted)
     assert out["payload"]["arguments"] == {"_redacted": True}
+
+
+def test_sanitize_context_snapshot_redacts_data() -> None:
+    ev = {"type": "context_snapshot", "payload": {"state": "gate", "data": {"secret": "value"}}}
+    out = sanitize_event(ev, LogMode.redacted)
+    assert out["payload"]["state"] == "gate"
+    assert out["payload"]["data"] == {"_redacted": True}
+
+
+def test_sanitize_context_snapshot_redacts_data_in_structured_only() -> None:
+    ev = {"type": "context_snapshot", "payload": {"state": "gate", "data": {"secret": "value"}}}
+    out = sanitize_event(ev, LogMode.structured_only)
+    assert out["payload"]["data"] == {"_redacted": True}

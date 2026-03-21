@@ -185,7 +185,7 @@ def parse_iso_ts(ts: str | None) -> datetime | None:
 def run_diff_data(events: list[dict[str, Any]]) -> dict[str, Any]:
     """Extract comparable data from a run's events."""
     states: list[str] = []
-    outputs: dict[str, Any] = {}
+    outputs: list[dict[str, Any]] = []
     tool_calls: list[dict[str, Any]] = []
     status = "unknown"
     total_latency_ms = 0
@@ -196,7 +196,14 @@ def run_diff_data(events: list[dict[str, Any]]) -> dict[str, Any]:
         if typ == "state_entered":
             states.append(str(payload.get("state", "")))
         elif typ == "structured_output":
-            outputs[str(payload.get("schema_name", ""))] = payload.get("data")
+            outputs.append(
+                {
+                    "schema_name": str(payload.get("schema_name", "")),
+                    "state": payload.get("state"),
+                    "seq": e.get("seq"),
+                    "data": payload.get("data"),
+                }
+            )
         elif typ == "tool_call":
             tool_calls.append({"tool": payload.get("name"), "args": payload.get("arguments")})
         elif typ == "llm_response":

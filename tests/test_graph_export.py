@@ -21,3 +21,24 @@ def test_mermaid_contains_steps() -> None:
     m = workflow_to_mermaid(wf)
     assert "s_a" in m
     assert "s_b" in m
+
+
+def test_mermaid_ids_do_not_collapse_distinct_state_names() -> None:
+    wf = Workflow("collide")
+    wf.set_initial("a-b")
+    wf.note_transition("a-b", "a_b")
+
+    @wf.step("a-b")
+    def hyphen(ctx) -> str:
+        return "a_b"
+
+    @wf.step("a_b")
+    def underscore(ctx) -> None:
+        return None
+
+    m = workflow_to_mermaid(wf)
+    assert '["a-b"]' in m
+    assert '["a_b"]' in m
+    ids = [line.split("[", 1)[0].strip() for line in m.splitlines() if '["a-' in line or '["a_' in line]
+    assert len(ids) == 2
+    assert ids[0] != ids[1]

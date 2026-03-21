@@ -90,7 +90,7 @@ def cmd_doctor(
         "provider_connectivity": "try replayt doctor --skip-connectivity; check OPENAI_BASE_URL",
     }
     if output == "json":
-        soft = {"openai_api_key", "project_config"}
+        soft = {"openai_api_key", "project_config", "yaml_extra"}
         healthy = all(ok for n, ok, _ in checks if n not in soft)
         payload = {
             "schema": "replayt.doctor_report.v1",
