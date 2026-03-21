@@ -19,6 +19,7 @@
 ## Maintainers
 
 - [`RELEASE_INVENTORY.md`](RELEASE_INVENTORY.md) — commit-level rollup since git tag **`v0.2.0`** (useful when writing release notes).
+- [`ARCHETYPE_FEATURE_BRAINSTORM.md`](ARCHETYPE_FEATURE_BRAINSTORM.md) — ten backlog ideas from ten developer archetypes, each classified as in-core or composition.
 
 ## Related guides
 

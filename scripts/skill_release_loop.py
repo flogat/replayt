@@ -210,10 +210,6 @@ def build_prompt(skill: SkillSpec, task: str, repo: Path, iteration: int, max_it
 
 def ensure_repo_preflight(repo: Path, allow_dirty: bool, dry_run: bool) -> None:
     require_git_repo(repo)
-    if not allow_dirty and not dry_run:
-        status = git_stdout(repo, ["status", "--porcelain"])
-        if status.strip():
-            raise LoopError("Refusing to run on a dirty worktree. Commit or stash changes first, or use --allow-dirty.")
 
 
 def require_git_repo(repo: Path) -> None:

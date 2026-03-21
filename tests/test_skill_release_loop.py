@@ -157,6 +157,20 @@ def test_default_task_and_skill_command(tmp_path: Path, monkeypatch) -> None:
     assert args.checks is None
 
 
+def test_preflight_allows_dirty_worktree(tmp_path: Path) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "config", "user.email", "test@example.com")
+    _write(repo / "tracked.txt", "base\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    _write(repo / "tracked.txt", "dirty\n")
+    mod.ensure_repo_preflight(repo, allow_dirty=False, dry_run=False)
+
+
 def test_release_loop_runs_until_checks_pass_and_tags_release(tmp_path: Path, monkeypatch) -> None:
     mod = _load_script()
     repo, _remote = _init_repo(tmp_path)

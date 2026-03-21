@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import platform
 import subprocess
 from pathlib import Path
@@ -70,6 +71,15 @@ def ensure_codex_installed() -> Path:
     return binary
 
 
+def codex_path_entries(binary: Path) -> list[str]:
+    arch_root = binary.parent.parent
+    path_dir = arch_root / "path"
+    entries: list[str] = []
+    if path_dir.exists():
+        entries.append(str(path_dir))
+    return entries
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     prompt_path = Path(args.prompt_file).resolve()
@@ -77,6 +87,10 @@ def main(argv: list[str] | None = None) -> int:
         raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
     prompt = prompt_path.read_text(encoding="utf-8")
     binary = ensure_codex_installed()
+    env = os.environ.copy()
+    extra_path = codex_path_entries(binary)
+    if extra_path:
+        env["PATH"] = os.pathsep.join([*extra_path, env.get("PATH", "")])
     command = ["exec", "-C", str(repo_root()), "--skip-git-repo-check"]
     if args.model:
         command += ["--model", args.model]
@@ -85,7 +99,14 @@ def main(argv: list[str] | None = None) -> int:
     else:
         command.append("--full-auto")
     command.append("-")
-    result = subprocess.run([str(binary), *command], input=prompt, text=True, cwd=repo_root())
+    result = subprocess.run(
+        [str(binary), *command],
+        input=prompt,
+        text=True,
+        encoding="utf-8",
+        cwd=repo_root(),
+        env=env,
+    )
     return result.returncode
 
 
