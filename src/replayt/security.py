@@ -98,11 +98,8 @@ def log_directory_permission_trust_checks(log_dir: Path | None) -> list[TrustBou
         return []
     try:
         resolved = log_dir.resolve()
-    except OSError:
-        return []
-    if not resolved.is_dir():
-        return []
-    try:
+        if not resolved.is_dir():
+            return []
         mode = resolved.stat().st_mode
     except OSError:
         return []

@@ -135,11 +135,23 @@ def test_docs_index_report_flags_missing_doc_entry_and_broken_link(tmp_path: Pat
     assert "docs/README.md is missing an index entry for docs/SCOPE.md" in report["issues"]
 
 
-def test_changelog_report_parses_unreleased_items() -> None:
-    mod = _load_script("changelog_unreleased", "changelog_unreleased.py")
-    root = Path(__file__).resolve().parents[1]
+def test_changelog_report_parses_unreleased_items(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "CHANGELOG.md",
+        """
+        # Changelog
 
-    report = mod.changelog_report(root / "CHANGELOG.md")
+        ## Unreleased
+
+        - **Maintainer release helpers:** added a thing.
+        - Second item.
+
+        ## 0.1.0 - 2026-03-21
+        """
+    )
+    mod = _load_script("changelog_unreleased", "changelog_unreleased.py")
+
+    report = mod.changelog_report(tmp_path / "CHANGELOG.md")
 
     assert report["ok"] is True
     assert report["item_count"] >= 1
