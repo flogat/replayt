@@ -54,10 +54,11 @@ def test_log_directory_permission_trust_checks_stat_failure(monkeypatch: pytest.
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
 
+    resolved_log_dir = str(log_dir.resolve())
     real_stat = Path.stat
 
     def boom(self: Path) -> os.stat_result:
-        if self.resolve() == log_dir.resolve():
+        if str(self) == str(log_dir) or str(self) == resolved_log_dir:
             raise OSError("boom")
         return real_stat(self)
 
