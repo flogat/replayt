@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import tarfile
@@ -10,6 +11,12 @@ import pytest
 from typer.testing import CliRunner
 
 from replayt.cli.main import REPLAY_HTML_CSS, _replay_html, app
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _strip_ansi(s: str) -> str:
+    return _ANSI_RE.sub("", s)
 
 
 def test_cli_graph_smoke() -> None:
@@ -1755,9 +1762,9 @@ def a(ctx):
     )
 
     assert bad_meta.exit_code == 2
-    assert "--metadata-json must be valid json" in (bad_meta.stdout + bad_meta.stderr).lower()
+    assert "--metadata-json must be valid json" in _strip_ansi(bad_meta.stdout + bad_meta.stderr).lower()
     assert bad_exp.exit_code == 2
-    assert "--experiment-json must be valid json" in (bad_exp.stdout + bad_exp.stderr).lower()
+    assert "--experiment-json must be valid json" in _strip_ansi(bad_exp.stdout + bad_exp.stderr).lower()
 
 
 def test_cli_validate_inputs_file_invalid_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1995,7 +2002,7 @@ def gate(ctx):
     )
 
     assert resume.exit_code == 2
-    assert "--actor-json must be valid json" in (resume.stdout + resume.stderr).lower()
+    assert "--actor-json must be valid json" in _strip_ansi(resume.stdout + resume.stderr).lower()
 
 
 def test_cli_init_ci_github_writes_workflow(tmp_path: Path) -> None:
