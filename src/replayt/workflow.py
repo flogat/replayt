@@ -80,3 +80,56 @@ class Workflow:
         if not self._edges:
             return True
         return (from_state, to_state) in self._edges
+
+    @staticmethod
+    def _type_label(tp: type) -> str:
+        if tp is object:
+            return "any"
+        return getattr(tp, "__name__", repr(tp))
+
+    def contract(self) -> dict[str, Any]:
+        """Return a stable, snapshot-friendly description of the workflow surface."""
+
+        edges_by_source: dict[str, list[str]] = {}
+        for src, dst in self._edges:
+            edges_by_source.setdefault(src, []).append(dst)
+        llm_defaults_keys: set[str] = set((self.llm_defaults or {}).keys())
+        meta_llm_defaults = (self.meta or {}).get("llm_defaults")
+        if isinstance(meta_llm_defaults, dict):
+            llm_defaults_keys.update(meta_llm_defaults.keys())
+
+        steps: list[dict[str, Any]] = []
+        for name in self.step_names():
+            expects = [
+                {"key": key, "type": self._type_label(expected_type)}
+                for key, expected_type in sorted(self.expects_for(name).items())
+            ]
+            retry = self.retry_policy_for(name)
+            steps.append(
+                {
+                    "name": name,
+                    "expects": expects,
+                    "retry_policy": {
+                        "max_attempts": retry.max_attempts,
+                        "backoff_seconds": retry.backoff_seconds,
+                    },
+                    "outgoing_transitions": list(edges_by_source.get(name, [])),
+                }
+            )
+
+        visible_meta = dict(self.meta or {})
+        visible_meta.pop("llm_defaults", None)
+        return {
+            "schema": "replayt.workflow_contract.v1",
+            "workflow": {
+                "name": self.name,
+                "version": self.version,
+                "initial_state": self.initial_state,
+                "state_count": len(steps),
+                "edge_count": len(self._edges),
+                "meta_keys": sorted(visible_meta.keys()),
+                "llm_defaults_keys": sorted(llm_defaults_keys),
+            },
+            "declared_edges": [{"from_state": src, "to_state": dst} for src, dst in self._edges],
+            "steps": steps,
+        }

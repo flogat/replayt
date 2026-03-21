@@ -13,6 +13,22 @@ from replayt.workflow import Workflow
 VALIDATE_REPORT_SCHEMA = "replayt.validate_report.v1"
 
 
+def _read_json_text_file(path: Path, *, label: str) -> str:
+    if not path.is_file():
+        raise typer.BadParameter(f"{label} file not found: {path}")
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as e:
+        raise typer.BadParameter(f"{label} file must be UTF-8 text ({e})") from e
+    return raw.strip() or "{}"
+
+
+def _json_parse_hint(label: str) -> str:
+    if label == "inputs":
+        return "; tip: use --inputs-file inputs.json or --inputs-json @inputs.json to avoid shell quoting"
+    return ""
+
+
 def inputs_json_from_options(
     inputs_json: str | None,
     inputs_file: Path | None,
@@ -20,13 +36,12 @@ def inputs_json_from_options(
     if inputs_json is not None and inputs_file is not None:
         raise typer.BadParameter("Use only one of --inputs-json or --inputs-file")
     if inputs_file is not None:
-        if not inputs_file.is_file():
-            raise typer.BadParameter(f"--inputs-file not found: {inputs_file}")
-        try:
-            raw = inputs_file.read_text(encoding="utf-8")
-        except UnicodeDecodeError as e:
-            raise typer.BadParameter(f"--inputs-file must be UTF-8 text ({e})") from e
-        return raw.strip() or "{}"
+        return _read_json_text_file(inputs_file, label="--inputs-file")
+    if inputs_json is not None and inputs_json.startswith("@"):
+        file_ref = inputs_json[1:].strip()
+        if not file_ref:
+            raise typer.BadParameter("--inputs-json @path form requires a file path, e.g. --inputs-json @inputs.json")
+        return _read_json_text_file(Path(file_ref), label="--inputs-json @path")
     return inputs_json
 
 
@@ -36,7 +51,7 @@ def check_json_object_string(raw: str | None, *, label: str) -> tuple[bool, str 
     try:
         obj = json.loads(raw)
     except json.JSONDecodeError as e:
-        return False, f"{label}: {e}"
+        return False, f"{label}: {e}{_json_parse_hint(label)}"
     if not isinstance(obj, dict):
         return False, f"{label}: must be a JSON object"
     try:
@@ -50,7 +65,7 @@ def parse_json_object_option(raw: str, *, label: str) -> dict[str, Any]:
     try:
         obj = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise typer.BadParameter(f"{label} must be valid JSON ({e})") from e
+        raise typer.BadParameter(f"{label} must be valid JSON ({e}){_json_parse_hint(label)}") from e
     if not isinstance(obj, dict):
         raise typer.BadParameter(f"{label} must be a JSON object")
     return obj

@@ -42,6 +42,7 @@ def event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "transition_count": 0,
         "llm_calls": 0,
         "tool_calls": 0,
+        "notes": 0,
         "approvals": 0,
         "last_ts": None,
         "tags": {},
@@ -67,6 +68,8 @@ def event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
             summary["llm_calls"] += 1
         elif typ == "tool_call":
             summary["tool_calls"] += 1
+        elif typ == "step_note":
+            summary["notes"] += 1
         elif typ == "approval_requested":
             summary["approvals"] += 1
         elif typ == "run_completed":
@@ -90,6 +93,7 @@ def replay_timeline_lines(events: list[dict[str, Any]]) -> list[str]:
             "run_failed",
             "approval_requested",
             "structured_output",
+            "step_note",
             "tool_call",
             "tool_result",
         }:

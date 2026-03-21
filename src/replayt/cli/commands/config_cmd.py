@@ -1,0 +1,252 @@
+"""Command: config."""
+
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+from typing import Literal
+
+import typer
+
+from replayt.cli.config import (
+    DEFAULT_LOG_DIR,
+    export_hook_timeout_seconds,
+    get_project_config,
+    resolve_approval_actor_required_keys,
+    resolve_llm_settings,
+    resolve_log_dir,
+    resolve_log_mode_setting,
+    resolve_redact_keys,
+    resolve_sqlite_path,
+    resolve_strict_mirror,
+    resolve_timeout_setting,
+    resume_hook_timeout_seconds,
+    run_hook_timeout_seconds,
+)
+from replayt.cli.path_readiness import readiness_checks
+from replayt.cli.run_support import export_hook_argv, resume_hook_argv, run_hook_argv
+from replayt.security import log_directory_permission_trust_checks, trust_boundary_checks
+
+
+def _config_report(
+    *,
+    log_dir: Path,
+    log_subdir: str | None,
+    sqlite: Path | None,
+    log_mode: str,
+    timeout: int | None,
+) -> dict[str, object]:
+    cfg, cfg_path = get_project_config()
+    resolved_log_dir = resolve_log_dir(log_dir, log_subdir)
+    sqlite_path, sqlite_source = resolve_sqlite_path(sqlite, cfg, config_path=cfg_path)
+    resolved_log_mode, log_mode_source = resolve_log_mode_setting(log_mode, cfg)
+    redact_keys, redact_keys_source = resolve_redact_keys(None, cfg)
+    resolved_timeout, timeout_source = resolve_timeout_setting(timeout, cfg, in_child=False)
+    strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite_path)
+    required_actor_keys, required_actor_keys_source = resolve_approval_actor_required_keys(None, cfg)
+    if "strict_mirror" in cfg:
+        strict_mirror_source = "project_config:strict_mirror"
+    elif sqlite_path is not None:
+        strict_mirror_source = "derived:sqlite-present"
+    else:
+        strict_mirror_source = "derived:no-sqlite"
+    llm_settings, llm_report = resolve_llm_settings(cfg)
+
+    env_run_hook = os.environ.get("REPLAYT_RUN_HOOK", "").strip()
+    run_hook = run_hook_argv(cfg)
+    if env_run_hook:
+        run_hook_source = "env:REPLAYT_RUN_HOOK"
+    elif cfg.get("run_hook"):
+        run_hook_source = "project_config:run_hook"
+    else:
+        run_hook_source = "unset"
+
+    env_run_hook_timeout = os.environ.get("REPLAYT_RUN_HOOK_TIMEOUT", "").strip()
+    if env_run_hook_timeout:
+        run_hook_timeout_source = "env:REPLAYT_RUN_HOOK_TIMEOUT"
+    elif cfg.get("run_hook_timeout") is not None:
+        run_hook_timeout_source = "project_config:run_hook_timeout"
+    else:
+        run_hook_timeout_source = "default:120"
+
+    env_hook = os.environ.get("REPLAYT_RESUME_HOOK", "").strip()
+    resume_hook = resume_hook_argv(cfg)
+    if env_hook:
+        resume_hook_source = "env:REPLAYT_RESUME_HOOK"
+    elif cfg.get("resume_hook"):
+        resume_hook_source = "project_config:resume_hook"
+    else:
+        resume_hook_source = "unset"
+
+    env_hook_timeout = os.environ.get("REPLAYT_RESUME_HOOK_TIMEOUT", "").strip()
+    if env_hook_timeout:
+        hook_timeout_source = "env:REPLAYT_RESUME_HOOK_TIMEOUT"
+    elif cfg.get("resume_hook_timeout") is not None:
+        hook_timeout_source = "project_config:resume_hook_timeout"
+    else:
+        hook_timeout_source = "default:120"
+
+    env_export_hook = os.environ.get("REPLAYT_EXPORT_HOOK", "").strip()
+    export_hook = export_hook_argv(cfg)
+    if env_export_hook:
+        export_hook_source = "env:REPLAYT_EXPORT_HOOK"
+    elif cfg.get("export_hook"):
+        export_hook_source = "project_config:export_hook"
+    else:
+        export_hook_source = "unset"
+
+    env_export_hook_timeout = os.environ.get("REPLAYT_EXPORT_HOOK_TIMEOUT", "").strip()
+    if env_export_hook_timeout:
+        export_hook_timeout_source = "env:REPLAYT_EXPORT_HOOK_TIMEOUT"
+    elif cfg.get("export_hook_timeout") is not None:
+        export_hook_timeout_source = "project_config:export_hook_timeout"
+    else:
+        export_hook_timeout_source = "default:120"
+    trust_checks = trust_boundary_checks(
+        base_url=llm_report.get("base_url"),
+        log_mode=resolved_log_mode,
+    ) + log_directory_permission_trust_checks(resolved_log_dir)
+    filesystem_checks = readiness_checks(log_dir=resolved_log_dir, sqlite=sqlite_path)
+
+    return {
+        "schema": "replayt.config_report.v1",
+        "project_config": {
+            "path": cfg_path,
+            "keys": sorted(cfg.keys()),
+        },
+        "paths": {
+            "log_dir": str(resolved_log_dir),
+            "log_dir_source": "cli:--log-dir" if log_dir != DEFAULT_LOG_DIR else "resolved_default",
+            "log_subdir": log_subdir,
+            "sqlite": str(sqlite_path) if sqlite_path is not None else None,
+            "sqlite_source": sqlite_source,
+        },
+        "runtime_defaults": {
+            "log_mode": resolved_log_mode,
+            "log_mode_source": log_mode_source,
+            "redact_keys": list(redact_keys),
+            "redact_keys_source": redact_keys_source,
+            "timeout_seconds": resolved_timeout,
+            "timeout_source": timeout_source,
+            "strict_mirror": strict_mirror,
+            "strict_mirror_source": strict_mirror_source,
+        },
+        "run": {
+            "hook_argv": run_hook,
+            "hook_source": run_hook_source,
+            "hook_timeout_seconds": run_hook_timeout_seconds(cfg),
+            "hook_timeout_source": run_hook_timeout_source,
+        },
+        "resume": {
+            "hook_argv": resume_hook,
+            "hook_source": resume_hook_source,
+            "hook_timeout_seconds": resume_hook_timeout_seconds(cfg),
+            "hook_timeout_source": hook_timeout_source,
+            "required_actor_keys": list(required_actor_keys),
+            "required_actor_keys_source": required_actor_keys_source,
+        },
+        "export": {
+            "hook_argv": export_hook,
+            "hook_source": export_hook_source,
+            "hook_timeout_seconds": export_hook_timeout_seconds(cfg),
+            "hook_timeout_source": export_hook_timeout_source,
+        },
+        "llm": {
+            **llm_report,
+            "timeout_seconds": llm_settings.timeout_seconds if llm_settings is not None else None,
+            "max_response_bytes": llm_settings.max_response_bytes if llm_settings is not None else None,
+            "max_schema_json_chars": llm_settings.max_schema_json_chars if llm_settings is not None else None,
+        },
+        "trust_boundary": {
+            "checks": [
+                {
+                    "name": check.name,
+                    "ok": check.ok,
+                    "detail": check.detail,
+                    "hint": check.hint,
+                }
+                for check in trust_checks
+            ],
+            "warnings": [check.detail for check in trust_checks if not check.ok],
+        },
+        "filesystem": {
+            "checks": [
+                {
+                    "name": check.name,
+                    "ok": check.ok,
+                    "detail": check.detail,
+                    "path": check.path,
+                }
+                for check in filesystem_checks
+            ],
+            "warnings": [check.detail for check in filesystem_checks if not check.ok],
+        },
+    }
+
+
+def cmd_config(
+    log_dir: Path = typer.Option(DEFAULT_LOG_DIR, help="Directory for JSONL run logs."),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
+    sqlite: Path | None = typer.Option(None, help="Optional SQLite mirror path."),
+    log_mode: str = typer.Option("redacted", case_sensitive=False, help="redacted|full|structured_only"),
+    timeout: int | None = typer.Option(None, "--timeout", help="Preview the effective run timeout."),
+    output: Literal["text", "json"] = typer.Option("text", "--format", "-f", help="text or json."),
+) -> None:
+    """Show the effective replayt config after CLI args, project config, and env defaults are applied."""
+
+    report = _config_report(
+        log_dir=log_dir,
+        log_subdir=log_subdir,
+        sqlite=sqlite,
+        log_mode=log_mode,
+        timeout=timeout,
+    )
+    if output == "json":
+        typer.echo(json.dumps(report, indent=2))
+        return
+
+    project = report["project_config"]
+    paths = report["paths"]
+    runtime = report["runtime_defaults"]
+    run = report["run"]
+    resume = report["resume"]
+    export = report["export"]
+    llm = report["llm"]
+    typer.echo(f"project_config={project['path'] or '(none)'}")
+    typer.echo(f"log_dir={paths['log_dir']} ({paths['log_dir_source']})")
+    typer.echo(f"log_subdir={paths['log_subdir'] or '(none)'}")
+    typer.echo(f"sqlite={paths['sqlite'] or '(none)'} ({paths['sqlite_source']})")
+    typer.echo(f"log_mode={runtime['log_mode']} ({runtime['log_mode_source']})")
+    typer.echo(f"redact_keys={runtime['redact_keys'] or '(none)'} ({runtime['redact_keys_source']})")
+    typer.echo(f"timeout_seconds={runtime['timeout_seconds']} ({runtime['timeout_source']})")
+    typer.echo(f"strict_mirror={runtime['strict_mirror']} ({runtime['strict_mirror_source']})")
+    typer.echo(f"run_hook={run['hook_argv'] or '(none)'} ({run['hook_source']})")
+    typer.echo(f"run_hook_timeout_seconds={run['hook_timeout_seconds']} ({run['hook_timeout_source']})")
+    typer.echo(f"resume_hook={resume['hook_argv'] or '(none)'} ({resume['hook_source']})")
+    typer.echo(
+        f"resume_hook_timeout_seconds={resume['hook_timeout_seconds']} ({resume['hook_timeout_source']})"
+    )
+    typer.echo(
+        f"approval_actor_required_keys={resume['required_actor_keys'] or '(none)'} "
+        f"({resume['required_actor_keys_source']})"
+    )
+    typer.echo(f"export_hook={export['hook_argv'] or '(none)'} ({export['hook_source']})")
+    typer.echo(
+        f"export_hook_timeout_seconds={export['hook_timeout_seconds']} "
+        f"({export['hook_timeout_source']})"
+    )
+    typer.echo(f"provider={llm['provider']} ({llm['provider_source']})")
+    typer.echo(f"base_url={llm.get('base_url') or '(invalid)'} ({llm['base_url_source']})")
+    typer.echo(f"model={llm.get('model') or '(invalid)'} ({llm['model_source']})")
+    typer.echo(f"openai_api_key={'set' if llm['api_key_present'] else 'missing'} ({llm['api_key_source']})")
+    if llm.get("error"):
+        typer.echo(f"provider_error={llm['error']}")
+    for warning in report["trust_boundary"]["warnings"]:
+        typer.echo(f"trust_boundary_warning={warning}")
+    for check in report["filesystem"]["checks"]:
+        typer.echo(f"{check['name']}={check['ok']} ({check['detail']})")
+
+
+def register(app: typer.Typer) -> None:
+    app.command("config")(cmd_config)

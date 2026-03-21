@@ -80,6 +80,12 @@ def codex_path_entries(binary: Path) -> list[str]:
     return entries
 
 
+def _venv_bin_dir() -> Path:
+    if os.name == "nt":
+        return repo_root() / ".venv" / "Scripts"
+    return repo_root() / ".venv" / "bin"
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     prompt_path = Path(args.prompt_file).resolve()
@@ -89,6 +95,10 @@ def main(argv: list[str] | None = None) -> int:
     binary = ensure_codex_installed()
     env = os.environ.copy()
     extra_path = codex_path_entries(binary)
+    venv_bin = _venv_bin_dir()
+    if venv_bin.exists():
+        extra_path.insert(0, str(venv_bin))
+        env["VIRTUAL_ENV"] = str(venv_bin.parent)
     if extra_path:
         env["PATH"] = os.pathsep.join([*extra_path, env.get("PATH", "")])
     command = ["exec", "-C", str(repo_root()), "--skip-git-repo-check"]

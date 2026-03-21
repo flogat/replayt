@@ -1,10 +1,12 @@
-"""Optional CI outputs (JUnit XML, GitHub Actions step summary)."""
+"""Optional CI outputs (JUnit XML, GitHub Actions step summary, machine-readable summary)."""
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 
+from replayt.cli.run_support import exit_code_for_run_result
 from replayt.runner import RunResult
 from replayt.workflow import Workflow
 
@@ -49,7 +51,12 @@ def write_junit_xml(path: Path, *, wf: Workflow, result: RunResult) -> None:
     path.write_text(doc, encoding="utf-8")
 
 
-def append_github_step_summary(wf: Workflow, result: RunResult) -> None:
+def append_github_step_summary(
+    wf: Workflow,
+    result: RunResult,
+    *,
+    duration_ms: int | None = None,
+) -> None:
     summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not summary_path:
         return
@@ -60,11 +67,50 @@ def append_github_step_summary(wf: Workflow, result: RunResult) -> None:
         f"- **run_id:** `{result.run_id}`",
         f"- **status:** `{result.status}`",
     ]
+    if duration_ms is not None:
+        lines.append(f"- **duration_ms:** `{duration_ms}`")
     if result.error:
         lines.append(f"- **error:** `{result.error}`")
     lines.append("")
     with Path(summary_path).open("a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
+
+
+def write_summary_json(
+    path: Path,
+    *,
+    wf: Workflow,
+    result: RunResult,
+    target: str,
+    log_dir: Path,
+    sqlite: Path | None = None,
+    dry_run: bool = False,
+    duration_ms: int | None = None,
+) -> None:
+    """Write one machine-readable run summary artifact for CI wrappers."""
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload: dict[str, object] = {
+        "schema": "replayt.ci_run_summary.v1",
+        "workflow": f"{wf.name}@{wf.version}",
+        "workflow_name": wf.name,
+        "workflow_version": wf.version,
+        "run_id": result.run_id,
+        "status": result.status,
+        "final_state": result.final_state,
+        "error": result.error,
+        "exit_code": exit_code_for_run_result(result),
+        "target": target,
+        "log_dir": str(log_dir.resolve()),
+        "dry_run": dry_run,
+    }
+    if sqlite is not None:
+        payload["sqlite"] = str(sqlite.resolve())
+    else:
+        payload["sqlite"] = None
+    if duration_ms is not None:
+        payload["duration_ms"] = duration_ms
+    path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
 def resolve_ci_junit_path(explicit: Path | None) -> Path | None:
@@ -76,6 +122,15 @@ def resolve_ci_junit_path(explicit: Path | None) -> Path | None:
     return Path(env_j) if env_j else None
 
 
+def resolve_ci_summary_json_path(explicit: Path | None) -> Path | None:
+    """Explicit ``replayt ci --summary-json`` wins; else ``REPLAYT_SUMMARY_JSON`` for scripts."""
+
+    if explicit is not None:
+        return explicit
+    env_summary = os.environ.get("REPLAYT_SUMMARY_JSON", "").strip()
+    return Path(env_summary) if env_summary else None
+
+
 def should_write_github_step_summary(explicit: bool) -> bool:
     return explicit or os.environ.get("REPLAYT_GITHUB_SUMMARY") == "1"
 
@@ -85,9 +140,26 @@ def write_ci_artifacts(
     result: RunResult,
     *,
     junit_path: Path | None,
+    summary_json_path: Path | None,
     github_summary: bool,
+    target: str,
+    log_dir: Path,
+    sqlite: Path | None = None,
+    dry_run: bool = False,
+    duration_ms: int | None = None,
 ) -> None:
     if junit_path is not None:
         write_junit_xml(junit_path, wf=wf, result=result)
+    if summary_json_path is not None:
+        write_summary_json(
+            summary_json_path,
+            wf=wf,
+            result=result,
+            target=target,
+            log_dir=log_dir,
+            sqlite=sqlite,
+            dry_run=dry_run,
+            duration_ms=duration_ms,
+        )
     if github_summary:
-        append_github_step_summary(wf, result)
+        append_github_step_summary(wf, result, duration_ms=duration_ms)

@@ -8,19 +8,27 @@ from typing import Any
 
 import typer
 
+from replayt.llm import LLMSettings
+from replayt.security import normalize_name_list
 from replayt.types import LogMode
 
 SUPPORTED_CONFIG_KEYS = frozenset(
     {
         "log_dir",
         "log_mode",
+        "redact_keys",
         "sqlite",
         "provider",
         "model",
         "timeout",
         "strict_mirror",
+        "run_hook",
+        "run_hook_timeout",
         "resume_hook",
         "resume_hook_timeout",
+        "export_hook",
+        "export_hook_timeout",
+        "approval_actor_required_keys",
     }
 )
 
@@ -106,12 +114,145 @@ def resolve_log_dir(cli_log_dir: Path, log_subdir: str | None = None) -> Path:
     return base
 
 
+def resolve_sqlite_path(
+    cli_sqlite: Path | None,
+    cfg: dict[str, Any],
+    *,
+    config_path: str | None,
+) -> tuple[Path | None, str]:
+    if cli_sqlite is not None:
+        return cli_sqlite, "cli:--sqlite"
+    if cfg.get("sqlite"):
+        return resolve_project_path(cfg["sqlite"], config_path=config_path), "project_config:sqlite"
+    return None, "unset"
+
+
+def resolve_log_mode_setting(cli_log_mode: str, cfg: dict[str, Any]) -> tuple[str, str]:
+    if cli_log_mode == "redacted" and cfg.get("log_mode"):
+        return str(cfg["log_mode"]), "project_config:log_mode"
+    return cli_log_mode, "cli:--log-mode" if cli_log_mode != "redacted" else "default:redacted"
+
+
+def resolve_redact_keys(cli_redact_keys: list[str] | None, cfg: dict[str, Any]) -> tuple[tuple[str, ...], str]:
+    if cli_redact_keys:
+        return normalize_name_list(cli_redact_keys), "cli:--redact-key"
+    cfg_value = cfg.get("redact_keys")
+    if isinstance(cfg_value, list):
+        return normalize_name_list([str(item) for item in cfg_value]), "project_config:redact_keys"
+    return (), "unset"
+
+
+def resolve_approval_actor_required_keys(
+    cli_required_keys: list[str] | None,
+    cfg: dict[str, Any],
+) -> tuple[tuple[str, ...], str]:
+    if cli_required_keys:
+        return normalize_name_list(cli_required_keys), "cli:--require-actor-key"
+    cfg_value = cfg.get("approval_actor_required_keys")
+    if isinstance(cfg_value, list):
+        return normalize_name_list([str(item) for item in cfg_value]), "project_config:approval_actor_required_keys"
+    return (), "unset"
+
+
+def resolve_timeout_setting(
+    timeout: int | None,
+    cfg: dict[str, Any],
+    *,
+    in_child: bool = False,
+) -> tuple[int | None, str]:
+    if in_child:
+        return None, "child_process:disabled"
+    if timeout is not None:
+        return timeout, "cli:--timeout"
+    if cfg.get("timeout"):
+        return int(cfg["timeout"]), "project_config:timeout"
+    return None, "unset"
+
+
 def resolve_strict_mirror(cfg: dict[str, Any], *, sqlite: Path | None) -> bool:
     """Mirror write policy: explicit ``strict_mirror`` in config, else strict when ``--sqlite`` is used."""
 
     if "strict_mirror" in cfg:
         return bool(cfg["strict_mirror"])
     return sqlite is not None
+
+
+def resolve_llm_settings(cfg: dict[str, Any]) -> tuple[LLMSettings | None, dict[str, Any]]:
+    env_provider = os.environ.get("REPLAYT_PROVIDER", "").strip()
+    env_model = os.environ.get("REPLAYT_MODEL", "").strip()
+    env_base_url = os.environ.get("OPENAI_BASE_URL", "").strip()
+    api_key = os.environ.get("OPENAI_API_KEY")
+
+    cfg_provider = str(cfg.get("provider", "")).strip() if cfg.get("provider") is not None else ""
+    cfg_model = str(cfg.get("model", "")).strip() if cfg.get("model") is not None else ""
+
+    provider = env_provider or cfg_provider or None
+    model = env_model or cfg_model or None
+    provider_source = (
+        "env:REPLAYT_PROVIDER"
+        if env_provider
+        else "project_config:provider"
+        if cfg_provider
+        else "default:ollama"
+    )
+    model_source = (
+        "env:REPLAYT_MODEL"
+        if env_model
+        else "project_config:model"
+        if cfg_model
+        else f"provider_default:{provider or 'ollama'}"
+    )
+    base_url_source = "env:OPENAI_BASE_URL" if env_base_url else f"provider_preset:{provider or 'ollama'}"
+    api_key_source = "env:OPENAI_API_KEY" if api_key else "unset"
+
+    report: dict[str, Any] = {
+        "provider": provider or "ollama",
+        "provider_source": provider_source,
+        "model_source": model_source,
+        "base_url_source": base_url_source,
+        "api_key_present": bool(api_key),
+        "api_key_source": api_key_source,
+    }
+    try:
+        settings = LLMSettings.from_sources(
+            provider=provider,
+            base_url=env_base_url or None,
+            model=model,
+            api_key=api_key,
+        )
+    except ValueError as exc:
+        report["error"] = str(exc)
+        if env_base_url:
+            report["base_url"] = env_base_url
+        if model:
+            report["model"] = model
+        return None, report
+
+    report["base_url"] = settings.base_url
+    report["model"] = settings.model
+    return settings, report
+
+
+def _hook_timeout_seconds(cfg: dict[str, Any], *, env_var: str, config_key: str) -> float | None:
+    env_raw = os.environ.get(env_var, "").strip()
+    if env_raw:
+        v = float(env_raw)
+        return None if v <= 0 else v
+    cfg_val = cfg.get(config_key)
+    if cfg_val is not None:
+        v = float(cfg_val)
+        return None if v <= 0 else v
+    return 120.0
+
+
+def run_hook_timeout_seconds(cfg: dict[str, Any]) -> float | None:
+    """Wall-clock limit for the ``run_hook`` subprocess (seconds).
+
+    ``None`` means no limit. Env ``REPLAYT_RUN_HOOK_TIMEOUT`` overrides config; value ``<= 0``
+    means unlimited. Default when unset: 120 seconds.
+    """
+
+    return _hook_timeout_seconds(cfg, env_var="REPLAYT_RUN_HOOK_TIMEOUT", config_key="run_hook_timeout")
 
 
 def resume_hook_timeout_seconds(cfg: dict[str, Any]) -> float | None:
@@ -121,15 +262,17 @@ def resume_hook_timeout_seconds(cfg: dict[str, Any]) -> float | None:
     means unlimited. Default when unset: 120 seconds.
     """
 
-    env_raw = os.environ.get("REPLAYT_RESUME_HOOK_TIMEOUT", "").strip()
-    if env_raw:
-        v = float(env_raw)
-        return None if v <= 0 else v
-    cfg_val = cfg.get("resume_hook_timeout")
-    if cfg_val is not None:
-        v = float(cfg_val)
-        return None if v <= 0 else v
-    return 120.0
+    return _hook_timeout_seconds(cfg, env_var="REPLAYT_RESUME_HOOK_TIMEOUT", config_key="resume_hook_timeout")
+
+
+def export_hook_timeout_seconds(cfg: dict[str, Any]) -> float | None:
+    """Wall-clock limit for the ``export_hook`` subprocess (seconds).
+
+    ``None`` means no limit. Env ``REPLAYT_EXPORT_HOOK_TIMEOUT`` overrides config; value ``<= 0``
+    means unlimited. Default when unset: 120 seconds.
+    """
+
+    return _hook_timeout_seconds(cfg, env_var="REPLAYT_EXPORT_HOOK_TIMEOUT", config_key="export_hook_timeout")
 
 
 def parse_log_mode(log_mode: str) -> LogMode:

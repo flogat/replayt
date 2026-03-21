@@ -34,7 +34,7 @@ replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. This page
 
 **Hosted stacks** usually mean accounts, dashboards, and traces in a vendor service.
 
-**replayt** stores run history in files you own (JSONL, optional SQLite); core has no cloud requirement. The client is **OpenAI-compatible**; provider and base URL come from environment variables (defaults favor OpenRouter when unset; see [`CONFIG.md`](CONFIG.md)). To feed a vendor pipeline, forward events yourself; see **Pattern: custom EventStore for external sinks** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
+**replayt** stores run history in files you own (JSONL, optional SQLite); core has no cloud requirement. The client is **OpenAI-compatible**; provider and base URL come from environment variables (unset `REPLAYT_PROVIDER` uses the **ollama** preset toward `127.0.0.1:11434`; see [`CONFIG.md`](CONFIG.md)). To feed a vendor pipeline, forward events yourself; see **Pattern: custom EventStore for external sinks** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
 **Use hosted observability when:** Policy mandates a vendor for telemetry; replayt can still be the engine if JSONL remains the source of truth.
 

@@ -16,6 +16,7 @@ from typing import Any
 from replayt.exceptions import ApprovalPending, ContextSchemaError, ReplaytError, RunFailed
 from replayt.llm import LLMBridge, LLMSettings, OpenAICompatClient
 from replayt.persistence.base import EventStore
+from replayt.security import missing_actor_fields, normalize_name_list, redact_named_fields, trust_boundary_checks
 from replayt.tools import ToolRegistry
 from replayt.types import LogMode
 from replayt.workflow import Workflow
@@ -112,6 +113,28 @@ class RunContext:
     def get(self, key: str, default: Any = None) -> Any:
         return self.data.get(key, default)
 
+    def note(
+        self,
+        kind: str,
+        *,
+        summary: str | None = None,
+        data: Any = None,
+    ) -> None:
+        """Append a small, explicit application note for the current state."""
+
+        note_kind = str(kind).strip()
+        if not note_kind:
+            raise ValueError("note kind must be a non-empty string")
+        payload: dict[str, Any] = {
+            "state": self._runner._current_state,
+            "kind": note_kind,
+        }
+        if summary is not None:
+            payload["summary"] = str(summary)
+        if data is not None:
+            payload["data"] = data
+        self._runner._emit_payload("step_note", payload)
+
     def request_approval(
         self,
         approval_id: str,
@@ -182,12 +205,16 @@ class Runner:
         max_steps: int | None = None,
         before_step: Callable[[RunContext, str], None] | None = None,
         after_step: Callable[[RunContext, str, str | None], None] | None = None,
+        redact_keys: list[str] | tuple[str, ...] | None = None,
     ) -> None:
         self.workflow = workflow
         self.store = store
         self.log_mode = log_mode
+        self.redact_keys = normalize_name_list(redact_keys)
         self.include_tracebacks = include_tracebacks
         self.max_steps = max_steps if max_steps is not None else self._DEFAULT_MAX_STEPS
+        if self.max_steps < 1:
+            raise ValueError("max_steps must be >= 1")
         self._owns_client = llm_client is None
         self._llm_client = llm_client or OpenAICompatClient(llm_settings or LLMSettings.from_env())
         self.run_id: str = ""
@@ -210,7 +237,53 @@ class Runner:
         self.close()
 
     def _emit_payload(self, typ: str, payload: dict[str, Any]) -> None:
-        self.store.append_event(self.run_id, ts=_utcnow_iso(), typ=typ, payload=payload)
+        event_payload = payload
+        if self.redact_keys:
+            event_payload = redact_named_fields(payload, field_names=self.redact_keys)
+        self.store.append_event(self.run_id, ts=_utcnow_iso(), typ=typ, payload=event_payload)
+
+    def _runtime_snapshot(self) -> dict[str, Any]:
+        settings = getattr(self._llm_client, "settings", None)
+        llm_payload: dict[str, Any] = {"client_class": type(self._llm_client).__name__}
+        trust_checks = trust_boundary_checks(base_url=None, log_mode=self.log_mode)
+        if isinstance(settings, LLMSettings):
+            llm_payload.update(
+                {
+                    "provider": settings.provider,
+                    "base_url": settings.base_url,
+                    "model": settings.model,
+                    "timeout_seconds": settings.timeout_seconds,
+                    "top_p": settings.top_p,
+                    "frequency_penalty": settings.frequency_penalty,
+                    "presence_penalty": settings.presence_penalty,
+                    "seed": settings.seed,
+                    "max_tokens": settings.max_tokens,
+                    "max_response_bytes": settings.max_response_bytes,
+                    "max_parse_response_chars": settings.max_parse_response_chars,
+                    "max_schema_json_chars": settings.max_schema_json_chars,
+                    "extra_header_names": sorted((settings.extra_headers or {}).keys()),
+                    "api_key_present": bool(settings.api_key),
+                }
+            )
+            trust_checks = trust_boundary_checks(base_url=settings.base_url, log_mode=self.log_mode)
+        return {
+            "engine": {
+                "log_mode": self.log_mode.value,
+                "max_steps": self.max_steps,
+                "redact_keys": list(self.redact_keys),
+            },
+            "hooks": {
+                "before_step": self._before_step is not None,
+                "after_step": self._after_step is not None,
+            },
+            "store": {
+                "class": type(self.store).__name__,
+            },
+            "llm": llm_payload,
+            "trust_boundary": {
+                "warnings": [check.detail for check in trust_checks if not check.ok],
+            },
+        }
 
     def _load_approval_state_from_events(self, events: list[dict[str, Any]]) -> None:
         self._approval_outcomes.clear()
@@ -310,6 +383,7 @@ class Runner:
                 "workflow_version": self.workflow.version,
                 "initial_state": self.workflow.initial_state,
                 "inputs": inputs or {},
+                "runtime": self._runtime_snapshot(),
             }
             if self.workflow.meta:
                 meta_out = dict(self.workflow.meta)
@@ -507,6 +581,7 @@ def resolve_approval_on_store(
     resolver: str = "cli",
     reason: str | None = None,
     actor: dict[str, Any] | None = None,
+    required_actor_keys: list[str] | tuple[str, ...] | None = None,
 ) -> None:
     """Append an `approval_resolved` event; resume execution via `Runner.run(..., resume=True)`."""
     events = store.load_events(run_id)
@@ -527,6 +602,11 @@ def resolve_approval_on_store(
 
     if not pending:
         raise RuntimeError(f"No pending approval {approval_id!r} found for run_id={run_id!r}")
+
+    missing = missing_actor_fields(actor, required_fields=required_actor_keys)
+    if missing:
+        joined = ", ".join(missing)
+        raise ValueError(f"approval actor is missing required keys: {joined}")
 
     payload: dict[str, Any] = {
         "approval_id": str(approval_id),

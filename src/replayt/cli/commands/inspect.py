@@ -1,4 +1,4 @@
-"""Commands: inspect, replay, graph, validate, runs, stats, diff, gc, log-schema."""
+"""Commands: inspect, replay, graph, contract, validate, runs, stats, diff, gc, log-schema."""
 
 from __future__ import annotations
 
@@ -32,12 +32,54 @@ from replayt.cli.validation import inputs_json_from_options, validate_workflow_g
 from replayt.graph_export import workflow_to_mermaid
 from replayt.persistence import JSONLStore, SQLiteStore
 
+_RUN_STATUS_CHOICES = frozenset({"completed", "failed", "paused", "unknown"})
+
+
+def _event_type_filters(event_types: list[str] | None) -> frozenset[str] | None:
+    if not event_types:
+        return None
+    normalized: list[str] = []
+    for raw in event_types:
+        t = str(raw).strip()
+        if not t:
+            raise typer.BadParameter(
+                "Empty --event-type is not allowed; omit the flag or pass a JSONL `type` string "
+                "(e.g. step_note, tool_call, llm_request)."
+            )
+        normalized.append(t)
+    return frozenset(normalized)
+
+
+def _filter_events_by_type(events: list[dict[str, Any]], filters: frozenset[str] | None) -> list[dict[str, Any]]:
+    if filters is None:
+        return events
+    return [e for e in events if e.get("type") in filters]
+
+
+def _run_status_filters(status: list[str] | None) -> frozenset[str] | None:
+    if not status:
+        return None
+    bad = sorted({s for s in status if s not in _RUN_STATUS_CHOICES})
+    if bad:
+        raise typer.BadParameter(
+            f"Invalid --status {bad!r}; choose from {sorted(_RUN_STATUS_CHOICES)} (repeat for OR)."
+        )
+    return frozenset(status)
+
 
 def cmd_inspect(
     run_id: str = typer.Argument(...),
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR),
     log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
+    event_type: list[str] | None = typer.Option(
+        None,
+        "--event-type",
+        help=(
+            "Only include JSONL events whose `type` matches (repeatable; OR). "
+            "Summary counts still reflect the full run; the event list (and JSON `events`) are filtered."
+        ),
+    ),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -50,34 +92,43 @@ def cmd_inspect(
     ),
 ) -> None:
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    type_filters = _event_type_filters(event_type)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r} in {log_dir}", err=True)
         raise typer.Exit(code=2)
+    filtered = _filter_events_by_type(events, type_filters)
     use_json = as_json or output == "json"
     if use_json:
         summary = event_summary(events)
-        typer.echo(json.dumps({"summary": summary, "events": events}, indent=2, default=str))
+        payload: dict[str, Any] = {"summary": summary, "events": filtered}
+        if type_filters is not None:
+            payload["event_type_filter"] = sorted(type_filters)
+        typer.echo(json.dumps(payload, indent=2, default=str))
         return
     summary = event_summary(events)
     typer.echo(
         f"run_id={run_id} workflow={summary['workflow_name']}@{summary['workflow_version']} status={summary['status']}"
     )
+    event_counts = f"events={len(events)}"
+    if type_filters is not None:
+        event_counts += f" shown={len(filtered)}"
     typer.echo(
         (
-            "events={events} states={states} transitions={transitions} "
-            "llm_calls={llm_calls} tool_calls={tool_calls} approvals={approvals}"
+            "{event_counts} states={states} transitions={transitions} "
+            "llm_calls={llm_calls} tool_calls={tool_calls} notes={notes} approvals={approvals}"
         ).format(
-            events=len(events),
+            event_counts=event_counts,
             states=summary["state_count"],
             transitions=summary["transition_count"],
             llm_calls=summary["llm_calls"],
             tool_calls=summary["tool_calls"],
+            notes=summary["notes"],
             approvals=summary["approvals"],
         )
     )
-    for e in events:
+    for e in filtered:
         typ = e.get("type")
         seq = e.get("seq")
         typer.echo(f"{seq:04d}  {typ}")
@@ -133,6 +184,49 @@ def cmd_graph(
 ) -> None:
     wf = load_target(target)
     typer.echo(workflow_to_mermaid(wf).rstrip())
+
+
+def cmd_contract(
+    target: str = typer.Argument(
+        ...,
+        metavar="TARGET",
+        help=(
+            "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Loading a .py file executes that file as code-use only trusted paths."
+        ),
+    ),
+    output: Literal["text", "json"] = typer.Option(
+        "text",
+        "--format",
+        "-f",
+        help="text (default) or json.",
+    ),
+) -> None:
+    """Print a snapshot-friendly workflow contract: states, retries, expects, and declared edges."""
+
+    wf = load_target(target)
+    contract = wf.contract()
+    if output == "json":
+        typer.echo(json.dumps(contract, indent=2))
+        return
+
+    meta = contract["workflow"]
+    typer.echo(
+        f"{meta['name']}@{meta['version']} initial={meta['initial_state']} "
+        f"states={meta['state_count']} edges={meta['edge_count']}"
+    )
+    if meta["meta_keys"]:
+        typer.echo("meta_keys=" + ", ".join(meta["meta_keys"]))
+    if meta["llm_defaults_keys"]:
+        typer.echo("llm_defaults_keys=" + ", ".join(meta["llm_defaults_keys"]))
+    for step in contract["steps"]:
+        expects = ", ".join(f"{item['key']}:{item['type']}" for item in step["expects"]) or "-"
+        outgoing = ", ".join(step["outgoing_transitions"]) or "-"
+        retry = step["retry_policy"]
+        typer.echo(
+            f"{step['name']}: expects={expects} retries={retry['max_attempts']} "
+            f"backoff={retry['backoff_seconds']} next={outgoing}"
+        )
 
 
 def cmd_validate(
@@ -211,6 +305,11 @@ def cmd_runs(
     log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     limit: int = typer.Option(20, min=1, max=200),
+    status: list[str] | None = typer.Option(
+        None,
+        "--status",
+        help="Filter by recorded terminal status (repeatable; OR): completed, failed, paused, unknown.",
+    ),
     tag: list[str] | None = typer.Option(None, "--tag", help="Filter by tag key=value (repeatable)."),
     run_meta: list[str] | None = typer.Option(
         None,
@@ -225,6 +324,7 @@ def cmd_runs(
 ) -> None:
     """List recent local runs from JSONL logs."""
 
+    status_filters = _run_status_filters(status)
     tag_filters = parse_tag_filters(tag)
     meta_filters = parse_meta_filters(run_meta)
     exp_filters = parse_tag_filters(experiment)
@@ -239,6 +339,8 @@ def cmd_runs(
             if meta_filters and not run_meta_filters_match(summary.get("run_metadata") or {}, meta_filters):
                 continue
             if exp_filters and not experiment_filters_match(summary.get("experiment") or {}, exp_filters):
+                continue
+            if status_filters is not None and summary.get("status") not in status_filters:
                 continue
             runs_data.append((rid, summary))
 
@@ -586,6 +688,7 @@ def register(app: typer.Typer) -> None:
     app.command("inspect")(cmd_inspect)
     app.command("replay")(cmd_replay)
     app.command("graph")(cmd_graph)
+    app.command("contract")(cmd_contract)
     app.command("validate")(cmd_validate)
     app.command("runs")(cmd_runs)
     app.command("stats")(cmd_stats)

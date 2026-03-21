@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import io
 import json
+import subprocess
 import tarfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -12,13 +13,97 @@ from typing import Any, Literal
 
 import typer
 
-from replayt.cli.config import DEFAULT_LOG_DIR, parse_log_mode, resolve_log_dir
+from replayt.cli.config import (
+    DEFAULT_LOG_DIR,
+    export_hook_timeout_seconds,
+    get_project_config,
+    parse_log_mode,
+    resolve_log_dir,
+)
 from replayt.cli.display import replay_html
+from replayt.cli.run_support import export_hook_argv, invoke_export_hook
 from replayt.cli.stores import read_store
 from replayt.cli.targets import load_target
 from replayt.export_run import events_to_jsonl_lines
 from replayt.graph_export import workflow_to_mermaid
 from replayt.persistence.jsonl import validate_run_id
+
+
+def _maybe_invoke_export_hook(
+    *,
+    run_id: str,
+    export_kind: Literal["export_run", "bundle_export"],
+    log_dir: Path,
+    sqlite: Path | None,
+    export_mode: str,
+    out: Path,
+    seal: bool,
+    event_count: int,
+    report_style: str | None = None,
+) -> None:
+    cfg, _ = get_project_config()
+    hook = export_hook_argv(cfg)
+    if not hook:
+        return
+    hook_timeout = export_hook_timeout_seconds(cfg)
+    try:
+        invoke_export_hook(
+            hook,
+            run_id=run_id,
+            export_kind=export_kind,
+            log_dir=log_dir,
+            sqlite=sqlite,
+            export_mode=export_mode,
+            out=out,
+            seal=seal,
+            event_count=event_count,
+            report_style=report_style,
+            timeout_seconds=hook_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
+        typer.echo(
+            f"export_hook timed out (limit {lim}); set REPLAYT_EXPORT_HOOK_TIMEOUT or "
+            "export_hook_timeout in project config (<=0 for no limit).",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    except subprocess.CalledProcessError as exc:
+        typer.echo(f"export_hook exited with code {exc.returncode}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def compute_seal_digests(raw: bytes) -> tuple[str, list[str], int]:
+    """Return (file_sha256, per-line sha256 list, line_count) using the same rules as seal manifests."""
+
+    file_digest = hashlib.sha256(raw).hexdigest()
+    line_digests = [hashlib.sha256(line).hexdigest() for line in raw.splitlines(keepends=True)]
+    return file_digest, line_digests, len(line_digests)
+
+
+def _seal_manifest(
+    *,
+    schema: str,
+    run_id: str,
+    jsonl_path: str,
+    raw: bytes,
+    note: str,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    file_digest, line_digests, _n = compute_seal_digests(raw)
+    manifest: dict[str, Any] = {
+        "schema": schema,
+        "run_id": run_id,
+        "jsonl_path": jsonl_path,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "line_count": len(line_digests),
+        "line_sha256": line_digests,
+        "file_sha256": file_digest,
+        "note": note,
+    }
+    if extra:
+        manifest.update(extra)
+    return manifest
 
 
 def cmd_seal(
@@ -59,29 +144,151 @@ def cmd_seal(
         )
         raise typer.Exit(code=2)
 
-    raw = path.read_bytes()
-    file_digest = hashlib.sha256(raw).hexdigest()
-    line_digests = [hashlib.sha256(line).hexdigest() for line in raw.splitlines(keepends=True)]
-    manifest: dict[str, Any] = {
-        "schema": "replayt.seal.v1",
-        "run_id": safe_run_id,
-        "jsonl_path": str(path.resolve()),
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "line_count": len(line_digests),
-        "line_sha256": line_digests,
-        "file_sha256": file_digest,
-        "note": (
+    manifest = _seal_manifest(
+        schema="replayt.seal.v1",
+        run_id=safe_run_id,
+        jsonl_path=str(path.resolve()),
+        raw=path.read_bytes(),
+        note=(
             "Best-effort integrity record. Anyone who can write the log directory can replace "
             "both the JSONL and this manifest; use WORM storage or external signing for stronger guarantees."
         ),
-    }
+    )
     out_path = out if out is not None else log_dir / f"{safe_run_id}.seal.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if output == "json":
         typer.echo(json.dumps({**manifest, "manifest_path": str(out_path.resolve())}, indent=2))
     else:
-        typer.echo(f"wrote {out_path} ({len(line_digests)} lines, file_sha256={file_digest[:12]}...)")
+        typer.echo(
+            f"wrote {out_path} ({manifest['line_count']} lines, file_sha256={str(manifest['file_sha256'])[:12]}...)"
+        )
+
+
+_SEAL_VERIFY_SCHEMAS = frozenset({"replayt.seal.v1", "replayt.export_seal.v1"})
+
+
+def cmd_verify_seal(
+    run_id: str = typer.Argument(..., help="Run id (must match the manifest's run_id field)."),
+    log_dir: Path = typer.Option(DEFAULT_LOG_DIR, "--log-dir"),
+    log_subdir: str | None = typer.Option(None, "--log-subdir"),
+    manifest: Path | None = typer.Option(
+        None,
+        "--manifest",
+        help="Seal JSON path (default: <log-dir>/<run_id>.seal.json).",
+    ),
+    jsonl: Path | None = typer.Option(
+        None,
+        "--jsonl",
+        help="Override JSONL path (needed for extracted export/bundle manifests with relative jsonl_path).",
+    ),
+    output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
+) -> None:
+    """Check that a JSONL run log still matches a prior ``replayt seal`` or export ``events.seal.json`` manifest."""
+
+    log_dir = resolve_log_dir(log_dir, log_subdir)
+
+    try:
+        safe_run_id = validate_run_id(run_id)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=2)
+
+    manifest_path = manifest if manifest is not None else log_dir / f"{safe_run_id}.seal.json"
+    if not manifest_path.is_file():
+        typer.echo(f"No seal manifest at {manifest_path}", err=True)
+        raise typer.Exit(code=2)
+
+    try:
+        data: dict[str, Any] = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        typer.echo(f"Invalid JSON in manifest: {exc}", err=True)
+        raise typer.Exit(code=2)
+
+    schema = data.get("schema")
+    if schema not in _SEAL_VERIFY_SCHEMAS:
+        typer.echo(
+            f"Unsupported manifest schema {schema!r} (expected one of {sorted(_SEAL_VERIFY_SCHEMAS)})",
+            err=True,
+        )
+        raise typer.Exit(code=2)
+
+    mid = data.get("run_id")
+    if mid != safe_run_id:
+        typer.echo(f"Manifest run_id {mid!r} does not match argument {safe_run_id!r}", err=True)
+        raise typer.Exit(code=2)
+
+    expected_file = data.get("file_sha256")
+    expected_lines = data.get("line_sha256")
+    expected_count = data.get("line_count")
+    if not isinstance(expected_file, str) or not isinstance(expected_lines, list) or not isinstance(
+        expected_count, int
+    ):
+        typer.echo("Manifest is missing file_sha256, line_sha256, or line_count", err=True)
+        raise typer.Exit(code=2)
+    if not all(isinstance(x, str) for x in expected_lines):
+        typer.echo("Manifest line_sha256 must be a list of strings", err=True)
+        raise typer.Exit(code=2)
+
+    jsonl_path: Path | None = None
+    if jsonl is not None:
+        jsonl_path = jsonl.resolve()
+    else:
+        raw_jp = data.get("jsonl_path")
+        if isinstance(raw_jp, str) and raw_jp.strip():
+            cand = Path(raw_jp)
+            if cand.is_file():
+                jsonl_path = cand.resolve()
+    if jsonl_path is None:
+        log_root = log_dir.resolve()
+        candidate = (log_dir / f"{safe_run_id}.jsonl").resolve()
+        try:
+            candidate.relative_to(log_root)
+        except ValueError:
+            typer.echo(
+                f"Refusing to verify JSONL outside log directory: {candidate} is not under {log_root}",
+                err=True,
+            )
+            raise typer.Exit(code=2)
+        jsonl_path = candidate
+
+    if not jsonl_path.is_file():
+        typer.echo(f"No JSONL at {jsonl_path}", err=True)
+        raise typer.Exit(code=2)
+
+    raw = jsonl_path.read_bytes()
+    file_digest, line_digests, line_count = compute_seal_digests(raw)
+
+    mismatches: list[str] = []
+    if file_digest != expected_file:
+        mismatches.append("file_sha256")
+    if line_count != expected_count:
+        mismatches.append("line_count")
+    if line_digests != expected_lines:
+        mismatches.append("line_sha256")
+
+    ok = not mismatches
+    if output == "json":
+        report = {
+            "schema": "replayt.verify_seal_report.v1",
+            "ok": ok,
+            "run_id": safe_run_id,
+            "manifest_path": str(manifest_path.resolve()),
+            "jsonl_path": str(jsonl_path),
+            "manifest_schema": schema,
+            "mismatches": mismatches,
+        }
+        typer.echo(json.dumps(report, indent=2))
+        raise typer.Exit(code=0 if ok else 1)
+
+    if ok:
+        typer.echo(f"OK: {jsonl_path} matches {manifest_path}")
+        return
+
+    typer.echo(f"MISMATCH: {jsonl_path} does not match {manifest_path}", err=True)
+    for name in mismatches:
+        typer.echo(f"  - {name}", err=True)
+    raise typer.Exit(code=1)
 
 
 def cmd_report(
@@ -90,10 +297,10 @@ def cmd_report(
     log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, "--sqlite"),
     out: str | None = typer.Option(None, "--out", help="Output file path (default: stdout)"),
-    style: Literal["default", "stakeholder"] = typer.Option(
+    style: Literal["default", "stakeholder", "support"] = typer.Option(
         "default",
         "--style",
-        help="default (full) or stakeholder (approvals-first; omits tool/token sections).",
+        help="default (full), stakeholder, or support (failure/approval-first; omits tool/token sections).",
     ),
 ) -> None:
     """Generate a self-contained HTML report for a run."""
@@ -164,6 +371,11 @@ def cmd_export_run(
         case_sensitive=False,
         help="Sanitize copy: redacted | full | structured_only",
     ),
+    seal: bool = typer.Option(
+        False,
+        "--seal",
+        help="Include events.seal.json with SHA-256 digests for the exported events.jsonl.",
+    ),
 ) -> None:
     """Write a shareable .tar.gz: sanitized events.jsonl + manifest.json."""
 
@@ -175,6 +387,16 @@ def cmd_export_run(
         typer.echo(f"No events for run_id={run_id!r}", err=True)
         raise typer.Exit(code=2)
 
+    _maybe_invoke_export_hook(
+        run_id=run_id,
+        export_kind="export_run",
+        log_dir=log_dir,
+        sqlite=sqlite,
+        export_mode=export_mode,
+        out=out,
+        seal=seal,
+        event_count=len(events),
+    )
     lines = events_to_jsonl_lines(events, lm)
     bundle = b"".join(lines)
     digest = hashlib.sha256(bundle).hexdigest()
@@ -184,18 +406,38 @@ def cmd_export_run(
         "export_mode": export_mode,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "line_count": len(lines),
+        "files": ["events.jsonl", "manifest.json"] + (["events.seal.json"] if seal else []),
         "events_jsonl_sha256": digest,
         "note": "Sanitized copy for sharing; not necessarily byte-identical to on-disk JSONL.",
     }
     man_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+    seal_bytes: bytes | None = None
+    if seal:
+        seal_manifest = _seal_manifest(
+            schema="replayt.export_seal.v1",
+            run_id=run_id,
+            jsonl_path="events.jsonl",
+            raw=bundle,
+            note=(
+                "Integrity record for the sanitized events.jsonl inside this export bundle. "
+                "Verify the extracted file against this manifest; it does not attest to the original on-disk JSONL."
+            ),
+            extra={"export_mode": export_mode},
+        )
+        seal_bytes = json.dumps(seal_manifest, indent=2).encode("utf-8")
     out.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(out, "w:gz") as tf:
-        ti = tarfile.TarInfo(name=f"{run_id}/events.jsonl")
-        ti.size = len(bundle)
-        tf.addfile(ti, io.BytesIO(bundle))
-        ti2 = tarfile.TarInfo(name=f"{run_id}/manifest.json")
-        ti2.size = len(man_bytes)
-        tf.addfile(ti2, io.BytesIO(man_bytes))
+        for name, body in (
+            ("events.jsonl", bundle),
+            ("manifest.json", man_bytes),
+        ):
+            ti = tarfile.TarInfo(name=f"{run_id}/{name}")
+            ti.size = len(body)
+            tf.addfile(ti, io.BytesIO(body))
+        if seal_bytes is not None:
+            ti = tarfile.TarInfo(name=f"{run_id}/events.seal.json")
+            ti.size = len(seal_bytes)
+            tf.addfile(ti, io.BytesIO(seal_bytes))
     typer.echo(f"wrote {out.resolve()} ({len(lines)} events, sha256={digest[:16]}...)")
 
 
@@ -211,7 +453,7 @@ def cmd_bundle_export(
         case_sensitive=False,
         help="Sanitized events.jsonl: redacted | full | structured_only",
     ),
-    report_style: Literal["default", "stakeholder"] = typer.Option(
+    report_style: Literal["default", "stakeholder", "support"] = typer.Option(
         "stakeholder",
         "--report-style",
         help="Which replayt report variant to include.",
@@ -219,7 +461,12 @@ def cmd_bundle_export(
     target: str | None = typer.Option(
         None,
         "--target",
-        help="Optional MODULE:wf / workflow.py for workflow.mmd.txt (Mermaid); .py executes code—trusted only.",
+        help="Optional MODULE:wf / workflow.py for workflow.mmd.txt (Mermaid); .py executes code - trusted only.",
+    ),
+    seal: bool = typer.Option(
+        False,
+        "--seal",
+        help="Include events.seal.json with SHA-256 digests for the exported events.jsonl.",
     ),
 ) -> None:
     """Write a stakeholder-oriented .tar.gz: HTML report, replay timeline HTML, sanitized events.jsonl, manifest."""
@@ -234,6 +481,17 @@ def cmd_bundle_export(
         typer.echo(f"No events for run_id={run_id!r}", err=True)
         raise typer.Exit(code=2)
 
+    _maybe_invoke_export_hook(
+        run_id=run_id,
+        export_kind="bundle_export",
+        log_dir=log_dir,
+        sqlite=sqlite,
+        export_mode=export_mode,
+        out=out,
+        seal=seal,
+        event_count=len(events),
+        report_style=report_style,
+    )
     report_html = build_run_report_html(run_id, events, style=report_style)
     timeline_html = replay_html(run_id, events)
     lines = events_to_jsonl_lines(events, lm)
@@ -251,11 +509,26 @@ def cmd_bundle_export(
         "report_style": report_style,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files": ["report.html", "timeline.html", "events.jsonl", "manifest.json"]
+        + (["events.seal.json"] if seal else [])
         + (["workflow.mmd.txt"] if mermaid_txt else []),
         "events_jsonl_sha256": digest,
         "note": "Stakeholder bundle: HTML views + sanitized JSONL; not necessarily byte-identical to on-disk JSONL.",
     }
     man_bytes = json.dumps(manifest, indent=2).encode("utf-8")
+    seal_bytes: bytes | None = None
+    if seal:
+        seal_manifest = _seal_manifest(
+            schema="replayt.export_seal.v1",
+            run_id=run_id,
+            jsonl_path="events.jsonl",
+            raw=bundle,
+            note=(
+                "Integrity record for the sanitized events.jsonl inside this stakeholder bundle. "
+                "Verify the extracted file against this manifest; it does not attest to the original on-disk JSONL."
+            ),
+            extra={"export_mode": export_mode, "report_style": report_style},
+        )
+        seal_bytes = json.dumps(seal_manifest, indent=2).encode("utf-8")
     out.parent.mkdir(parents=True, exist_ok=True)
     prefix = run_id
     with tarfile.open(out, "w:gz") as tf:
@@ -268,6 +541,10 @@ def cmd_bundle_export(
             ti = tarfile.TarInfo(name=f"{prefix}/{name}")
             ti.size = len(body)
             tf.addfile(ti, io.BytesIO(body))
+        if seal_bytes is not None:
+            ti = tarfile.TarInfo(name=f"{prefix}/events.seal.json")
+            ti.size = len(seal_bytes)
+            tf.addfile(ti, io.BytesIO(seal_bytes))
         if mermaid_txt is not None:
             ti = tarfile.TarInfo(name=f"{prefix}/workflow.mmd.txt")
             ti.size = len(mermaid_txt)
@@ -277,6 +554,7 @@ def cmd_bundle_export(
 
 def register(app: typer.Typer) -> None:
     app.command("seal")(cmd_seal)
+    app.command("verify-seal")(cmd_verify_seal)
     app.command("report")(cmd_report)
     app.command("report-diff")(cmd_report_diff)
     app.command("export-run")(cmd_export_run)

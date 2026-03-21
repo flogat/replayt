@@ -42,6 +42,22 @@ Publishing to PyPI is automated via GitHub Actions. To cut a release:
 
 The workflow lives in `.github/workflows/publish.yml` and triggers on any tag matching `v*`.
 
+## Maintainer helpers
+
+During release prep or API review, these repo-local scripts keep the public surface and docs inventory explicit:
+
+```bash
+python scripts/public_api_report.py --format json
+python scripts/check_docs_index.py
+python scripts/changelog_unreleased.py --check-nonempty
+python scripts/version_consistency.py
+```
+
+- `public_api_report.py` snapshots the top-level `replayt` exports from `__all__`, including any declared-but-missing names that would make semver review or docs examples misleading.
+- `check_docs_index.py` verifies that `docs/README.md` still indexes every top-level docs file and that the main README documentation links resolve.
+- `changelog_unreleased.py` extracts `CHANGELOG.md` -> `## Unreleased` as text or JSON so release-note work does not depend on ad hoc markdown parsing.
+- `version_consistency.py` fails fast when `pyproject.toml` `[project].version` and `src/replayt/__init__.py` `__version__` disagree, which catches the common partial-bump footgun before a tag push.
+
 ### Automated skill-loop release
 
 If you want the repo's Cursor skills to drive a patch release, use `scripts/skill_release_loop.py`.

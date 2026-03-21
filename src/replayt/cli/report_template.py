@@ -65,6 +65,12 @@ details.rp-details summary:hover {{ color:var(--slate-900); }}
 .rp-table tbody tr.rp-total {{ border-top:1px solid var(--slate-200); font-weight:600; }}
 .rp-foot {{ font-size:0.75rem; color:var(--slate-400); margin-top:3rem; }}
 .rp-seq {{ font-size:0.75rem; color:var(--slate-400); font-weight:400; }}
+.rp-kv p {{ margin:0.2rem 0; }}
+.rp-note {{ margin-top:0.6rem; font-size:0.8rem; color:var(--slate-500); }}
+.rp-callout {{ border-left:4px solid var(--slate-300); }}
+.rp-callout-ok {{ border-left-color:var(--green-500); background:var(--green-100); }}
+.rp-callout-err {{ border-left-color:var(--red-500); background:var(--red-100); }}
+.rp-callout-pause {{ border-left-color:var(--yellow-800); background:var(--yellow-100); }}
 """
 
 REPORT_HTML = """\
@@ -94,6 +100,8 @@ REPORT_HTML = """\
       </div>
     </section>
 
+    {attention_section}
+
     {approvals_section}
 
     <section class="rp-section">
@@ -108,6 +116,8 @@ REPORT_HTML = """\
     {outputs_section}
 
     {tool_calls_section}
+
+    {notes_section}
 
     {token_section}
 
@@ -152,6 +162,21 @@ TOOL_CALL_ITEM = """\
   <pre class="rp-pre">{detail_json}</pre>
 </details>"""
 
+NOTES_SECTION = """\
+    <section class="rp-section">
+      <h2 class="rp-h2">Step Notes</h2>
+      <div class="rp-card rp-stack">
+        {items}
+      </div>
+    </section>"""
+
+NOTE_ITEM = """\
+<details class="rp-details group">
+  <summary>{kind} <span class="rp-seq">(state {state}, seq {seq})</span></summary>
+  {summary_block}
+  {data_block}
+</details>"""
+
 TOKEN_USAGE_SECTION = """\
     <section class="rp-section">
       <h2 class="rp-h2">Token Usage</h2>
@@ -184,7 +209,23 @@ APPROVAL_ITEM = """\
   <p><span class="rp-label">Summary:</span> {summary}</p>
   {details_block}
   {timing_block}
+  {resolution_block}
+  {route_block}
   <p><span class="rp-label">Outcome:</span> <strong>{outcome}</strong></p>
+</div>"""
+
+ATTENTION_SECTION = """\
+    <section class="rp-section">
+      <h2 class="rp-h2">{title}</h2>
+      <div class="rp-stack">
+        {items}
+      </div>
+    </section>"""
+
+ATTENTION_ITEM = """\
+<div class="rp-card rp-card-tight rp-callout {callout_class}">
+  <p><strong>{heading}</strong></p>
+  {body}
 </div>"""
 
 
@@ -353,6 +394,33 @@ def _outputs_signature(outputs: list[dict[str, Any]]) -> dict[str, Any]:
     return {str(output.get("schema_name", "")): output.get("data") for output in outputs}
 
 
+def _json_preview(value: Any, *, limit: int = 4000) -> str:
+    raw = json.dumps(value, indent=2, ensure_ascii=False, default=str)
+    preview = html.escape(raw[:limit])
+    if len(raw) > limit:
+        preview += "..."
+    return preview
+
+
+def _preview_block(label: str, value: Any) -> str:
+    return (
+        f'<p><span class="rp-label">{html.escape(label)}:</span></p>'
+        f'<pre class="rp-pre">{_json_preview(value)}</pre>'
+    )
+
+
+def _context_diff_rows(label: str, left: Any, right: Any) -> str:
+    same = left == right
+    cls = "rp-diff-row" if same else "rp-diff-row rp-changed"
+    if same:
+        return f'<p class="{cls}"><span class="rp-label">{html.escape(label)}:</span> match</p>'
+    return (
+        f'<p class="{cls}"><span class="rp-label">{html.escape(label)}:</span> different</p>'
+        f'<pre class="rp-pre">A: {html.escape(json.dumps(left, indent=2, default=str)[:1200])}\n\n'
+        f'B: {html.escape(json.dumps(right, indent=2, default=str)[:1200])}</pre>'
+    )
+
+
 REPORT_DIFF_HTML = """\
 <!DOCTYPE html>
 <html lang="en">
@@ -388,6 +456,18 @@ REPORT_DIFF_HTML = """\
         <p><span class="rp-label">Workflow:</span> {wb_name}@{wb_ver}</p>
         <p><span class="rp-label">Status:</span> {wb_status}</p>
         <p><span class="rp-label">States:</span> {wb_states}</p>
+      </div>
+    </section>
+    <section class="rp-section">
+      <h2 class="rp-h2">Run context</h2>
+      <div class="rp-card rp-card-tight">
+        {context_diff_rows}
+      </div>
+    </section>
+    <section class="rp-section">
+      <h2 class="rp-h2">Failure and pause signals</h2>
+      <div class="rp-card rp-card-tight">
+        {failure_diff_rows}
       </div>
     </section>
     <section class="rp-section">
@@ -645,6 +725,7 @@ def _legacy_build_run_report_html(
         timeline_html=timeline_html,
         outputs_section=outputs_section,
         tool_calls_section=tool_calls_section,
+        notes_section="",
         token_section=token_section,
     )
 
@@ -657,11 +738,19 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
     status = "unknown"
     tags: dict[str, str] = {}
     run_metadata: dict[str, Any] = {}
+    experiment: dict[str, Any] = {}
+    workflow_meta: dict[str, Any] = {}
     states: list[dict[str, str]] = []
     outputs: list[dict[str, Any]] = []
     tool_calls: list[dict[str, Any]] = []
+    notes: list[dict[str, Any]] = []
     approvals: list[dict[str, Any]] = []
     pending_approvals: dict[str, deque[int]] = defaultdict(deque)
+    resolved_approvals: deque[int] = deque()
+    failure: dict[str, Any] | None = None
+    structured_output_failures: list[dict[str, Any]] = []
+    retry_count = 0
+    latest_retry: dict[str, Any] | None = None
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
@@ -683,10 +772,26 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
             tags = raw_tags if isinstance(raw_tags, dict) else {}
             raw_meta = payload.get("run_metadata") or {}
             run_metadata = raw_meta if isinstance(raw_meta, dict) else {}
+            raw_experiment = payload.get("experiment") or {}
+            experiment = raw_experiment if isinstance(raw_experiment, dict) else {}
+            raw_workflow_meta = payload.get("workflow_meta") or {}
+            workflow_meta = raw_workflow_meta if isinstance(raw_workflow_meta, dict) else {}
         elif typ == "state_entered":
             states.append({"state": str(payload.get("state", "")), "ts": ts})
         elif typ == "structured_output":
             outputs.append({"schema_name": payload.get("schema_name", ""), "data": payload.get("data")})
+        elif typ == "structured_output_failed":
+            structured_output_failures.append(
+                {
+                    "state": payload.get("state"),
+                    "schema_name": payload.get("schema_name"),
+                    "stage": payload.get("stage"),
+                    "structured_output_mode": payload.get("structured_output_mode"),
+                    "error": payload.get("error"),
+                    "response_chars": payload.get("response_chars"),
+                    "ts": ts,
+                }
+            )
         elif typ == "tool_call":
             tool_calls.append(
                 {"tool": payload.get("name", ""), "seq": event.get("seq", ""), "args": payload.get("arguments")}
@@ -697,6 +802,17 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "tool": payload.get("name", "result"),
                     "seq": event.get("seq", ""),
                     "args": payload.get("result"),
+                }
+            )
+        elif typ == "step_note":
+            notes.append(
+                {
+                    "seq": event.get("seq", ""),
+                    "ts": ts,
+                    "state": payload.get("state"),
+                    "kind": payload.get("kind"),
+                    "summary": payload.get("summary"),
+                    "data": payload.get("data"),
                 }
             )
         elif typ == "llm_response":
@@ -710,12 +826,26 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
                 completion_tokens += ct
             if isinstance(tt, int):
                 total_tokens += tt
+        elif typ == "retry_scheduled":
+            retry_count += 1
+            latest_retry = {
+                "state": payload.get("state"),
+                "attempt": payload.get("attempt"),
+                "max_attempts": payload.get("max_attempts"),
+                "error": payload.get("error"),
+                "ts": ts,
+            }
         elif typ == "run_completed":
             status = str(payload.get("status", status))
         elif typ == "run_paused":
             status = "paused"
         elif typ == "run_failed":
             status = "failed"
+            failure = {
+                "state": payload.get("state"),
+                "error": payload.get("error"),
+                "ts": ts,
+            }
         elif typ == "approval_requested":
             aid = payload.get("approval_id")
             if aid is not None:
@@ -726,9 +856,16 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
                         "summary": payload.get("summary", ""),
                         "state": payload.get("state", ""),
                         "details": payload.get("details") or {},
+                        "on_approve": payload.get("on_approve"),
+                        "on_reject": payload.get("on_reject"),
                         "requested_ts": ts,
                         "approved": None,
                         "resolved_ts": None,
+                        "resolver": None,
+                        "reason": None,
+                        "actor": None,
+                        "approval_state": None,
+                        "resumed_at_state": None,
                         "orphan_resolution": False,
                     }
                 )
@@ -742,6 +879,10 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
                     idx = pending_approvals[aid_str].popleft()
                     approvals[idx]["approved"] = approved
                     approvals[idx]["resolved_ts"] = ts
+                    approvals[idx]["resolver"] = payload.get("resolver")
+                    approvals[idx]["reason"] = payload.get("reason")
+                    approvals[idx]["actor"] = payload.get("actor")
+                    resolved_approvals.append(idx)
                 else:
                     approvals.append(
                         {
@@ -749,12 +890,24 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
                             "summary": "",
                             "state": "",
                             "details": {},
+                            "on_approve": None,
+                            "on_reject": None,
                             "requested_ts": None,
                             "approved": approved,
                             "resolved_ts": ts,
+                            "resolver": payload.get("resolver"),
+                            "reason": payload.get("reason"),
+                            "actor": payload.get("actor"),
+                            "approval_state": None,
+                            "resumed_at_state": None,
                             "orphan_resolution": True,
                         }
                     )
+                    resolved_approvals.append(len(approvals) - 1)
+        elif typ == "approval_applied" and resolved_approvals:
+            idx = resolved_approvals.popleft()
+            approvals[idx]["approval_state"] = payload.get("approval_state")
+            approvals[idx]["resumed_at_state"] = payload.get("resumed_at_state")
 
     return {
         "workflow_name": workflow_name,
@@ -762,9 +915,16 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
         "status": status,
         "tags": tags,
         "run_metadata": run_metadata,
+        "experiment": experiment,
+        "workflow_meta": workflow_meta,
         "states": states,
         "outputs": outputs,
         "tool_calls": tool_calls,
+        "notes": notes,
+        "failure": failure,
+        "structured_output_failures": structured_output_failures,
+        "retry_count": retry_count,
+        "latest_retry": latest_retry,
         "prompt_tokens": prompt_tokens,
         "completion_tokens": completion_tokens,
         "total_tokens": total_tokens,
@@ -784,9 +944,16 @@ def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
         "status": agg["status"],
         "tags": agg["tags"],
         "run_metadata": agg["run_metadata"],
+        "experiment": agg["experiment"],
+        "workflow_meta": agg["workflow_meta"],
         "states": agg["states"],
         "outputs": agg["outputs"],
         "tool_calls": agg["tool_calls"],
+        "notes": agg["notes"],
+        "failure": agg["failure"],
+        "structured_output_failures": agg["structured_output_failures"],
+        "retry_count": agg["retry_count"],
+        "latest_retry": agg["latest_retry"],
         "prompt_tokens": agg["prompt_tokens"],
         "completion_tokens": agg["completion_tokens"],
         "total_tokens": agg["total_tokens"],
@@ -804,6 +971,21 @@ def build_report_diff_html(
 ) -> str:
     def state_chain(states: list[dict[str, str]]) -> str:
         return " -> ".join(s["state"] for s in states) if states else "(none)"
+
+    context_rows = [
+        _context_diff_rows("Tags", ctx_a["tags"], ctx_b["tags"]),
+        _context_diff_rows("Run metadata", ctx_a["run_metadata"], ctx_b["run_metadata"]),
+        _context_diff_rows("Experiment", ctx_a["experiment"], ctx_b["experiment"]),
+        _context_diff_rows("Workflow metadata", ctx_a["workflow_meta"], ctx_b["workflow_meta"]),
+    ]
+
+    latest_parse_a = ctx_a["structured_output_failures"][-1] if ctx_a["structured_output_failures"] else None
+    latest_parse_b = ctx_b["structured_output_failures"][-1] if ctx_b["structured_output_failures"] else None
+    failure_rows = [
+        _context_diff_rows("Run failure", ctx_a["failure"], ctx_b["failure"]),
+        _context_diff_rows("Latest structured parse failure", latest_parse_a, latest_parse_b),
+        _context_diff_rows("Retries scheduled", ctx_a["retry_count"], ctx_b["retry_count"]),
+    ]
 
     output_rows: list[str] = []
     for idx, (left, right) in enumerate(zip_longest(ctx_a["outputs"], ctx_b["outputs"], fillvalue=None), start=1):
@@ -856,6 +1038,8 @@ def build_report_diff_html(
         wb_ver=html.escape(str(ctx_b["workflow_version"])),
         wb_status=html.escape(str(ctx_b["status"])),
         wb_states=html.escape(state_chain(ctx_b["states"])),
+        context_diff_rows="\n".join(context_rows),
+        failure_diff_rows="\n".join(failure_rows),
         outputs_diff_rows="\n".join(output_rows),
         approvals_diff=approvals_html,
     )
@@ -865,7 +1049,7 @@ def build_run_report_html(
     run_id: str,
     events: list[dict[str, Any]],
     *,
-    style: Literal["default", "stakeholder"] = "default",
+    style: Literal["default", "stakeholder", "support"] = "default",
 ) -> str:
     """Build the same self-contained HTML as ``replayt report`` (for CLI and bundle export)."""
 
@@ -875,9 +1059,16 @@ def build_run_report_html(
     status = agg["status"]
     tags = agg["tags"]
     run_metadata = agg["run_metadata"]
+    experiment = agg["experiment"]
+    workflow_meta = agg["workflow_meta"]
     states = agg["states"]
     outputs = agg["outputs"]
     tool_calls = agg["tool_calls"]
+    notes = agg["notes"]
+    failure = agg["failure"]
+    structured_output_failures = agg["structured_output_failures"]
+    retry_count = agg["retry_count"]
+    latest_retry = agg["latest_retry"]
     prompt_tokens = agg["prompt_tokens"]
     completion_tokens = agg["completion_tokens"]
     total_tokens = agg["total_tokens"]
@@ -907,12 +1098,99 @@ def build_run_report_html(
     if tags:
         tag_strs = ", ".join(f"{html.escape(k)}={html.escape(v)}" for k, v in tags.items())
         tags_html = f'<p><span class="rp-label">Tags:</span> {tag_strs}</p>'
-    meta_html = ""
+    meta_parts: list[str] = []
     if run_metadata:
-        meta_html = (
+        meta_parts.append(
             '<p><span class="rp-label">Run metadata:</span> '
             f'<code class="rp-code">{html.escape(json.dumps(run_metadata, default=str)[:4000])}</code></p>'
         )
+    if experiment:
+        meta_parts.append(
+            '<p><span class="rp-label">Experiment:</span> '
+            f'<code class="rp-code">{html.escape(json.dumps(experiment, default=str)[:4000])}</code></p>'
+        )
+    if workflow_meta:
+        meta_parts.append(
+            '<p><span class="rp-label">Workflow metadata:</span> '
+            f'<code class="rp-code">{html.escape(json.dumps(workflow_meta, default=str)[:4000])}</code></p>'
+        )
+    meta_html = "\n".join(meta_parts)
+
+    pending_approvals = [approval for approval in approvals if approval.get("approved") is None]
+    attention_items: list[str] = []
+    if status == "failed" and failure:
+        err = failure.get("error") or {}
+        body = [
+            f'<p><span class="rp-label">State:</span> {html.escape(str(failure.get("state") or "-"))}</p>',
+            f'<p><span class="rp-label">Error:</span> {html.escape(str(err.get("type") or "Error"))}: '
+            f'{html.escape(str(err.get("message") or ""))}</p>',
+        ]
+        attention_items.append(
+            ATTENTION_ITEM.format(
+                callout_class="rp-callout-err",
+                heading="Run failed",
+                body="".join(body),
+            )
+        )
+    elif status == "paused":
+        pending_ids = ", ".join(
+            html.escape(str(approval.get("approval_id") or "")) for approval in pending_approvals
+        ) or "-"
+        body = [
+            f'<p><span class="rp-label">Pending approvals:</span> {len(pending_approvals)}</p>',
+            f'<p><span class="rp-label">Approval IDs:</span> {pending_ids}</p>',
+        ]
+        attention_items.append(
+            ATTENTION_ITEM.format(
+                callout_class="rp-callout-pause",
+                heading="Run is waiting for approval",
+                body="".join(body),
+            )
+        )
+
+    if structured_output_failures:
+        parse_failure = structured_output_failures[-1]
+        parse_error = parse_failure.get("error") or {}
+        body = [
+            f'<p><span class="rp-label">Schema:</span> {html.escape(str(parse_failure.get("schema_name") or "-"))}</p>',
+            f'<p><span class="rp-label">Stage:</span> {html.escape(str(parse_failure.get("stage") or "-"))}</p>',
+            f'<p><span class="rp-label">State:</span> {html.escape(str(parse_failure.get("state") or "-"))}</p>',
+            f'<p><span class="rp-label">Error:</span> {html.escape(str(parse_error.get("message") or ""))}</p>',
+        ]
+        attention_items.append(
+            ATTENTION_ITEM.format(
+                callout_class="rp-callout-err",
+                heading="Latest structured parse failure",
+                body="".join(body),
+            )
+        )
+
+    if retry_count:
+        body = [f'<p><span class="rp-label">Retries scheduled:</span> {retry_count}</p>']
+        if latest_retry:
+            retry_error = latest_retry.get("error") or {}
+            body.append(
+                f'<p><span class="rp-label">Latest retry:</span> state '
+                f'{html.escape(str(latest_retry.get("state") or "-"))}, '
+                f'attempt {html.escape(str(latest_retry.get("attempt") or "-"))}/'
+                f'{html.escape(str(latest_retry.get("max_attempts") or "-"))}</p>'
+            )
+            if isinstance(retry_error, dict) and retry_error.get("message"):
+                body.append(
+                    f'<p><span class="rp-label">Retry error:</span> '
+                    f'{html.escape(str(retry_error.get("message") or ""))}</p>'
+                )
+        attention_items.append(
+            ATTENTION_ITEM.format(
+                callout_class="rp-callout-pause",
+                heading="Retries happened during this run",
+                body="".join(body),
+            )
+        )
+    attention_section = ""
+    if attention_items:
+        attention_title = "Support summary" if style == "support" else "Action summary"
+        attention_section = ATTENTION_SECTION.format(title=attention_title, items="\n".join(attention_items))
 
     timeline_items: list[str] = []
     for state_meta in states:
@@ -959,6 +1237,30 @@ def build_run_report_html(
             )
         tool_calls_section = TOOL_CALLS_SECTION.format(items="\n".join(items))
 
+    notes_section = ""
+    if notes:
+        items = []
+        for note in notes:
+            summary_block = ""
+            if note.get("summary") not in (None, ""):
+                summary_block = (
+                    f'<p class="rp-note"><span class="rp-label">Summary:</span> '
+                    f'{html.escape(str(note.get("summary") or ""))}</p>'
+                )
+            data_block = ""
+            if note.get("data") not in (None, "", {}):
+                data_block = f'<pre class="rp-pre">{_json_preview(note.get("data"))}</pre>'
+            items.append(
+                NOTE_ITEM.format(
+                    kind=html.escape(str(note.get("kind") or "")),
+                    state=html.escape(str(note.get("state") or "")),
+                    seq=html.escape(str(note.get("seq") or "")),
+                    summary_block=summary_block,
+                    data_block=data_block,
+                )
+            )
+        notes_section = NOTES_SECTION.format(items="\n".join(items))
+
     approvals_section = ""
     if approvals:
         items_a: list[str] = []
@@ -994,6 +1296,49 @@ def build_run_report_html(
                 )
             else:
                 timing_block = ""
+            resolution_lines: list[str] = []
+            if approval.get("resolver"):
+                resolution_lines.append(
+                    f'<p><span class="rp-label">Resolver:</span> '
+                    f'{html.escape(str(approval.get("resolver") or ""))}</p>'
+                )
+            if approval.get("reason"):
+                resolution_lines.append(
+                    f'<p><span class="rp-label">Reason:</span> '
+                    f'{html.escape(str(approval.get("reason") or ""))}</p>'
+                )
+            actor = approval.get("actor")
+            if actor not in (None, "", {}):
+                resolution_lines.append(_preview_block("Actor", actor))
+            resolution_block = "".join(resolution_lines)
+
+            route_lines: list[str] = []
+            if approval.get("approval_state") or approval.get("resumed_at_state"):
+                route_lines.append(
+                    "<p><span class=\"rp-label\">Resume path:</span> "
+                    f'{html.escape(str(approval.get("approval_state") or "-"))} -> '
+                    f'{html.escape(str(approval.get("resumed_at_state") or "-"))}</p>'
+                )
+            elif approval.get("approved") is True and approval.get("on_approve"):
+                route_lines.append(
+                    f'<p><span class="rp-label">Configured on approve:</span> '
+                    f'{html.escape(str(approval.get("on_approve") or ""))}</p>'
+                )
+            elif approval.get("approved") is False and approval.get("on_reject"):
+                route_lines.append(
+                    f'<p><span class="rp-label">Configured on reject:</span> '
+                    f'{html.escape(str(approval.get("on_reject") or ""))}</p>'
+                )
+            elif approval.get("approved") is None and (approval.get("on_approve") or approval.get("on_reject")):
+                route_lines.append(
+                    f'<p><span class="rp-label">Configured approve path:</span> '
+                    f'{html.escape(str(approval.get("on_approve") or "-"))}</p>'
+                )
+                route_lines.append(
+                    f'<p><span class="rp-label">Configured reject path:</span> '
+                    f'{html.escape(str(approval.get("on_reject") or "-"))}</p>'
+                )
+            route_block = "".join(route_lines)
             items_a.append(
                 APPROVAL_ITEM.format(
                     approval_id=html.escape(str(approval.get("approval_id", ""))),
@@ -1001,27 +1346,29 @@ def build_run_report_html(
                     summary=html.escape(str(approval.get("summary", ""))),
                     details_block=details_block,
                     timing_block=timing_block,
+                    resolution_block=resolution_block,
+                    route_block=route_block,
                     outcome=html.escape(outcome),
                 )
             )
         appr_block = APPROVALS_SECTION.format(items="\n".join(items_a))
-        if style == "stakeholder":
+        if style in {"stakeholder", "support"}:
             intro = (
                 '<p class="rp-muted">Human approval gates from the JSONL timeline '
-                "(stakeholder view; tool/token sections omitted below).</p>\n"
+                "(stakeholder-facing view; tool/token sections omitted below).</p>\n"
             )
             approvals_section = intro + appr_block
         else:
             approvals_section = appr_block
 
-    if style == "stakeholder":
+    if style in {"stakeholder", "support"}:
         token_section = (
             '<section class="rp-section"><p class="rp-muted">Tool-call and token usage sections omitted. '
             "For the full technical report, run "
             f'<code class="rp-code">replayt report {html.escape(run_id)} --style default</code>'
             "</p></section>"
         )
-        report_title = "Run summary"
+        report_title = "Support handoff" if style == "support" else "Run summary"
     else:
         token_section = TOKEN_USAGE_SECTION.format(
             prompt_tokens=prompt_tokens,
@@ -1040,9 +1387,11 @@ def build_run_report_html(
         duration=html.escape(duration),
         tags_html=tags_html,
         meta_html=meta_html,
+        attention_section=attention_section,
         approvals_section=approvals_section,
         timeline_html=timeline_html,
         outputs_section=outputs_section,
         tool_calls_section=tool_calls_section,
+        notes_section=notes_section,
         token_section=token_section,
     )

@@ -11,9 +11,12 @@ import httpx
 from pydantic import BaseModel
 
 from replayt.llm_coercion import (
+    coerce_llm_seed,
     coerce_max_tokens_for_api,
+    coerce_openai_penalty,
     coerce_temperature,
     coerce_timeout_seconds,
+    coerce_top_p,
 )
 from replayt.types import LogMode
 
@@ -84,9 +87,14 @@ def _extract_json_object(text: str, *, max_brace_starts: int = _MAX_JSON_OBJECT_
 @dataclass
 class LLMSettings:
     api_key: str | None = None
-    base_url: str = "https://openrouter.ai/api/v1"
-    model: str = "anthropic/claude-sonnet-4.6"
+    provider: str | None = None
+    base_url: str = "http://127.0.0.1:11434/v1"
+    model: str = "llama3.2"
     timeout_seconds: float = 120.0
+    top_p: float | None = None
+    frequency_penalty: float | None = None
+    presence_penalty: float | None = None
+    seed: int | None = None
     max_tokens: int | None = None
     extra_headers: dict[str, str] = field(default_factory=dict)
     http_retries: int = 0
@@ -133,26 +141,13 @@ class LLMSettings:
         base_url, default_model = cls._provider_presets[key]
         return cls(
             api_key=api_key,
+            provider=key,
             base_url=base_url,
             model=model or default_model,
         )
 
     @classmethod
-    def from_env(cls) -> LLMSettings:
-        provider = os.environ.get("REPLAYT_PROVIDER", "").strip().lower()
-        env_base_url = os.environ.get("OPENAI_BASE_URL", "").strip()
-        if provider:
-            if provider == "anthropic":
-                if not env_base_url:
-                    raise ValueError(cls._anthropic_gateway_error())
-                preset_base = env_base_url
-                preset_model = cls.anthropic_gateway_model
-            else:
-                preset = cls.for_provider(provider)
-                preset_base = preset.base_url
-                preset_model = preset.model
-        else:
-            preset_base, preset_model = cls._provider_presets["openrouter"]
+    def _limits_from_env(cls) -> tuple[int, int]:
         max_rb = 32 * 1024 * 1024
         raw_rb = os.environ.get("REPLAYT_LLM_MAX_RESPONSE_BYTES", "").strip()
         if raw_rb:
@@ -171,12 +166,49 @@ class LLMSettings:
                 raise ValueError(
                     f"REPLAYT_LLM_MAX_SCHEMA_CHARS must be a positive integer, got {raw_schema!r}"
                 ) from None
+        return max_rb, max_schema
+
+    @classmethod
+    def from_sources(
+        cls,
+        *,
+        provider: str | None = None,
+        base_url: str | None = None,
+        model: str | None = None,
+        api_key: str | None = None,
+    ) -> LLMSettings:
+        provider_name = (provider or "").strip().lower()
+        resolved_base_url = (base_url or "").strip()
+        resolved_model = (model or "").strip()
+        if provider_name:
+            if provider_name == "anthropic":
+                if not resolved_base_url:
+                    raise ValueError(cls._anthropic_gateway_error())
+                preset_base = resolved_base_url
+                preset_model = cls.anthropic_gateway_model
+            else:
+                preset = cls.for_provider(provider_name)
+                preset_base = preset.base_url
+                preset_model = preset.model
+        else:
+            preset_base, preset_model = cls._provider_presets["ollama"]
+        max_rb, max_schema = cls._limits_from_env()
         return cls(
-            api_key=os.environ.get("OPENAI_API_KEY"),
-            base_url=env_base_url or preset_base,
-            model=os.environ.get("REPLAYT_MODEL", preset_model),
+            api_key=api_key,
+            provider=provider_name or None,
+            base_url=resolved_base_url or preset_base,
+            model=resolved_model or preset_model,
             max_response_bytes=max_rb,
             max_schema_json_chars=max_schema,
+        )
+
+    @classmethod
+    def from_env(cls) -> LLMSettings:
+        return cls.from_sources(
+            provider=os.environ.get("REPLAYT_PROVIDER"),
+            base_url=os.environ.get("OPENAI_BASE_URL"),
+            model=os.environ.get("REPLAYT_MODEL"),
+            api_key=os.environ.get("OPENAI_API_KEY"),
         )
 
 
@@ -237,18 +269,31 @@ class OpenAICompatClient:
         messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.0,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        seed: int | None = None,
         max_tokens: int | None = None,
         timeout_seconds: float | None = None,
+        base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        url = self.settings.base_url.rstrip("/") + "/chat/completions"
+        url = (base_url or self.settings.base_url).rstrip("/") + "/chat/completions"
         eff_max = max_tokens if max_tokens is not None else self.settings.max_tokens
         payload: dict[str, Any] = {
             "model": model or self.settings.model,
             "messages": messages,
             "temperature": temperature,
         }
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if frequency_penalty is not None:
+            payload["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not None:
+            payload["presence_penalty"] = presence_penalty
+        if seed is not None:
+            payload["seed"] = seed
         if eff_max is not None:
             payload["max_tokens"] = eff_max
         if response_format is not None:
@@ -293,9 +338,8 @@ class OpenAICompatClient:
                 try:
                     return json.loads(raw.decode("utf-8"))
                 except json.JSONDecodeError as exc:
-                    preview = raw[:500]
                     raise RuntimeError(
-                        f"Chat completions response was not valid JSON: {exc}; body preview: {preview!r}"
+                        f"Chat completions response was not valid JSON: {exc}; body_bytes={len(raw)}"
                     ) from exc
             except httpx.TransportError as exc:
                 last_exc = exc
@@ -329,9 +373,16 @@ class LLMBridge:
         *,
         model: str | None = None,
         temperature: float | None = None,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        seed: int | None = None,
         timeout_seconds: float | None = None,
         max_tokens: int | None = None,
+        provider: str | None = None,
+        base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        native_response_format: bool | None = None,
         experiment: dict[str, Any] | None = None,
     ) -> LLMBridge:
         """Return a new bridge with merged per-call defaults (logged on each request as ``effective``)."""
@@ -341,14 +392,28 @@ class LLMBridge:
             merged["model"] = model
         if temperature is not None:
             merged["temperature"] = temperature
+        if top_p is not None:
+            merged["top_p"] = top_p
+        if frequency_penalty is not None:
+            merged["frequency_penalty"] = frequency_penalty
+        if presence_penalty is not None:
+            merged["presence_penalty"] = presence_penalty
+        if seed is not None:
+            merged["seed"] = seed
         if timeout_seconds is not None:
             merged["timeout_seconds"] = timeout_seconds
         if max_tokens is not None:
             merged["max_tokens"] = max_tokens
+        if provider is not None:
+            merged["provider"] = provider
+        if base_url is not None:
+            merged["base_url"] = base_url
         if extra_headers:
             h = dict(merged.get("extra_headers") or {})
             h.update(extra_headers)
             merged["extra_headers"] = h
+        if native_response_format is not None:
+            merged["native_response_format"] = bool(native_response_format)
         if experiment is not None:
             prev = merged.get("experiment")
             if isinstance(prev, dict):
@@ -368,17 +433,65 @@ class LLMBridge:
         *,
         model: str | None,
         temperature: float,
+        top_p: float | None,
+        frequency_penalty: float | None,
+        presence_penalty: float | None,
+        seed: int | None,
         max_tokens: int | None,
         timeout_seconds: float | None,
+        provider: str | None,
+        base_url: str | None,
         extra_headers: dict[str, str] | None,
-    ) -> tuple[dict[str, Any], dict[str, str]]:
+    ) -> tuple[dict[str, Any], dict[str, str], str]:
         d = self._defaults
         base = self._client.settings
-        eff_model = model if model is not None else (d.get("model") if d.get("model") is not None else base.model)
+        eff_provider_raw = provider if provider is not None else d.get("provider", base.provider)
+        eff_provider = str(eff_provider_raw).strip().lower() if eff_provider_raw not in (None, "") else None
+        eff_base_url = str(base_url).strip() if base_url not in (None, "") else ""
+        if not eff_base_url:
+            default_base_url = d.get("base_url")
+            eff_base_url = str(default_base_url).strip() if default_base_url not in (None, "") else ""
+        provider_default_model: str | None = None
+        if eff_provider is not None:
+            provider_settings = LLMSettings.from_sources(
+                provider=eff_provider,
+                base_url=eff_base_url or None,
+            )
+            eff_base_url = provider_settings.base_url
+            provider_default_model = provider_settings.model
+        elif not eff_base_url:
+            eff_base_url = base.base_url
+        eff_model = model if model is not None else d.get("model")
+        if eff_model is None:
+            eff_model = provider_default_model or base.model
         if "temperature" in d:
             eff_temp = coerce_temperature(d["temperature"], default=temperature)
         else:
             eff_temp = coerce_temperature(temperature, default=0.0)
+        if top_p is not None:
+            eff_top_p = coerce_top_p(top_p)
+        elif "top_p" in d:
+            eff_top_p = coerce_top_p(d.get("top_p"))
+        else:
+            eff_top_p = coerce_top_p(base.top_p)
+        if frequency_penalty is not None:
+            eff_freq_pen = coerce_openai_penalty(frequency_penalty)
+        elif "frequency_penalty" in d:
+            eff_freq_pen = coerce_openai_penalty(d.get("frequency_penalty"))
+        else:
+            eff_freq_pen = coerce_openai_penalty(base.frequency_penalty)
+        if presence_penalty is not None:
+            eff_pres_pen = coerce_openai_penalty(presence_penalty)
+        elif "presence_penalty" in d:
+            eff_pres_pen = coerce_openai_penalty(d.get("presence_penalty"))
+        else:
+            eff_pres_pen = coerce_openai_penalty(base.presence_penalty)
+        if seed is not None:
+            eff_seed = coerce_llm_seed(seed)
+        elif "seed" in d:
+            eff_seed = coerce_llm_seed(d.get("seed"))
+        else:
+            eff_seed = coerce_llm_seed(base.seed)
         eff_max = max_tokens if max_tokens is not None else d.get("max_tokens")
         if eff_max is None:
             eff_max = base.max_tokens
@@ -393,36 +506,71 @@ class LLMBridge:
         hdrs.update(extra_headers or {})
         effective: dict[str, Any] = {
             "model": eff_model,
+            "base_url": eff_base_url,
             "temperature": eff_temp,
+            "top_p": eff_top_p,
+            "frequency_penalty": eff_freq_pen,
+            "presence_penalty": eff_pres_pen,
+            "seed": eff_seed,
             "max_tokens": eff_max,
             "timeout_seconds": eff_timeout,
             "extra_header_names": sorted(hdrs.keys()),
         }
+        if eff_provider is not None:
+            effective["provider"] = eff_provider
         exp = d.get("experiment")
         if isinstance(exp, dict) and exp:
             effective["experiment"] = dict(exp)
-        return effective, hdrs
+        return effective, hdrs, eff_base_url
 
-    def complete_text(
+    @staticmethod
+    def _serialize_error(exc: Exception) -> dict[str, str]:
+        return {
+            "type": exc.__class__.__name__,
+            "module": exc.__class__.__module__,
+            "message": str(exc),
+        }
+
+    def _request_text(
         self,
         *,
         messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.0,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        seed: int | None = None,
         max_tokens: int | None = None,
         timeout_seconds: float | None = None,
+        provider: str | None = None,
+        base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
-    ) -> str:
+        response_format: dict[str, Any] | None = None,
+        effective_extras: dict[str, Any] | None = None,
+    ) -> tuple[str, dict[str, Any]]:
         state = self._state_getter()
-        effective, hdrs = self._merge_call(
+        effective, hdrs, eff_base_url = self._merge_call(
             model=model,
             temperature=temperature,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            seed=seed,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            provider=provider,
+            base_url=base_url,
             extra_headers=extra_headers,
         )
+        if effective_extras:
+            effective = {**effective, **effective_extras}
         eff_model = str(effective["model"])
         eff_temp = float(effective["temperature"])
+        eff_top_p = coerce_top_p(effective.get("top_p"))
+        eff_freq_pen = coerce_openai_penalty(effective.get("frequency_penalty"))
+        eff_pres_pen = coerce_openai_penalty(effective.get("presence_penalty"))
+        eff_seed = coerce_llm_seed(effective.get("seed"))
         eff_max = effective["max_tokens"]
         eff_timeout = float(effective["timeout_seconds"])
 
@@ -434,7 +582,6 @@ class LLMBridge:
                 "count": len(messages),
                 "roles": [msg.get("role") for msg in messages],
             }
-        # structured_only: state + effective only (no message bodies or role metadata); see LogMode.structured_only
         self._emit("llm_request", req_payload)
 
         t0 = time.perf_counter()
@@ -443,9 +590,15 @@ class LLMBridge:
             messages=messages,
             model=eff_model,
             temperature=eff_temp,
+            top_p=eff_top_p,
+            frequency_penalty=eff_freq_pen,
+            presence_penalty=eff_pres_pen,
+            seed=eff_seed,
             max_tokens=max_tok,
             timeout_seconds=eff_timeout,
+            base_url=eff_base_url,
             extra_headers=hdrs if hdrs else None,
+            response_format=response_format,
         )
         dt_ms = int((time.perf_counter() - t0) * 1000)
         choice = (data.get("choices") or [{}])[0]
@@ -463,9 +616,74 @@ class LLMBridge:
             resp_payload["content"] = content
         elif self._log_mode == LogMode.redacted:
             resp_payload["content_preview"] = content[:800]
-        # structured_only: omit content and preview; structured_output events still carry validated data from parse()
         self._emit("llm_response", resp_payload)
-        return content
+        return content, effective
+
+    def _emit_structured_output_failed(
+        self,
+        *,
+        schema_name: str,
+        stage: str,
+        structured_output_mode: str,
+        error: Exception,
+        effective: dict[str, Any] | None = None,
+        response_chars: int | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {
+            "state": self._state_getter(),
+            "schema_name": schema_name,
+            "stage": stage,
+            "structured_output_mode": structured_output_mode,
+            "error": self._serialize_error(error),
+        }
+        if effective is not None:
+            payload["effective"] = effective
+        if response_chars is not None:
+            payload["response_chars"] = response_chars
+        self._emit("structured_output_failed", payload)
+
+    @staticmethod
+    def _native_response_format(model_type: type[T]) -> dict[str, Any]:
+        return {
+            "type": "json_schema",
+            "json_schema": {
+                "name": model_type.__name__,
+                "strict": True,
+                "schema": model_type.model_json_schema(),
+            },
+        }
+
+    def complete_text(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        model: str | None = None,
+        temperature: float = 0.0,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        seed: int | None = None,
+        max_tokens: int | None = None,
+        timeout_seconds: float | None = None,
+        provider: str | None = None,
+        base_url: str | None = None,
+        extra_headers: dict[str, str] | None = None,
+    ) -> str:
+        text, _effective = self._request_text(
+            messages=messages,
+            model=model,
+            temperature=temperature,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            seed=seed,
+            max_tokens=max_tokens,
+            timeout_seconds=timeout_seconds,
+            provider=provider,
+            base_url=base_url,
+            extra_headers=extra_headers,
+        )
+        return text
 
     def parse(
         self,
@@ -474,39 +692,111 @@ class LLMBridge:
         messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.0,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        seed: int | None = None,
         max_tokens: int | None = None,
         timeout_seconds: float | None = None,
+        provider: str | None = None,
+        base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        native_response_format: bool | None = None,
     ) -> T:
+        use_native_response_format = (
+            bool(self._defaults.get("native_response_format"))
+            if native_response_format is None
+            else native_response_format
+        )
+        structured_output_mode = "native_json_schema" if use_native_response_format else "prompt_only"
         schema_hint = json.dumps(model_type.model_json_schema(), ensure_ascii=False)
         cap = self._client.settings.max_schema_json_chars
         if len(schema_hint) > cap:
-            raise ValueError(
+            exc = ValueError(
                 f"JSON Schema for {model_type.__name__!r} serializes to {len(schema_hint)} characters, "
                 f"above max_schema_json_chars ({cap}); use a smaller model, split fields, or raise the limit "
                 "on LLMSettings / env REPLAYT_LLM_MAX_SCHEMA_CHARS."
             )
+            self._emit_structured_output_failed(
+                schema_name=model_type.__name__,
+                stage="schema_limit",
+                structured_output_mode=structured_output_mode,
+                error=exc,
+            )
+            raise exc
         sys = (
             "You must respond with a single JSON object that validates against this JSON Schema "
             f"(return JSON only, no markdown):\n{schema_hint}"
         )
         full_messages = [{"role": "system", "content": sys}, *messages]
-        text = self.complete_text(
+        response_format = self._native_response_format(model_type) if use_native_response_format else None
+        text, effective = self._request_text(
             messages=full_messages,
             model=model,
             temperature=temperature,
+            top_p=top_p,
+            frequency_penalty=frequency_penalty,
+            presence_penalty=presence_penalty,
+            seed=seed,
             max_tokens=max_tokens,
             timeout_seconds=timeout_seconds,
+            provider=provider,
+            base_url=base_url,
             extra_headers=extra_headers,
+            response_format=response_format,
+            effective_extras={"structured_output_mode": structured_output_mode},
         )
         cap = self._client.settings.max_parse_response_chars
         if len(text) > cap:
-            raise ValueError(
+            exc = ValueError(
                 f"Model response length ({len(text)} chars) exceeds max_parse_response_chars ({cap}); "
                 "raise the limit on LLMSettings if needed."
             )
-        obj = json.loads(_extract_json_object(text, max_brace_starts=min(_MAX_JSON_OBJECT_BRACE_STARTS, cap)))
-        result = model_type.model_validate(obj)
+            self._emit_structured_output_failed(
+                schema_name=model_type.__name__,
+                stage="response_limit",
+                structured_output_mode=structured_output_mode,
+                error=exc,
+                effective=effective,
+                response_chars=len(text),
+            )
+            raise exc
+        try:
+            object_text = _extract_json_object(text, max_brace_starts=min(_MAX_JSON_OBJECT_BRACE_STARTS, cap))
+        except Exception as exc:  # noqa: BLE001
+            self._emit_structured_output_failed(
+                schema_name=model_type.__name__,
+                stage="json_extract",
+                structured_output_mode=structured_output_mode,
+                error=exc,
+                effective=effective,
+                response_chars=len(text),
+            )
+            raise
+        try:
+            obj = json.loads(object_text)
+        except json.JSONDecodeError as exc:
+            self._emit_structured_output_failed(
+                schema_name=model_type.__name__,
+                stage="json_decode",
+                structured_output_mode=structured_output_mode,
+                error=exc,
+                effective=effective,
+                response_chars=len(text),
+            )
+            raise
+        try:
+            result = model_type.model_validate(obj)
+        except Exception as exc:  # noqa: BLE001
+            self._emit_structured_output_failed(
+                schema_name=model_type.__name__,
+                stage="schema_validate",
+                structured_output_mode=structured_output_mode,
+                error=exc,
+                effective=effective,
+                response_chars=len(text),
+            )
+            raise
         self._emit(
             "structured_output",
             {"state": self._state_getter(), "schema_name": model_type.__name__, "data": result.model_dump()},

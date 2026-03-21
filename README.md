@@ -179,16 +179,14 @@ It is **not**:
 - an "AI workforce" platform
 - "Temporal for agents"
 
-The scope is narrow.
-
 ---
 
 ## Security and trust boundaries
 
 replayt targets **trusted local or CI environments**: running a workflow **runs Python** from your file or import path (`replayt run workflow.py` / `module:wf`), with the privileges of your user.
 
-- **Logs and approvals** are stored on disk without authentication. Anyone who can write your log directory can append events or influence resume behavior. Treat the log path like credential storage.
-- **`replayt doctor`** performs an HTTP `GET` to ``OPENAI_BASE_URL``/``models`` and may send ``OPENAI_API_KEY``. Point the base URL only at providers you trust, or run ``replayt doctor --skip-connectivity`` to skip network I/O entirely.
+- **Logs and approvals** are stored on disk without authentication. Anyone who can write your log directory can append events or influence resume behavior. Treat the log path like credential storage. If you must keep some structured fields while scrubbing others, use **`--redact-key FIELD`** (or project config **`redact_keys = [...]`**) to blank matching keys from logged payloads.
+- **`replayt doctor`** performs an HTTP `GET` to ``OPENAI_BASE_URL``/``models`` and may send ``OPENAI_API_KEY``. Point the base URL only at providers you trust, or run ``replayt doctor --skip-connectivity`` to skip network I/O entirely. `doctor` also warns about risky trust-boundary defaults such as remote plain-HTTP base URLs, embedded credentials in `OPENAI_BASE_URL`, or `log_mode=full`.
 
 ---
 
@@ -231,8 +229,9 @@ A new user should be able to understand the architecture quickly.
 
 - OpenAI-compatible chat provider support
 - Strict Pydantic schema parsing for structured outputs
+- Explicit `structured_output_failed` events when JSON extraction or schema validation fails
 - Redacted, structured-only, or full logging modes
-- Per-call LLM overrides via `ctx.llm.with_settings(...)` (logged as `effective` on each `llm_request` / `llm_response`, including optional `experiment={...}` for tags you want in the audit trail)
+- Per-call LLM overrides via `ctx.llm.with_settings(...)` (logged as `effective` on each `llm_request` / `llm_response`, including `top_p`, OpenAI-style `frequency_penalty` / `presence_penalty`, optional integer `seed` where the provider supports it, per-call `provider` / `base_url`, optional native JSON-schema `response_format`, and optional `experiment={...}` tags you want in the audit trail)
 
 ### Tooling
 
@@ -257,7 +256,7 @@ When things go wrong, the run log is the debugging tool:
 
 Command reference: **[docs/CLI.md](docs/CLI.md)**. Everyday flow: `run` -> `inspect` / `replay` / `report` -> optional `resume` after approvals. **`TARGET`** is `module:variable`, `workflow.py`, or `workflow.yaml` / `.yml`.
 
-Extras: **`replayt try`** runs the packaged hello-world tutorial (offline placeholder LLM by default; **`--live`** for a real call). **`replayt ci`** matches `run` plus a CI banner, optional **`--junit-xml`**, **`--github-summary`**, and **`--strict-graph`**. **`replayt run ... --dry-check`** validates the graph and input JSON without executing (**`--inputs-json`** or **`--inputs-file`**; **`--output json`** / **`validate --format json`** for machine-readable reports). **`replayt validate --strict-graph`** fails when a multi-state workflow declares no transitions. **`replayt report --style stakeholder`** trims tool/token sections and expands approval context. **`replayt report-diff`** compares two runs in HTML. **`replayt export-run`** writes a redacted **`.tar.gz`** for sharing, and **`replayt bundle-export`** adds stakeholder **`report.html`**, replay timeline HTML, and sanitized JSONL in one archive. **`replayt log-schema`** prints the bundled JSON Schema for one JSONL line. **`replayt seal`** writes a SHA-256 manifest for a JSONL run. **`replayt doctor --format json`** is CI-friendly, and **`replayt init --ci github`** scaffolds a workflow YAML for Actions. **`replayt resume`** accepts **`--reason`** / **`--actor-json`** and can run a configured **`resume_hook`** before writing `approval_resolved`. In Python, optional **`Runner(..., before_step=..., after_step=...)`** supports explicit in-process hooks such as notifications or trace IDs without adding a second workflow engine. **`Workflow(..., llm_defaults=...)`** or **`meta["llm_defaults"]`** merge into logged LLM **`effective`** (see [`docs/CONFIG.md`](docs/CONFIG.md)).
+Extras: **`replayt try --list`** shows curated packaged tutorial workflows, **`replayt try --example issue-triage`** runs one without a local file, and **`--live`** switches from placeholder LLM responses to a real call. **`replayt ci`** matches `run` plus a CI banner, optional **`--junit-xml`**, **`--github-summary`**, **`--summary-json`**, and **`--strict-graph`**. **`replayt run ... --dry-check`** validates the graph and input JSON without executing (**`--inputs-json`** or **`--inputs-file`**; **`--output json`** / **`validate --format json`** for machine-readable reports). **`replayt validate --strict-graph`** fails when a multi-state workflow declares no transitions. **`replayt contract TARGET`** prints a snapshot-friendly workflow contract, and **`replayt config --format json`** prints the effective CLI defaults with source provenance plus filesystem readiness for the resolved log paths. **`replayt report --style stakeholder`** trims tool/token sections and expands approval context, while **`--style support`** leads with failure and retry context for PM/support handoffs. **`replayt report-diff`** compares two runs in HTML, including metadata / experiment context and failure signals. **`replayt export-run`** writes a redacted **`.tar.gz`** for sharing, and **`replayt bundle-export`** adds stakeholder **`report.html`**, replay timeline HTML, and sanitized JSONL in one archive. **`replayt log-schema`** prints the bundled JSON Schema for one JSONL line. **`replayt seal`** writes a SHA-256 manifest for a JSONL run. **`replayt doctor --format json`** is CI-friendly, can optionally preflight a **`--target`** without running it, and now reports path-readiness checks for the effective log / SQLite destinations. **`replayt init --ci github`** scaffolds a workflow YAML for Actions, and **`replayt init --template issue-triage|publishing-preflight`** gives you higher-signal starters for common startup workflows. **`replayt resume`** accepts **`--reason`** / **`--actor-json`** / **`--require-actor-key`** and can run a configured **`resume_hook`** before writing `approval_resolved`. In Python, optional **`Runner(..., before_step=..., after_step=...)`** supports explicit in-process hooks such as notifications or trace IDs without adding a second workflow engine. **`Workflow(..., llm_defaults=...)`**, **`Workflow.contract()`**, and the `run_started.runtime` snapshot make defaults and upgrade surfaces explicit (see [`docs/CONFIG.md`](docs/CONFIG.md) and [`docs/RUN_LOG_SCHEMA.md`](docs/RUN_LOG_SCHEMA.md)).
 
 Project defaults (log dir, provider preset, timeout, and more): **[docs/CONFIG.md](docs/CONFIG.md)**.
 
@@ -283,7 +282,11 @@ replayt doctor
 
 Optional dependencies (see [`pyproject.toml`](pyproject.toml)): **`[yaml]`** adds PyYAML for `.yaml` / `.yml` workflow targets; **`[dev]`** adds pytest, ruff, and YAML support for working on the repo.
 
-**Logs and PII:** runs write append-only JSONL under `.replayt/runs/` by default. Use **`--log-mode`** or Python **`LogMode.redacted` / `structured_only`** when prompts may contain sensitive text. See [`docs/RUN_LOG_SCHEMA.md`](docs/RUN_LOG_SCHEMA.md) and [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
+### Forks and release hygiene
+
+If you maintain a fork or vendor the package, keep **`pyproject.toml`** `[project].version` and **`src/replayt/__init__.py`** `__version__` in lockstep before you tag a release ([`CONTRIBUTING.md`](CONTRIBUTING.md)). From a clone, run `python scripts/version_consistency.py` (or `python scripts/version_consistency.py --format json` in CI) so a partial bump does not reach PyPI. Pre-commit hooks, SPDX REUSE, and license-header automation stay in **your** repo; replayt does not ship one blessed hook set so downstreams are not forced into a single toolchain.
+
+**Logs and PII:** runs write append-only JSONL under `.replayt/runs/` by default. Use **`--log-mode`** or Python **`LogMode.redacted` / `structured_only`** when prompts may contain sensitive text, and layer **`--redact-key FIELD`** (or project config **`redact_keys = [...]`**) when specific structured keys such as `email` or `token` should never land in the log. See [`docs/RUN_LOG_SCHEMA.md`](docs/RUN_LOG_SCHEMA.md) and [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
 
 Shell-specific venv activation, `.env` loading recipes, and troubleshooting: **[docs/INSTALL.md](docs/INSTALL.md)**.
 
@@ -293,8 +296,10 @@ Shell-specific venv activation, `.env` loading recipes, and troubleshooting: **[
 
 ```bash
 replayt init --path .
-replayt run workflow.py --inputs-json '{}'
+replayt run workflow.py --inputs-json @inputs.example.json
 ```
+
+`replayt init` now writes `inputs.example.json` alongside `workflow.py` / `workflow.yaml`, so the first run can use a file path instead of shell-escaped inline JSON. For a less-toy starting point, use `replayt init --template issue-triage` or `replayt init --template publishing-preflight`. `replayt run workflow.py` also accepts a Python file that exports exactly one top-level `Workflow` object, even if you did not name it `wf`.
 
 ### Run a Python workflow
 
@@ -388,6 +393,46 @@ def classify(ctx):
 ```
 
 replayt logs the request, response metadata, and validated structured output as explicit run events.
+
+When you need stricter per-call control, keep it explicit and local:
+
+```python
+@wf.step("classify")
+def classify(ctx):
+    decision = (
+        ctx.llm.with_settings(
+            provider="openai",
+            base_url="https://gateway.example.com/v1",
+            top_p=0.2,
+            frequency_penalty=0.0,
+            presence_penalty=0.4,
+            seed=42,
+            native_response_format=True,
+            experiment={"cohort": "router-a"},
+        )
+        .parse(Decision, messages=[{"role": "user", "content": "Return strict JSON only."}])
+    )
+    ctx.set("decision", decision.model_dump())
+    return "done"
+```
+
+Those per-call overrides show up under `effective` on `llm_request` / `llm_response`, and failed parses emit `structured_output_failed` with the failure stage (`json_extract`, `json_decode`, `schema_validate`, and similar) so JSONL keeps the debugging trail explicit.
+
+### Retries, tool calls, and provider-only APIs
+
+replayt does not add hidden repair loops around `ctx.llm.parse` or bundle first-class OpenAI `tools` / `tool_choice` on `LLMBridge`. When a parse fails, catch the exception (or inspect `structured_output_failed` in JSONL), adjust messages or settings, and call again from your step so every attempt stays an explicit transition in your code. For native tool routing, streaming, or vision, call the vendor SDK inside one `@wf.step` and return one validated Pydantic-shaped outcome before transitioning; see **Pattern: OpenAI Python SDK inside a step** in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
+
+```python
+# Explicit re-try in application code (not inside the bridge).
+for attempt in range(2):
+    try:
+        decision = ctx.llm.parse(Decision, messages=msgs)
+        break
+    except Exception:
+        if attempt == 1:
+            raise
+        msgs = msgs + [{"role": "user", "content": "Return only one JSON object, no prose."}]
+```
 
 ## Documentation map
 
@@ -497,7 +542,7 @@ steps:
 
 The repo ships a **linear tutorial** of **14 runnable workflows** covering deterministic steps, LLM-backed classification, tools, retries, approvals, YAML, and OpenAI/Anthropic SDK patterns. See [`src/replayt_examples/README.md`](src/replayt_examples/README.md). **Composition patterns** such as queues, approval UIs, and pytest live in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
 
-**Tutorial highlights:**
+**Tutorial examples:**
 
 - **GitHub issue triage:** validate issue shape, classify it, then route or request more information
 - **Refund policy:** constrained support decisions with structured model output

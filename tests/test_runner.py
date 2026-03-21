@@ -3,8 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+from pydantic import BaseModel
 
 from replayt.exceptions import RunFailed
+from replayt.llm import LLMSettings
 from replayt.persistence import JSONLStore
 from replayt.runner import Runner, resolve_approval_on_store
 from replayt.testing import MockLLMClient
@@ -187,6 +189,144 @@ def test_workflow_meta_in_run_started(tmp_path: Path) -> None:
     assert started["payload"]["workflow_meta"] == {"pkg": "demo", "git_sha": "abc"}
 
 
+def test_workflow_contract_describes_steps_edges_and_expectations() -> None:
+    wf = Workflow("contract_demo", version="7", meta={"pkg": "demo", "llm_defaults": {"experiment": {"lane": "a"}}})
+    wf.set_initial("start")
+    wf.note_transition("start", "done")
+
+    @wf.step("start", retries=RetryPolicy(max_attempts=5, backoff_seconds=1.5), expects={"account_id": str})
+    def start(ctx) -> str:
+        return "done"
+
+    @wf.step("done")
+    def done(ctx) -> None:
+        return None
+
+    contract = wf.contract()
+    assert contract["schema"] == "replayt.workflow_contract.v1"
+    assert contract["workflow"]["name"] == "contract_demo"
+    assert contract["workflow"]["llm_defaults_keys"] == ["experiment"]
+    assert contract["declared_edges"] == [{"from_state": "start", "to_state": "done"}]
+    start_step = next(step for step in contract["steps"] if step["name"] == "start")
+    assert start_step["expects"] == [{"key": "account_id", "type": "str"}]
+    assert start_step["retry_policy"] == {"max_attempts": 5, "backoff_seconds": 1.5}
+    assert start_step["outgoing_transitions"] == ["done"]
+
+
+def test_runner_run_started_includes_runtime_snapshot(tmp_path: Path) -> None:
+    wf = Workflow("runtime_meta")
+    wf.set_initial("a")
+
+    @wf.step("a")
+    def a(ctx) -> None:
+        return None
+
+    settings = LLMSettings(
+        api_key="secret",
+        provider="openai",
+        base_url="https://gateway.example/v1",
+        model="demo-model",
+        top_p=0.4,
+        frequency_penalty=0.1,
+        presence_penalty=-0.2,
+        seed=7,
+    )
+    store = JSONLStore(tmp_path)
+    runner = Runner(wf, store, log_mode=LogMode.full, llm_client=MockLLMClient(settings=settings), max_steps=9)
+    result = runner.run()
+    assert result.status == "completed"
+    events = store.load_events(result.run_id)
+    started = next(e for e in events if e["type"] == "run_started")
+    runtime = started["payload"]["runtime"]
+    assert runtime["engine"] == {"log_mode": "full", "max_steps": 9, "redact_keys": []}
+    assert runtime["store"]["class"] == "JSONLStore"
+    assert runtime["hooks"] == {"before_step": False, "after_step": False}
+    assert runtime["llm"]["provider"] == "openai"
+    assert runtime["llm"]["base_url"] == "https://gateway.example/v1"
+    assert runtime["llm"]["model"] == "demo-model"
+    assert runtime["llm"]["top_p"] == 0.4
+    assert runtime["llm"]["frequency_penalty"] == 0.1
+    assert runtime["llm"]["presence_penalty"] == -0.2
+    assert runtime["llm"]["seed"] == 7
+    assert runtime["llm"]["api_key_present"] is True
+    assert runtime["trust_boundary"]["warnings"] == ["full log mode stores raw LLM request and response bodies on disk"]
+
+
+def test_runner_redact_keys_scrub_structured_payloads(tmp_path: Path) -> None:
+    class Decision(BaseModel):
+        email: str
+        note: str
+
+    wf = Workflow("redact_keys")
+    wf.set_initial("gate")
+
+    @wf.step("gate")
+    def gate(ctx) -> str | None:
+        @ctx.tools.register
+        def echo(payload):
+            return {"email": payload["email"], "note": payload["note"]}
+
+        ctx.tools.call("echo", {"payload": {"email": "tool@example.com", "note": "ok"}})
+        parsed = ctx.llm.parse(
+            Decision,
+            messages=[{"role": "user", "content": "Return JSON with email and note."}],
+        )
+        ctx.set("email", "snapshot@example.com")
+        ctx.set("decision", parsed.model_dump())
+        ctx.request_approval("ship", summary="Ship it?", details={"email": "approval@example.com", "ticket": "T-1"})
+
+    store = JSONLStore(tmp_path)
+    client = MockLLMClient()
+    client.enqueue('{"email":"model@example.com","note":"approved"}')
+    result = Runner(wf, store, log_mode=LogMode.redacted, llm_client=client, redact_keys=["email"]).run(
+        inputs={"email": "input@example.com", "ticket": "T-1"}
+    )
+
+    assert result.status == "paused"
+    events = store.load_events(result.run_id)
+    started = next(e for e in events if e["type"] == "run_started")
+    tool_call = next(e for e in events if e["type"] == "tool_call")
+    tool_result = next(e for e in events if e["type"] == "tool_result")
+    structured = next(e for e in events if e["type"] == "structured_output")
+    approval = next(e for e in events if e["type"] == "approval_requested")
+    snapshot = next(e for e in events if e["type"] == "context_snapshot")
+
+    assert started["payload"]["inputs"]["email"] == {"_redacted": True}
+    assert started["payload"]["runtime"]["engine"]["redact_keys"] == ["email"]
+    assert tool_call["payload"]["arguments"]["payload"]["email"] == {"_redacted": True}
+    assert tool_result["payload"]["result"]["email"] == {"_redacted": True}
+    assert structured["payload"]["data"]["email"] == {"_redacted": True}
+    assert approval["payload"]["details"]["email"] == {"_redacted": True}
+    assert snapshot["payload"]["data"]["email"] == {"_redacted": True}
+
+
+def test_run_context_note_emits_step_note_event(tmp_path: Path) -> None:
+    wf = Workflow("notes")
+    wf.set_initial("compose")
+
+    @wf.step("compose")
+    def compose(ctx) -> None:
+        ctx.note(
+            "framework_summary",
+            summary="langgraph sandbox completed",
+            data={"nodes": 3, "tool_calls": 1},
+        )
+        return None
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert result.status == "completed"
+
+    events = store.load_events(result.run_id)
+    note = next(e for e in events if e["type"] == "step_note")
+    assert note["payload"] == {
+        "state": "compose",
+        "kind": "framework_summary",
+        "summary": "langgraph sandbox completed",
+        "data": {"nodes": 3, "tool_calls": 1},
+    }
+
+
 def test_linear_run(tmp_path: Path) -> None:
     wf = Workflow("linear")
     wf.set_initial("a")
@@ -230,6 +370,33 @@ def test_approval_resume(tmp_path: Path) -> None:
     r2 = Runner(wf, store, log_mode=LogMode.redacted)
     c = r2.run(run_id=p.run_id, resume=True)
     assert c.status == "completed"
+
+
+def test_resolve_approval_requires_actor_keys_when_configured(tmp_path: Path) -> None:
+    wf = Workflow("ap_actor")
+    wf.set_initial("gate")
+
+    @wf.step("gate")
+    def gate(ctx) -> str | None:
+        ctx.request_approval("go", summary="proceed?", on_approve="done")
+
+    @wf.step("done")
+    def done(ctx) -> str | None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    paused = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert paused.status == "paused"
+
+    with pytest.raises(ValueError, match="missing required keys: ticket_id"):
+        resolve_approval_on_store(
+            store,
+            paused.run_id,
+            "go",
+            approved=True,
+            actor={"email": "a@example.com"},
+            required_actor_keys=["email", "ticket_id"],
+        )
 
 
 def test_approval_resume_skips_replaying_side_effects_with_resume_target(tmp_path: Path) -> None:
@@ -501,6 +668,19 @@ def test_runner_context_manager_closes_client(tmp_path: Path) -> None:
         result = r.run()
     assert result.status == "completed"
     assert r._llm_client._http is None
+
+
+def test_runner_rejects_non_positive_max_steps(tmp_path: Path) -> None:
+    wf = Workflow("ms")
+    wf.set_initial("a")
+
+    @wf.step("a")
+    def a(ctx) -> None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    with pytest.raises(ValueError, match="max_steps must be >= 1"):
+        Runner(wf, store, max_steps=0)
 
 
 def test_max_steps_prevents_infinite_loop(tmp_path: Path) -> None:

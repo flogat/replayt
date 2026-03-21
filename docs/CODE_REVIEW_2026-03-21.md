@@ -1,6 +1,6 @@
 # Deep Code Review - 2026-03-21
 
-## Overall assessment
+## Assessment
 
 The codebase is still in solid shape structurally: the runtime, persistence, and CLI layers are separated cleanly enough that targeted fixes stay small. This pass found one confirmed high-severity robustness issue in the SQLite store and one confirmed medium-severity operator-facing issue in the JSONL read path. Both are now fixed with focused regressions, so deeper work is not required before the next patch release.
 
@@ -34,7 +34,7 @@ None.
 
 ## Potential concerns / assumptions
 
-- Assumption: read-only commands should prefer "no data found" over eagerly creating the default log root. That matches operator expectations and existing CLI semantics elsewhere, but it is worth preserving deliberately if new commands are added.
+- Assumption: read-only commands should prefer "no data found" over eagerly creating the default log root. That matches operator expectations and existing CLI semantics elsewhere; keep the same rule when adding new commands.
 - Assumption: rolling back the SQLite connection on all write failures is always preferable to leaving the caller to decide recovery. For this store API, that is the correct tradeoff because the class owns the connection lifecycle and callers expect the store to remain usable after an exception.
 
 ## What is good
@@ -53,7 +53,7 @@ None.
 - A tiny transactional helper inside `SQLiteStore` would remove repeated `commit` / `rollback` structure from write methods and make future changes harder to get wrong.
 - `JSONLStore` now has an intent flag. If more stores gain similar semantics, a dedicated read-only store protocol or factory would make the contract more explicit than a boolean constructor option.
 
-## Summary verdict
+## Verdict
 
 The repository remains production-ready, but this pass exposed two real operational footguns: SQLite could get stuck after a write failure, and read-only CLI commands could mutate the log root unexpectedly. Both issues were fixed without architectural churn, and the updated tests cover the exact failure modes that mattered.
 

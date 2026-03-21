@@ -1,0 +1,136 @@
+"""Best-effort filesystem readiness checks for CLI defaults and doctor output."""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True)
+class PathReadinessCheck:
+    name: str
+    ok: bool
+    detail: str
+    path: str | None = None
+
+
+def _writable_dir(path: Path) -> bool:
+    return os.access(path, os.W_OK | os.X_OK)
+
+
+def _nearest_existing_parent(path: Path) -> Path | None:
+    candidate = path
+    while True:
+        if candidate.exists():
+            return candidate
+        if candidate.parent == candidate:
+            return None
+        candidate = candidate.parent
+
+
+def _directory_check(path: Path, *, name: str, label: str) -> PathReadinessCheck:
+    if path.exists():
+        if not path.is_dir():
+            return PathReadinessCheck(
+                name=name,
+                ok=False,
+                detail=f"{label} exists but is not a directory",
+                path=str(path),
+            )
+        if not _writable_dir(path):
+            return PathReadinessCheck(
+                name=name,
+                ok=False,
+                detail=f"{label} exists but is not writable by the current process",
+                path=str(path),
+            )
+        return PathReadinessCheck(name=name, ok=True, detail=f"{label} exists and is writable", path=str(path))
+
+    parent = _nearest_existing_parent(path.parent if path.parent != path else path)
+    if parent is None:
+        return PathReadinessCheck(
+            name=name,
+            ok=False,
+            detail=f"{label} has no existing parent directory",
+            path=str(path),
+        )
+    if not parent.is_dir():
+        return PathReadinessCheck(
+            name=name,
+            ok=False,
+            detail=f"{label} cannot be created because parent {parent} is not a directory",
+            path=str(path),
+        )
+    if not _writable_dir(parent):
+        return PathReadinessCheck(
+            name=name,
+            ok=False,
+            detail=f"{label} does not exist and parent {parent} is not writable",
+            path=str(path),
+        )
+    return PathReadinessCheck(
+        name=name,
+        ok=True,
+        detail=f"{label} does not exist yet; replayt can create it under {parent}",
+        path=str(path),
+    )
+
+
+def _file_check(path: Path, *, name: str, label: str) -> PathReadinessCheck:
+    if path.exists():
+        if path.is_dir():
+            return PathReadinessCheck(name=name, ok=False, detail=f"{label} exists but is a directory", path=str(path))
+        if not os.access(path, os.W_OK):
+            return PathReadinessCheck(
+                name=name,
+                ok=False,
+                detail=f"{label} exists but is not writable by the current process",
+                path=str(path),
+            )
+        return PathReadinessCheck(name=name, ok=True, detail=f"{label} exists and is writable", path=str(path))
+
+    parent = _nearest_existing_parent(path.parent if path.parent != path else path)
+    if parent is None:
+        return PathReadinessCheck(
+            name=name,
+            ok=False,
+            detail=f"{label} has no existing parent directory",
+            path=str(path),
+        )
+    if not parent.is_dir():
+        return PathReadinessCheck(
+            name=name,
+            ok=False,
+            detail=f"{label} cannot be created because parent {parent} is not a directory",
+            path=str(path),
+        )
+    if not _writable_dir(parent):
+        return PathReadinessCheck(
+            name=name,
+            ok=False,
+            detail=f"{label} does not exist and parent {parent} is not writable",
+            path=str(path),
+        )
+    return PathReadinessCheck(
+        name=name,
+        ok=True,
+        detail=f"{label} does not exist yet; replayt can create it under {parent}",
+        path=str(path),
+    )
+
+
+def readiness_checks(*, log_dir: Path, sqlite: Path | None) -> list[PathReadinessCheck]:
+    checks = [_directory_check(log_dir, name="log_dir_ready", label="log_dir")]
+    if sqlite is None:
+        checks.append(
+            PathReadinessCheck(
+                name="sqlite_ready",
+                ok=True,
+                detail="sqlite mirror not configured",
+                path=None,
+            )
+        )
+    else:
+        checks.append(_file_check(sqlite, name="sqlite_ready", label="sqlite path"))
+    return checks

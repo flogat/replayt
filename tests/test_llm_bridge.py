@@ -132,6 +132,65 @@ def test_llm_bridge_with_settings_merges_into_effective_and_request() -> None:
     assert "content_preview" in resp
 
 
+def test_llm_bridge_with_settings_passes_penalties_and_seed_to_client() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="k", model="m")
+    client = OpenAICompatClient(settings)
+    bridge = (
+        LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+        .with_settings(frequency_penalty=0.5, presence_penalty=-1.0, seed=99)
+    )
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    call_kw = mock_cc.call_args.kwargs
+    assert call_kw["frequency_penalty"] == 0.5
+    assert call_kw["presence_penalty"] == -1.0
+    assert call_kw["seed"] == 99
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["frequency_penalty"] == 0.5
+    assert req["effective"]["presence_penalty"] == -1.0
+    assert req["effective"]["seed"] == 99
+
+
+def test_llm_bridge_with_settings_supports_top_p_and_provider_routing() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="test-key", provider="openrouter", model="base-model")
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "route_model",
+    ).with_settings(provider="openai", base_url="https://gateway.example/v1", top_p=0.2)
+
+    canned = {"choices": [{"message": {"content": "hello"}}], "usage": {"total_tokens": 3}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        out = bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    assert out == "hello"
+    call_kw = mock_cc.call_args.kwargs
+    assert call_kw["model"] == "gpt-4o-mini"
+    assert call_kw["base_url"] == "https://gateway.example/v1"
+    assert call_kw["top_p"] == 0.2
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["provider"] == "openai"
+    assert req["effective"]["base_url"] == "https://gateway.example/v1"
+    assert req["effective"]["top_p"] == 0.2
+    assert req["effective"]["model"] == "gpt-4o-mini"
+
+
 def test_llm_bridge_structured_only_skips_content_preview() -> None:
     events: list[tuple[str, dict]] = []
 
@@ -235,7 +294,7 @@ def test_llm_bridge_parse_rejects_oversized_response() -> None:
         state_getter=lambda: "parse",
     )
     huge = "x" * 101
-    with patch.object(bridge, "complete_text", return_value=huge):
+    with patch.object(bridge, "_request_text", return_value=(huge, {"model": "m"})):
         with pytest.raises(ValueError, match="exceeds max_parse_response_chars"):
             bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
 
@@ -257,6 +316,58 @@ def test_llm_bridge_parse_rejects_oversized_json_schema() -> None:
     )
     with pytest.raises(ValueError, match="max_schema_json_chars"):
         bridge.parse(Wide, messages=[{"role": "user", "content": "hi"}])
+
+
+def test_llm_bridge_parse_with_native_response_format_logs_mode() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "parse",
+    ).with_settings(native_response_format=True)
+    canned = {"choices": [{"message": {"content": '{"value": 7}'}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        out = bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
+
+    assert out.value == 7
+    response_format = mock_cc.call_args.kwargs["response_format"]
+    assert response_format["type"] == "json_schema"
+    assert response_format["json_schema"]["name"] == "Answer"
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["structured_output_mode"] == "native_json_schema"
+
+
+def test_llm_bridge_parse_emits_structured_output_failed_on_validation_error() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "parse",
+    )
+    content = '{"value": "oops"}'
+
+    with patch.object(client, "chat_completions", return_value={"choices": [{"message": {"content": content}}]}):
+        with pytest.raises(Exception, match="value"):
+            bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
+
+    failure = next(p for t, p in events if t == "structured_output_failed")
+    assert failure["schema_name"] == "Answer"
+    assert failure["stage"] == "schema_validate"
+    assert failure["structured_output_mode"] == "prompt_only"
+    assert failure["response_chars"] == len(content)
 
 
 def test_extract_json_object_empty_string() -> None:
@@ -311,8 +422,10 @@ def test_openai_compat_invalid_json_body_raises() -> None:
         LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"),
         http_client=_FakeHTTPClient(lambda *a, **k: _stream_cm(_FakeStreamResp(body))),
     )
-    with pytest.raises(RuntimeError, match="not valid JSON"):
+    with pytest.raises(RuntimeError, match="not valid JSON") as excinfo:
         client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    assert "body_bytes=" in str(excinfo.value)
+    assert "not json" not in str(excinfo.value).lower()
 
 
 def test_openai_compat_omits_authorization_without_api_key() -> None:
@@ -325,6 +438,29 @@ def test_openai_compat_omits_authorization_without_api_key() -> None:
     client.chat_completions(messages=[{"role": "user", "content": "x"}])
     hdrs = fake_http.calls[0][1]["headers"]
     assert "Authorization" not in hdrs
+
+
+def test_openai_compat_supports_base_url_and_top_p_overrides() -> None:
+    body = b'{"choices":[{"message":{"content":"{}"}}]}'
+    fake_http = _FakeHTTPClient(lambda *a, **k: _stream_cm(_FakeStreamResp(body)))
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"),
+        http_client=fake_http,
+    )
+    client.chat_completions(
+        messages=[{"role": "user", "content": "x"}],
+        base_url="https://gateway.example/v1",
+        top_p=0.3,
+        frequency_penalty=0.1,
+        presence_penalty=0.2,
+        seed=3,
+    )
+    args, kwargs = fake_http.calls[0]
+    assert args[1] == "https://gateway.example/v1/chat/completions"
+    assert kwargs["json"]["top_p"] == 0.3
+    assert kwargs["json"]["frequency_penalty"] == 0.1
+    assert kwargs["json"]["presence_penalty"] == 0.2
+    assert kwargs["json"]["seed"] == 3
 
 
 def test_openai_compat_rejects_response_over_max_bytes() -> None:

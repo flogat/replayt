@@ -36,6 +36,8 @@ export OPENAI_API_KEY=...   # only for sections that call a live model
 
 Runnable tutorials ship in the **`replayt_examples`** package on PyPI (namespaced so it does not collide with a generic `examples` module in your own code).
 
+To skip reading this file front to back, run `replayt try --list`, then `replayt try --example issue-triage` (or another key) to execute a packaged sample with its default inputs. Add `--inputs-json @my-inputs.json` when you want the same example shape with your own payload. To edit the tutorial code in your repo, run `replayt try --example KEY --copy-to ./my-flow` (writes `workflow.py` and `inputs.example.json`; use `--force` to replace).
+
 ### Install (from this repository)
 
 ```bash
@@ -51,6 +53,21 @@ See [`README.md`](../../README.md) for Windows activation lines, `replayt doctor
 ## Tests without a live LLM (CI and pytest)
 
 Sections **1-5** of this tutorial need **no API key**. For LLM-backed workflows in **automated tests**, use **`MockLLMClient`** with **`run_with_mock`** (or mock `httpx`) and assert on context or JSONL events. See **Pattern: golden path test (pytest)** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md). For **`replayt validate`** and CI exit codes, see [`docs/RECIPES.md`](../../docs/RECIPES.md).
+
+### CI images and explicit flags
+
+replayt does not ship a blessed container image: your registry, Python minor, and whether you need **`replayt[yaml]`** belong in **your** Dockerfile or CI job. A typical pattern is a slim Python base, install the package, then call **`replayt ci`** with the same flags you want everywhere (**`--strict-graph`**, **`--summary-json`**, **`--junit-xml`**) instead of relying on implicit environment detection.
+
+```dockerfile
+FROM python:3.12-slim
+WORKDIR /app
+COPY . .
+RUN pip install --no-cache-dir -e ".[dev]"
+ENV REPLAYT_GITHUB_SUMMARY=1
+CMD ["replayt", "ci", "your_pkg.workflow:wf", "--strict-graph", "--summary-json", ".replayt/ci-summary.json"]
+```
+
+For GitHub Actions, keep **`--github-summary`** or **`REPLAYT_GITHUB_SUMMARY=1`** explicit in the workflow file so local runs and other CI vendors do not pick up surprising markdown behavior.
 
 ## Beyond core: streaming, hooks, approvals, and logs
 
@@ -73,7 +90,16 @@ Optional **line/file SHA-256 manifest** for a JSONL run (extra audit packet, not
 
 ```bash
 replayt seal <run_id>
+replayt verify-seal <run_id>
 ```
+
+After **`bundle-export --seal`**, extract **`events.jsonl`** and **`events.seal.json`** and check them without re-running export:
+
+```bash
+replayt verify-seal <run_id> --manifest path/to/events.seal.json --jsonl path/to/events.jsonl
+```
+
+For **cryptographic signing** (GPG, minisign, Sigstore), keep that in **your** release or compliance pipeline: sign the manifest bytes (or the tarball) after **`replayt seal`** / export; replayt stays a local runner, not a key-management product.
 
 For **in-process** trace IDs or policy logging, use **`Runner(..., before_step=..., after_step=...)`** in Python (see **Pattern: webhook / lifecycle callbacks** for outer-wrapper alternatives).
 
@@ -83,7 +109,7 @@ replayt keeps **explicit** states and append-only JSONL. Per-token log lines and
 
 ### LangGraph (and similar frameworks): **composition**, not core
 
-replayt will not ship LangGraph inside the runner because that would hide control flow next to an explicit FSM (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). The supported shape is to run LangGraph **inside one `@wf.step`**, then move replayt forward from **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log the **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, or tools, not every planner tick.
+replayt will not ship LangGraph inside the runner because that would hide control flow next to an explicit FSM (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). The supported shape is to run LangGraph **inside one `@wf.step`**, then move replayt forward from **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log the **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, tools, or a small `ctx.note(...)` breadcrumb, not every planner tick.
 
 Install graph libraries in **your** project only:
 
@@ -110,6 +136,7 @@ def with_langgraph(ctx):
     out = AgentChunkOut.model_validate(
         {"answer": str(result.get("answer", ""))[:4000], "route": str(result.get("route", "done"))}
     )
+    ctx.note("framework_summary", summary="sandbox graph completed", data={"provider": "langgraph"})
     ctx.set("last_agent", out.model_dump())
     return out.route if out.route in {"done", "retry"} else "done"
 ```
@@ -162,7 +189,7 @@ This example uses a common workflow pattern: validate raw input first, then tran
 
 ### What the code does
 
-The workflow has three stages overall, although only two state handlers do real work:
+The workflow has three stages, but only two state handlers do real work:
 
 - `validate` checks that `lead` exists and matches the `RawLead` Pydantic schema.
 - `normalize` trims whitespace, title-cases the name, lowercases the email, compresses message spacing, and derives a `segment`.

@@ -2,7 +2,13 @@ from __future__ import annotations
 
 import pytest
 
-from replayt.llm_coercion import coerce_max_tokens_for_api, coerce_temperature, coerce_timeout_seconds
+from replayt.llm_coercion import (
+    coerce_llm_seed,
+    coerce_max_tokens_for_api,
+    coerce_openai_penalty,
+    coerce_temperature,
+    coerce_timeout_seconds,
+)
 
 
 def test_coerce_max_tokens_float_whole() -> None:
@@ -33,3 +39,24 @@ def test_coerce_temperature_string() -> None:
 
 def test_coerce_timeout_seconds_string() -> None:
     assert coerce_timeout_seconds("30.5") == 30.5
+
+
+def test_coerce_openai_penalty_none_and_bounds() -> None:
+    assert coerce_openai_penalty(None) is None
+    assert coerce_openai_penalty("-1.5") == -1.5
+    assert coerce_openai_penalty(2.0) == 2.0
+    with pytest.raises(ValueError, match="between -2 and 2"):
+        coerce_openai_penalty(3.0)
+    with pytest.raises(TypeError, match="penalty cannot be a boolean"):
+        coerce_openai_penalty(True)
+
+
+def test_coerce_llm_seed() -> None:
+    assert coerce_llm_seed(None) is None
+    assert coerce_llm_seed("42") == 42
+    assert coerce_llm_seed(0) == 0
+    assert coerce_llm_seed(4096.0) == 4096
+    with pytest.raises(TypeError, match="seed cannot be a boolean"):
+        coerce_llm_seed(True)
+    with pytest.raises(ValueError, match="whole number"):
+        coerce_llm_seed(1.5)

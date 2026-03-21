@@ -7,6 +7,7 @@ from replayt.llm import LLMSettings
 
 def test_for_provider_ollama() -> None:
     s = LLMSettings.for_provider("ollama")
+    assert s.provider == "ollama"
     assert "11434" in s.base_url
     assert s.model
 
@@ -24,17 +25,19 @@ def test_from_env_respects_provider(monkeypatch) -> None:
     assert "groq.com" in s.base_url
 
 
-def test_from_env_default_uses_openrouter(monkeypatch) -> None:
+def test_from_env_default_uses_ollama(monkeypatch) -> None:
     monkeypatch.delenv("REPLAYT_PROVIDER", raising=False)
     monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
     monkeypatch.delenv("REPLAYT_MODEL", raising=False)
     s = LLMSettings.from_env()
-    assert "openrouter.ai" in s.base_url
-    assert s.model == "anthropic/claude-sonnet-4.6"
+    assert s.provider is None
+    assert s.base_url == "http://127.0.0.1:11434/v1"
+    assert s.model == "llama3.2"
 
 
 def test_for_provider_openai_uses_openai_model_slug() -> None:
     s = LLMSettings.for_provider("openai")
+    assert s.provider == "openai"
     assert s.base_url == "https://api.openai.com/v1"
     assert s.model == "gpt-4o-mini"
 
@@ -57,6 +60,7 @@ def test_from_env_anthropic_uses_gateway_override(monkeypatch) -> None:
     monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.example/v1")
     monkeypatch.delenv("REPLAYT_MODEL", raising=False)
     s = LLMSettings.from_env()
+    assert s.provider == "anthropic"
     assert s.base_url == "https://gateway.example/v1"
     assert s.model == LLMSettings.anthropic_gateway_model
 

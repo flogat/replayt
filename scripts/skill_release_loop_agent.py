@@ -369,9 +369,10 @@ def repo_ruff(repo: Path) -> str:
 
 
 def default_skill_command(repo: Path) -> str:
-    python_exe = quote_for_shell(str(repo_python(repo)))
-    runner = quote_for_shell(str(repo / "scripts" / "run_codex_skill.py"))
-    return f"{python_exe} {runner} --prompt-file {{prompt_file_q}}"
+    return (
+        'agent --model composer-2 -p --yolo "Please read the file at {prompt_file_q} '
+        'and follow all instructions within it exactly to complete the task."'
+    )
 
 
 def default_check_commands(repo: Path) -> list[str]:

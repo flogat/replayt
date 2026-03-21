@@ -22,8 +22,8 @@ class DryRunLLMClient(OpenAICompatClient):
     not validate until you switch to :class:`MockLLMClient` or a real model.
     """
 
-    def __init__(self) -> None:
-        super().__init__(LLMSettings(api_key="dry-run"))
+    def __init__(self, settings: LLMSettings | None = None) -> None:
+        super().__init__(settings or LLMSettings(api_key="dry-run"))
 
     @classmethod
     def _minimal_json_from_schema(
@@ -172,11 +172,28 @@ class DryRunLLMClient(OpenAICompatClient):
         messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.0,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        seed: int | None = None,
         max_tokens: int | None = None,
         timeout_seconds: float | None = None,
+        base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
+        _ = (
+            model,
+            temperature,
+            top_p,
+            frequency_penalty,
+            presence_penalty,
+            seed,
+            max_tokens,
+            timeout_seconds,
+            base_url,
+            extra_headers,
+        )
         content = "{}"
         if response_format and isinstance(response_format, dict):
             json_schema = response_format.get("json_schema", {})
@@ -221,12 +238,30 @@ class MockLLMClient(OpenAICompatClient):
         messages: list[dict[str, Any]],
         model: str | None = None,
         temperature: float = 0.0,
+        top_p: float | None = None,
+        frequency_penalty: float | None = None,
+        presence_penalty: float | None = None,
+        seed: int | None = None,
         max_tokens: int | None = None,
         timeout_seconds: float | None = None,
+        base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
         response_format: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        _ = (messages, model, temperature, max_tokens, timeout_seconds, extra_headers, response_format)
+        _ = (
+            messages,
+            model,
+            temperature,
+            top_p,
+            frequency_penalty,
+            presence_penalty,
+            seed,
+            max_tokens,
+            timeout_seconds,
+            base_url,
+            extra_headers,
+            response_format,
+        )
         if not self._responses:
             raise RuntimeError("MockLLMClient: no queued response; call .enqueue(...) before running the workflow")
         return self._responses.pop(0)

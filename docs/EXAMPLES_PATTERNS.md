@@ -85,6 +85,18 @@ def run_batch(rows: list[dict], log_root: Path) -> None:
 
 Use your orchestrator for **retries between rows**, concurrency, and backpressure—not replayt.
 
+### Pattern: promotion / environment metadata
+
+**Scenario:** You need every archived JSONL line to show whether a run came from dev, staging, or production without baking environment names into workflow code.
+
+**Approach:** Pass promotion labels as **`run_metadata`** so they land on `run_started` and stay filterable with **`replayt runs --run-meta`**. From CI, export stable JSON (often from your deploy system's env vars) into **`--metadata-json`**:
+
+```bash
+replayt ci "$TARGET" --metadata-json "{\"deployment_tier\":\"prod\",\"change_ticket\":\"CHG-12345\"}"
+```
+
+In Python, the same shape is `Runner.run(..., run_metadata={"deployment_tier": "prod", "change_ticket": "CHG-12345"})`. Keep secrets out of metadata; use ticket ids and deployment labels instead of raw tokens.
+
 ### Pattern: OpenAI Python SDK inside a step
 
 **Scenario:** You want `openai` package features (custom retries, streaming, vision, assistants betas) without waiting for replayt to wrap everything.
@@ -267,11 +279,22 @@ Use the broker for **retries and DLQ**, not implicit replays inside replayt.
 
 **Approach:** Call **`chain.invoke(...)`** (or equivalent) **inside a single step**. Map the framework output to **one Pydantic model**, `ctx.set("step_result", model.model_dump())`, then **`return "next_state"`** so branching stays visible in replayt. Never let the framework decide the FSM transition without your Python code expressing it.
 
+Use **`ctx.note(...)`** for explicit sub-run breadcrumbs, then narrow a run with **`replayt inspect RUN_ID --event-type step_note`** (repeat the flag for OR, e.g. **`tool_call`**) when you want framework-shaped signals without `jq`.
+
 ### Pattern: reusable workflow package
 
 **Scenario:** Many services should import the same workflow without a “plugin registry.”
 
 **Approach:** Publish an internal package (e.g. `my_org_replayt`) that defines `wf: Workflow` in a module. Consumers run `replayt run my_org_replayt.support:wf ...` after `pip install my-org-replayt==1.3.0`. No dynamic `importlib` loaders—just normal dependency pinning.
+
+When you want **`Workflow.version`** to track the **same string as the installed wheel**, set it explicitly from metadata (still one line in *your* code, not magic inside replayt):
+
+```python
+from importlib.metadata import version as dist_version
+from replayt.workflow import Workflow
+
+wf = Workflow("support", version=dist_version("my_org_replayt"))
+```
 
 ### Pattern: stream inside step, log structured summary
 
@@ -501,6 +524,8 @@ def run_with_notify(runner: Runner, wf_inputs: dict, notify_url: str) -> dict:
 ```
 
 Or use the `ForwardingStore` pattern (above) to stream events in real-time to any HTTP sink. The notification layer is yours; replayt stays the engine.
+
+For **shell / CI** wrappers, treat **`replayt run`** / **`replayt ci`** exit code **`2`** as paused (approval or similar), then notify with the `run_id` from stdout or from your **`--summary-json`** artifact. To list paused backlog across logs, use **`replayt runs --status paused --log-dir ...`** (combine with **`--run-meta`** / **`--experiment`** when you tag runs for a tenant or experiment).
 
 **In-process policy / trace IDs:** For lightweight hooks without a second workflow engine, pass **`before_step`** / **`after_step`** to **`Runner(...)`** in Python (`before_step` runs after context schema checks, before the handler; **`after_step`** runs after a successful return, before `state_exited`). Keep side effects explicit; do not move control flow out of step handlers.
 
