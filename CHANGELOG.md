@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Docs:** refresh [`docs/ARCHETYPE_FEATURE_BRAINSTORM.md`](docs/ARCHETYPE_FEATURE_BRAINSTORM.md) so the ten archetype asks use current replayt nouns (`LLMBridge`, `ctx.llm.with_settings(...)`, `resume_hook`, `bundle-export`, `replayt seal`) and point deferred ideas at the existing README/tutorial composition guidance.
 - **Roadmap docs:** add [`docs/ARCHETYPE_FEATURE_BRAINSTORM.md`](docs/ARCHETYPE_FEATURE_BRAINSTORM.md) with ten replayt-shaped feature ideas from ten developer archetypes, classifying which asks fit core versus composition; index it in [`docs/README.md`](docs/README.md).
 - **Docs:** README above-the-fold positioning—hook line, **The problem** / **replayt** sections, **Why not LangGraph?**, tighter “in five seconds” intro, replay-emphasized core loop and design principle; **[`docs/COMPARISON.md`](docs/COMPARISON.md)** adds **Why not LangGraph?** and dedupes the agent-framework section; demo SVG titles/captions stress offline **replay**.
 - **Contributor automation:** add `scripts/skill_release_loop.py` plus `scripts/run_codex_skill.py` / `scripts/codex_local.ps1` so the repo can use a local Codex CLI install under `.replayt/tools/codex-cli`, run the Cursor skills in order, loop until checks pass, require a changelog update, bump the patch version, tag, and push; document the workflow in [`CONTRIBUTING.md`](CONTRIBUTING.md) and cover it with `tests/test_skill_release_loop.py`.
