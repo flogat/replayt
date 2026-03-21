@@ -42,6 +42,29 @@ Publishing to PyPI is fully automated via GitHub Actions. To cut a release:
 
 The workflow lives in `.github/workflows/publish.yml` and triggers on any tag matching `v*`.
 
+### Automated skill-loop release
+
+If you want the repo's Cursor skills to drive a patch release, use `scripts/skill_release_loop.py`.
+
+- Default skill order: `createfeatures`, `improvedoc`, `deslopdoc`, `reviewcodebase`.
+- With the repo-local Codex install present under `.replayt/tools/codex-cli`, `python scripts/skill_release_loop.py` uses the default task plus `scripts/run_codex_skill.py` automatically, so no extra flags are required for the common path.
+- The script repeats that full cycle until every `--check` command passes or `--max-iterations` is hit.
+- `CHANGELOG.md` must be edited during the loop; once checks pass, the script rolls `## Unreleased` into the new version, bumps the patch version in `pyproject.toml` and `src/replayt/__init__.py`, creates an annotated `vX.Y.Z` tag, and pushes the branch plus tag.
+- The repo only stores the skill prompts. You still need to provide a backend command via `--skill-command` that knows how to execute one prompt file.
+
+Example:
+
+```bash
+python scripts/skill_release_loop.py \
+  --task "Tighten the repo, keep docs honest, and cut the next patch release." \
+  --skill-command "python tools/run_skill_backend.py --prompt {prompt_file_q}" \
+  --check "python -m build" \
+  --check "ruff check src tests scripts" \
+  --check "pytest"
+```
+
+Available placeholders for `--skill-command`: `{skill}`, `{skill_path}`, `{prompt_file}`, `{log_file}`, `{repo}`, `{iteration}`, `{max_iterations}` and quoted `*_q` variants such as `{prompt_file_q}`. The same values are also exported as environment variables (`SKILL_NAME`, `SKILL_PROMPT_FILE`, `REPO_ROOT`, and so on).
+
 **Prerequisites (one-time repo setup):**
 - A `pypi` environment must exist in the GitHub repo (Settings > Environments).
 - The repo must be registered as a trusted publisher on [pypi.org](https://pypi.org/manage/account/publishing/).
