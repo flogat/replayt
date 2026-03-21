@@ -83,7 +83,7 @@ def run_batch(rows: list[dict], log_root: Path) -> None:
         assert result.status in {"completed", "failed", "paused"}
 ```
 
-Use your orchestrator for **retries between rows**, concurrency, and backpressure—not replayt.
+Handle **retries between rows**, concurrency, and backpressure in your orchestrator. replayt runs one job at a time inside its process.
 
 ### Pattern: promotion / environment metadata
 
@@ -132,7 +132,7 @@ def plan_with_sdk(ctx):
 
 #### Sub-pattern: vision / multimodal input
 
-Build multimodal `messages`; still normalize to a **single** structured object you store on the context. LLM traffic from the SDK is **not** auto-logged by replayt—treat validated `ctx.set` outputs as your audit surface, or log a short summary yourself if policy requires it.
+Build multimodal `messages`; still normalize to a **single** structured object you store on the context. LLM traffic from the SDK is **not** auto-logged by replayt. Treat validated `ctx.set` outputs as your audit surface, or log a short summary yourself if policy requires it.
 
 ```python
 from openai import OpenAI
@@ -200,7 +200,7 @@ def stream_then_struct(ctx):
 
 ### Pattern: wrap your own HTTP / gateway client
 
-**Scenario:** You need a corporate HTTP proxy, custom signing, or a gateway SDK—more than `OPENAI_BASE_URL` and `extra_headers`—but you still want explicit replayt states.
+**Scenario:** You need a corporate HTTP proxy, custom signing, or a gateway SDK beyond what `OPENAI_BASE_URL` and `extra_headers` cover, and you still want explicit replayt states.
 
 **Approach:** Keep **`Runner(..., llm_settings=LLMSettings(...))`** for anything the built-in client supports (base URL, timeout, headers). For arbitrary stacks, call your wrapper **inside one `@wf.step`**, validate the result with **Pydantic**, `ctx.set(...)`, and return the next state explicitly. Do not hide transitions inside the wrapper.
 
@@ -285,7 +285,7 @@ Use **`ctx.note(...)`** for explicit sub-run breadcrumbs, then narrow a run with
 
 **Scenario:** Many services should import the same workflow without a “plugin registry.”
 
-**Approach:** Publish an internal package (e.g. `my_org_replayt`) that defines `wf: Workflow` in a module. Consumers run `replayt run my_org_replayt.support:wf ...` after `pip install my-org-replayt==1.3.0`. No dynamic `importlib` loaders—just normal dependency pinning.
+**Approach:** Publish an internal package (e.g. `my_org_replayt`) that defines `wf: Workflow` in a module. Consumers run `replayt run my_org_replayt.support:wf ...` after `pip install my-org-replayt==1.3.0`. Skip dynamic `importlib` loaders; pin versions like any other dependency.
 
 When you want **`Workflow.version`** to track the **same string as the installed wheel**, set it explicitly from metadata (still one line in *your* code, not magic inside replayt):
 
@@ -300,16 +300,16 @@ wf = Workflow("support", version=dist_version("my_org_replayt"))
 
 **Scenario:** Stakeholders want token streaming UX, but you do not want streaming as first-class log events.
 
-**Approach:** If your provider SDK supports streaming, consume chunks **inside the step** (list comprehension, accumulator string). When the stream completes, **`ctx.llm.parse`** a **summary or structured object** from the final text—or derive it without another round-trip—and store only that. Timeline replay shows the validated outcome, not every delta.
+**Approach:** If your provider SDK supports streaming, consume chunks **inside the step** (list comprehension, accumulator string). When the stream completes, **`ctx.llm.parse`** a **summary or structured object** from the final text, or derive it without another round-trip, and store only that. Timeline replay shows the validated outcome, not every delta.
 
 ### Pattern: OpenAI-compatible presets vs native provider SDKs
 
 **Scenario:** You run Ollama, Groq, OpenRouter, or a corporate gateway. You want sensible defaults without hunting for base URLs.
 
-**Approach:** In Python, `LLMSettings.for_provider("ollama")` (also: `openai`, `groq`, `together`, `openrouter`, `anthropic`). In the shell, set `REPLAYT_PROVIDER` — `OPENAI_BASE_URL` and `REPLAYT_MODEL` still **override** the preset defaults when set. Native **Anthropic** HTTP APIs are not OpenAI-`/chat/completions`-compatible; point `OPENAI_BASE_URL` at an **OpenAI-compatible proxy** (LiteLLM, corporate gateway) or call `anthropic`’s SDK **inside one step** and validate with Pydantic:
+**Approach:** In Python, `LLMSettings.for_provider("ollama")` (also: `openai`, `groq`, `together`, `openrouter`, `anthropic`). In the shell, set `REPLAYT_PROVIDER`; `OPENAI_BASE_URL` and `REPLAYT_MODEL` still **override** the preset defaults when set. Native **Anthropic** HTTP APIs are not OpenAI-`/chat/completions`-compatible; point `OPENAI_BASE_URL` at an **OpenAI-compatible proxy** (LiteLLM, corporate gateway) or call `anthropic`’s SDK **inside one step** and validate with Pydantic:
 
 ```python
-# Inside a @wf.step — illustrative; pip install anthropic
+# Inside a @wf.step (illustrative; pip install anthropic)
 # import anthropic
 # client = anthropic.Anthropic()
 # msg = client.messages.create(model="claude-3-5-sonnet-20241022", max_tokens=1024, messages=[...])
@@ -397,7 +397,7 @@ class FernetWrappedJSONLStore:
         return out
 ```
 
-`inspect` / `replay` then see **decrypted** events only if you use this store for both writes and reads; standard CLI on raw files expects normal replayt event JSON—**document** that operators must use your decrypting tooling or a small bridge script.
+`inspect` / `replay` then see **decrypted** events only if you use this store for both writes and reads. The stock CLI on raw files expects normal replayt event JSON, so **document** that operators must use your decrypting tooling or a small bridge script.
 
 ### Pattern: post-hoc PII scrub on JSONL files
 
@@ -464,7 +464,7 @@ def start(ctx):
 
 **Scenario:** You shipped `Workflow("support", version="1")` and need `version="2"` without losing old JSONL.
 
-**Approach:** Keep **old handlers** reachable when replaying legacy runs (gate on stored `workflow_version` from `run_started` if you snapshot it in context), or write a **one-off migration script** that reads JSONL, maps old `structured_output` payloads to new shapes, and writes new artifacts—**do not** silently auto-mutate production logs. Prefer **new runs** on the new graph with explicit inputs at organizational boundaries.
+**Approach:** Keep **old handlers** reachable when replaying legacy runs (gate on stored `workflow_version` from `run_started` if you snapshot it in context), or write a **one-off migration script** that reads JSONL, maps old `structured_output` payloads to new shapes, and writes new artifacts. **Do not** silently auto-mutate production logs. Prefer **new runs** on the new graph with explicit inputs at organizational boundaries.
 
 ```python
 # Sketch: branch inside a step based on a context flag set from inputs.
@@ -480,7 +480,7 @@ def normalize(ctx):
 
 ---
 
-## Workaround patterns (rejected features — composition, not core)
+## Workaround patterns (rejected features: composition, not core)
 
 Common requests we keep out of core. Implement these in your own stack; they are patterns, not shipped features.
 
@@ -525,7 +525,7 @@ def run_with_notify(runner: Runner, wf_inputs: dict, notify_url: str) -> dict:
 
 Or use the `ForwardingStore` pattern (above) to stream events in real-time to any HTTP sink. The notification layer is yours; replayt stays the engine.
 
-For **shell / CI** wrappers, treat **`replayt run`** / **`replayt ci`** exit code **`2`** as paused (approval or similar), then notify with the `run_id` from stdout or from your **`--summary-json`** artifact. To list paused backlog across logs, use **`replayt runs --status paused --log-dir ...`** (combine with **`--run-meta`** / **`--experiment`** when you tag runs for a tenant or experiment).
+For **shell / CI** wrappers, treat **`replayt run`** / **`replayt ci`** exit code **`2`** as paused (approval or similar), then notify with the `run_id` from stdout or from your **`--summary-json`** artifact. To list paused backlog across logs, use **`replayt runs --status paused --log-dir ...`** (combine with **`--run-meta`** / **`--experiment`** when you tag runs for a tenant or experiment). When a framework-heavy step logs several **`ctx.tools.call`** invocations, **`replayt runs --tool TOOL_NAME`** finds recent runs that exercised a specific tool without hand-grepping JSONL.
 
 **In-process policy / trace IDs:** For lightweight hooks without a second workflow engine, pass **`before_step`** / **`after_step`** to **`Runner(...)`** in Python (`before_step` runs after context schema checks, before the handler; **`after_step`** runs after a successful return, before `state_exited`). Keep side effects explicit; do not move control flow out of step handlers.
 

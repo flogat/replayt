@@ -5,10 +5,33 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Any
 
 from replayt.cli.run_support import exit_code_for_run_result
 from replayt.runner import RunResult
 from replayt.workflow import Workflow
+
+
+def parse_ci_metadata_from_env() -> dict[str, Any] | None:
+    """Parse ``REPLAYT_CI_METADATA_JSON`` when set; must be a JSON object.
+
+    Used to enrich ``replayt.ci_run_summary.v1`` with pipeline correlation fields
+    (build id, commit, job URL) supplied by the caller's CI shell.
+    """
+
+    raw = os.environ.get("REPLAYT_CI_METADATA_JSON", "").strip()
+    if not raw:
+        return None
+    try:
+        val = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        msg = f"REPLAYT_CI_METADATA_JSON is not valid JSON: {exc}"
+        raise ValueError(msg) from exc
+    if not isinstance(val, dict):
+        raise ValueError(
+            "REPLAYT_CI_METADATA_JSON must be a JSON object (mapping), not an array or scalar."
+        )
+    return val
 
 
 def _xml_escape_text(s: str) -> str:
@@ -86,11 +109,12 @@ def write_summary_json(
     sqlite: Path | None = None,
     dry_run: bool = False,
     duration_ms: int | None = None,
+    ci_metadata: dict[str, Any] | None = None,
 ) -> None:
     """Write one machine-readable run summary artifact for CI wrappers."""
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload: dict[str, object] = {
+    payload: dict[str, Any] = {
         "schema": "replayt.ci_run_summary.v1",
         "workflow": f"{wf.name}@{wf.version}",
         "workflow_name": wf.name,
@@ -110,6 +134,8 @@ def write_summary_json(
         payload["sqlite"] = None
     if duration_ms is not None:
         payload["duration_ms"] = duration_ms
+    if ci_metadata is not None:
+        payload["ci_metadata"] = ci_metadata
     path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
 
 
@@ -147,6 +173,7 @@ def write_ci_artifacts(
     sqlite: Path | None = None,
     dry_run: bool = False,
     duration_ms: int | None = None,
+    ci_metadata: dict[str, Any] | None = None,
 ) -> None:
     if junit_path is not None:
         write_junit_xml(junit_path, wf=wf, result=result)
@@ -160,6 +187,7 @@ def write_ci_artifacts(
             sqlite=sqlite,
             dry_run=dry_run,
             duration_ms=duration_ms,
+            ci_metadata=ci_metadata,
         )
     if github_summary:
         append_github_step_summary(wf, result, duration_ms=duration_ms)

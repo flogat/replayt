@@ -2,7 +2,7 @@
 
 ## Assessment
 
-The codebase is still in solid shape structurally: the runtime, persistence, and CLI layers are separated cleanly enough that targeted fixes stay small. This pass found one confirmed high-severity robustness issue in the SQLite store and one confirmed medium-severity operator-facing issue in the JSONL read path. Both are now fixed with focused regressions, so deeper work is not required before the next patch release.
+The codebase is still in solid shape structurally: the runtime, persistence, and CLI layers are separated cleanly enough that targeted fixes stay small. This pass found one confirmed high-severity SQLite transaction-handling bug and one confirmed medium-severity operator-facing issue in the JSONL read path. Both are now fixed with focused regressions, so deeper work is not required before the next patch release.
 
 ## Critical
 
@@ -55,7 +55,7 @@ None.
 
 ## Verdict
 
-The repository remains production-ready, but this pass exposed two real operational footguns: SQLite could get stuck after a write failure, and read-only CLI commands could mutate the log root unexpectedly. Both issues were fixed without architectural churn, and the updated tests cover the exact failure modes that mattered.
+This pass exposed two real operational footguns: SQLite could get stuck after a write failure, and read-only CLI commands could mutate the log root unexpectedly. Both issues were fixed without architectural churn, and the updated tests cover the exact failure modes that mattered.
 
 ## Mitigation summary
 

@@ -1395,3 +1395,272 @@ def build_run_report_html(
         notes_section=notes_section,
         token_section=token_section,
     )
+
+
+def _md_json_fence(value: Any, *, limit: int = 12000) -> str:
+    raw = json.dumps(value, indent=2, ensure_ascii=False, default=str)
+    if len(raw) > limit:
+        raw = raw[:limit] + "\n... (truncated)"
+    return f"```json\n{raw}\n```"
+
+
+def build_run_report_markdown(
+    run_id: str,
+    events: list[dict[str, Any]],
+    *,
+    style: Literal["default", "stakeholder", "support"] = "default",
+) -> str:
+    """Plain Markdown variant of ``replayt report`` for tickets, chat, and email (no HTML)."""
+
+    agg = aggregate_run_report_data(events)
+    workflow_name = agg["workflow_name"]
+    workflow_version = agg["workflow_version"]
+    status = agg["status"]
+    tags = agg["tags"]
+    run_metadata = agg["run_metadata"]
+    experiment = agg["experiment"]
+    workflow_meta = agg["workflow_meta"]
+    states = agg["states"]
+    outputs = agg["outputs"]
+    tool_calls = agg["tool_calls"]
+    notes = agg["notes"]
+    failure = agg["failure"]
+    structured_output_failures = agg["structured_output_failures"]
+    retry_count = agg["retry_count"]
+    latest_retry = agg["latest_retry"]
+    prompt_tokens = agg["prompt_tokens"]
+    completion_tokens = agg["completion_tokens"]
+    total_tokens = agg["total_tokens"]
+    first_ts = agg["first_ts"]
+    last_ts = agg["last_ts"]
+    approvals = agg["approvals"]
+
+    duration = "n/a"
+    t0 = _parse_iso_ts(first_ts)
+    t1 = _parse_iso_ts(last_ts)
+    if t0 and t1:
+        delta = t1 - t0
+        secs = delta.total_seconds()
+        if secs < 60:
+            duration = f"{secs:.1f}s"
+        else:
+            duration = f"{secs / 60:.1f}m"
+
+    if style == "support":
+        report_title = "Support handoff"
+    elif style == "stakeholder":
+        report_title = "Run summary"
+    else:
+        report_title = "Run Report"
+
+    lines: list[str] = [f"# {report_title}", ""]
+    lines += [
+        f"- **Run ID:** `{run_id}`",
+        f"- **Workflow:** {workflow_name}@{workflow_version}",
+        f"- **Status:** {status}",
+        f"- **Duration:** {duration}",
+    ]
+    if tags:
+        tag_strs = ", ".join(f"{k}={v}" for k, v in tags.items())
+        lines.append(f"- **Tags:** {tag_strs}")
+    lines.append("")
+    if run_metadata:
+        lines.append("**Run metadata**")
+        lines.append("")
+        lines.append(_md_json_fence(run_metadata))
+        lines.append("")
+    if experiment:
+        lines.append("**Experiment**")
+        lines.append("")
+        lines.append(_md_json_fence(experiment))
+        lines.append("")
+    if workflow_meta:
+        lines.append("**Workflow metadata**")
+        lines.append("")
+        lines.append(_md_json_fence(workflow_meta))
+        lines.append("")
+
+    pending_approvals = [approval for approval in approvals if approval.get("approved") is None]
+    attention_blocks: list[str] = []
+    if status == "failed" and failure:
+        err = failure.get("error") or {}
+        sub = [
+            "### Run failed",
+            "",
+            f"- **State:** {failure.get('state') or '-'}",
+            f"- **Error:** {err.get('type') or 'Error'}: {err.get('message') or ''}",
+            "",
+        ]
+        attention_blocks.append("\n".join(sub))
+    elif status == "paused":
+        pending_ids = ", ".join(str(approval.get("approval_id") or "") for approval in pending_approvals) or "-"
+        sub = [
+            "### Run is waiting for approval",
+            "",
+            f"- **Pending approvals:** {len(pending_approvals)}",
+            f"- **Approval IDs:** {pending_ids}",
+            "",
+            "- **Operator:** replace `TARGET` with your workflow (`module:variable` or path), then run "
+            f"`replayt resume TARGET {run_id} --approval <approval_id>` (add `--log-dir` / `--reject` as needed).",
+            "",
+        ]
+        attention_blocks.append("\n".join(sub))
+
+    if structured_output_failures:
+        parse_failure = structured_output_failures[-1]
+        parse_error = parse_failure.get("error") or {}
+        sub = [
+            "### Latest structured parse failure",
+            "",
+            f"- **Schema:** {parse_failure.get('schema_name') or '-'}",
+            f"- **Stage:** {parse_failure.get('stage') or '-'}",
+            f"- **State:** {parse_failure.get('state') or '-'}",
+            f"- **Error:** {parse_error.get('message') or ''}",
+            "",
+        ]
+        attention_blocks.append("\n".join(sub))
+
+    if retry_count:
+        sub = ["### Retries happened during this run", "", f"- **Retries scheduled:** {retry_count}", ""]
+        if latest_retry:
+            retry_error = latest_retry.get("error") or {}
+            sub.append(
+                f"- **Latest retry:** state {latest_retry.get('state') or '-'}, "
+                f"attempt {latest_retry.get('attempt') or '-'}/"
+                f"{latest_retry.get('max_attempts') or '-'}"
+            )
+            if isinstance(retry_error, dict) and retry_error.get("message"):
+                sub.append(f"- **Retry error:** {retry_error.get('message')}")
+        sub.append("")
+        attention_blocks.append("\n".join(sub))
+
+    if attention_blocks:
+        att_title = "Support summary" if style == "support" else "Action summary"
+        lines.append(f"## {att_title}")
+        lines.append("")
+        lines.append("\n".join(attention_blocks))
+
+    if approvals:
+        lines.append("## Approvals")
+        lines.append("")
+        if style in {"stakeholder", "support"}:
+            lines.append(
+                "Human approval gates from the JSONL timeline (stakeholder-facing view; "
+                "tool/token sections omitted below)."
+            )
+            lines.append("")
+        for approval in approvals:
+            approved = approval.get("approved")
+            if approved is True:
+                outcome = "Approved"
+            elif approved is False:
+                outcome = "Rejected"
+            else:
+                outcome = "Pending (no resolution in this log)"
+            if approval.get("orphan_resolution"):
+                outcome += " [missing approval_requested event]"
+            lines.append(f"### Approval `{approval.get('approval_id', '')}`")
+            lines.append("")
+            lines.append(f"- **State:** {approval.get('state', '')}")
+            lines.append(f"- **Summary:** {approval.get('summary', '')}")
+            details = approval.get("details") or {}
+            if isinstance(details, dict) and details:
+                lines.append("- **Details:**")
+                lines.append("")
+                lines.append(_md_json_fence(details, limit=4000))
+                lines.append("")
+            requested_ts = str(approval.get("requested_ts") or "")
+            resolved_ts = str(approval.get("resolved_ts") or "")
+            if requested_ts or resolved_ts:
+                lines.append(
+                    f"- **Timeline:** requested `{requested_ts or '-'}` → resolved `{resolved_ts or '-'}`"
+                )
+            if approval.get("resolver"):
+                lines.append(f"- **Resolver:** {approval.get('resolver')}")
+            if approval.get("reason"):
+                lines.append(f"- **Reason:** {approval.get('reason')}")
+            actor = approval.get("actor")
+            if actor not in (None, "", {}):
+                lines.append("- **Actor:**")
+                lines.append("")
+                raw_actor = json.dumps(actor, indent=2, ensure_ascii=False, default=str)
+                lines.append(f"```json\n{raw_actor[:4000]}{'...' if len(raw_actor) > 4000 else ''}\n```")
+                lines.append("")
+            if approval.get("approval_state") or approval.get("resumed_at_state"):
+                lines.append(
+                    f"- **Resume path:** {approval.get('approval_state') or '-'} → "
+                    f"{approval.get('resumed_at_state') or '-'}"
+                )
+            elif approval.get("approved") is True and approval.get("on_approve"):
+                lines.append(f"- **Configured on approve:** {approval.get('on_approve')}")
+            elif approval.get("approved") is False and approval.get("on_reject"):
+                lines.append(f"- **Configured on reject:** {approval.get('on_reject')}")
+            elif approval.get("approved") is None and (approval.get("on_approve") or approval.get("on_reject")):
+                lines.append(f"- **Configured approve path:** {approval.get('on_approve') or '-'}")
+                lines.append(f"- **Configured reject path:** {approval.get('on_reject') or '-'}")
+            lines.append(f"- **Outcome:** **{outcome}**")
+            lines.append("")
+
+    lines.append("## State timeline")
+    lines.append("")
+    if states:
+        for state_meta in states:
+            lines.append(f"- **{state_meta['state']}** — `{state_meta['ts']}`")
+    else:
+        lines.append("_No states recorded._")
+    lines.append("")
+
+    if outputs:
+        lines.append("## Structured outputs")
+        lines.append("")
+        for output in outputs:
+            lines.append(f"### {output['schema_name']}")
+            lines.append("")
+            lines.append(_md_json_fence(output.get("data"), limit=8000))
+            lines.append("")
+
+    if tool_calls and style == "default":
+        lines.append("## Tool calls")
+        lines.append("")
+        for tc in tool_calls:
+            lines.append(f"### `{tc['tool']}` (seq {tc['seq']})")
+            lines.append("")
+            lines.append(_md_json_fence(tc.get("args"), limit=8000))
+            lines.append("")
+
+    if notes:
+        lines.append("## Step notes")
+        lines.append("")
+        for note in notes:
+            lines.append(
+                f"### {note.get('kind') or ''} (state `{note.get('state') or ''}`, seq {note.get('seq')})"
+            )
+            lines.append("")
+            if note.get("summary") not in (None, ""):
+                lines.append(f"- **Summary:** {note.get('summary')}")
+            if note.get("data") not in (None, "", {}):
+                raw = json.dumps(note.get("data"), indent=2, ensure_ascii=False, default=str)
+                lines.append("")
+                lines.append(f"```json\n{raw[:4000]}{'...' if len(raw) > 4000 else ''}\n```")
+            lines.append("")
+
+    if style in {"stakeholder", "support"}:
+        lines.append(
+            "_Tool-call and token usage sections omitted. For the full technical report, run "
+            f"`replayt report {run_id} --format html --style default`._"
+        )
+        lines.append("")
+    else:
+        lines.append("## Token usage")
+        lines.append("")
+        lines.append("| Metric | Value |")
+        lines.append("| --- | ---: |")
+        lines.append(f"| Prompt tokens | {prompt_tokens} |")
+        lines.append(f"| Completion tokens | {completion_tokens} |")
+        lines.append(f"| **Total tokens** | **{total_tokens}** |")
+        lines.append("")
+
+    lines.append("---")
+    lines.append("")
+    lines.append("_Generated by replayt_")
+    return "\n".join(lines).rstrip() + "\n"

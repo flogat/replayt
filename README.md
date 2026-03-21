@@ -33,7 +33,7 @@ The **CLI** follows the same model: `run`, `inspect`, **`replay`**, `report`, `r
 
 ### LangGraph and similar frameworks
 
-[LangGraph](https://github.com/langchain-ai/langgraph) is powerful, but built for long-running agent systems.
+[LangGraph](https://github.com/langchain-ai/langgraph) targets long-running agent systems.
 
 **replayt** keeps the workflow graph explicit:
 
@@ -186,7 +186,7 @@ It is **not**:
 replayt targets **trusted local or CI environments**: running a workflow **runs Python** from your file or import path (`replayt run workflow.py` / `module:wf`), with the privileges of your user.
 
 - **Logs and approvals** are stored on disk without authentication. Anyone who can write your log directory can append events or influence resume behavior. Treat the log path like credential storage. If you must keep some structured fields while scrubbing others, use **`--redact-key FIELD`** (or project config **`redact_keys = [...]`**) to blank matching keys from logged payloads.
-- **`replayt doctor`** performs an HTTP `GET` to ``OPENAI_BASE_URL``/``models`` and may send ``OPENAI_API_KEY``. Point the base URL only at providers you trust, or run ``replayt doctor --skip-connectivity`` to skip network I/O entirely. `doctor` also warns about risky trust-boundary defaults such as remote plain-HTTP base URLs, embedded credentials in `OPENAI_BASE_URL`, or `log_mode=full`.
+- **`replayt doctor`** performs an HTTP `GET` to ``OPENAI_BASE_URL``/``models`` and may send ``OPENAI_API_KEY``. Point the base URL only at providers you trust, or run ``replayt doctor --skip-connectivity`` to skip network I/O entirely. `doctor` also warns about risky trust-boundary defaults such as remote plain-HTTP base URLs, embedded credentials in `OPENAI_BASE_URL`, or `log_mode=full`. **`replayt doctor --format json`** and **`replayt config --format json`** include **`credential_env`**: a fixed list of common LLM-related environment variable names with boolean **`present`** flags only (no secret values), so reviewers can spot credential scope creep in the shell.
 
 ---
 
@@ -199,7 +199,7 @@ LLM workflows should behave like systems, not personalities. The model may gener
 The workflow structure should be obvious in code. No hidden planners, implicit retries, or secret sub-agents.
 
 ### 3. Strict schemas over fuzzy outputs
-Every meaningful model output should validate against a clear schema. Structured output is the default path, not a nice-to-have.
+Every meaningful model output should validate against a clear schema. Structured output is the default path.
 
 ### 4. Typed tool calls over free-form execution
 Tool use should be constrained, validated, and logged as part of the run history.
@@ -231,7 +231,7 @@ A new user should be able to understand the architecture quickly.
 - Strict Pydantic schema parsing for structured outputs
 - Explicit `structured_output_failed` events when JSON extraction or schema validation fails
 - Redacted, structured-only, or full logging modes
-- Per-call LLM overrides via `ctx.llm.with_settings(...)` (logged as `effective` on each `llm_request` / `llm_response`, including `top_p`, OpenAI-style `frequency_penalty` / `presence_penalty`, optional integer `seed` where the provider supports it, per-call `provider` / `base_url`, optional native JSON-schema `response_format`, and optional `experiment={...}` tags you want in the audit trail)
+- Per-call LLM overrides via `ctx.llm.with_settings(...)` (logged as `effective` on each `llm_request` / `llm_response`, including `top_p`, OpenAI-style `frequency_penalty` / `presence_penalty`, optional integer `seed` where the provider supports it, optional `stop` sequences (up to four strings) for OpenAI-compatible sampling, per-call `provider` / `base_url`, optional native JSON-schema `response_format`, and optional `experiment={...}` tags you want in the audit trail)
 
 ### Tooling
 
@@ -284,7 +284,9 @@ Optional dependencies (see [`pyproject.toml`](pyproject.toml)): **`[yaml]`** add
 
 ### Forks and release hygiene
 
-If you maintain a fork or vendor the package, keep **`pyproject.toml`** `[project].version` and **`src/replayt/__init__.py`** `__version__` in lockstep before you tag a release ([`CONTRIBUTING.md`](CONTRIBUTING.md)). From a clone, run `python scripts/version_consistency.py` (or `python scripts/version_consistency.py --format json` in CI) so a partial bump does not reach PyPI. Pre-commit hooks, SPDX REUSE, and license-header automation stay in **your** repo; replayt does not ship one blessed hook set so downstreams are not forced into a single toolchain.
+If you maintain a fork or vendor the package, keep **`pyproject.toml`** `[project].version` and **`src/replayt/__init__.py`** `__version__` in lockstep before you tag a release ([`CONTRIBUTING.md`](CONTRIBUTING.md)). From a clone, run **`python scripts/maintainer_checks.py`** (add **`--format json`** for CI parsers and **`--changelog-nonempty`** right before you promote Unreleased into a version) so version consistency, the Unreleased changelog, docs index links, and top-level **`__all__`** integrity are checked together; **`python scripts/version_consistency.py`** alone stays the lightest probe after a version edit. Pre-commit hooks, SPDX REUSE, and license-header automation stay in **your** repo; replayt does not ship one blessed hook set so downstreams are not forced into a single toolchain.
+
+**Log schema and typing outside the wheel:** Pin **`docs/RUN_LOG_SCHEMA.md`** from the tag or commit you deploy when you parse JSONL event payloads. **`replayt version --format json`** exposes stable ids under **`cli_machine_readable_schemas`** for other machine-readable CLI payloads; replayt does not ship a separate log-schema dump command so the markdown contract stays the canonical human-readable spec. For static types, generate stubs in your own tree (for example `python -m mypy.stubgen -m replayt -o typings/replayt`) instead of expecting checked-in `.pyi` files inside the published package, where stub drift and mypy-version coupling would become a maintainer bottleneck.
 
 **Logs and PII:** runs write append-only JSONL under `.replayt/runs/` by default. Use **`--log-mode`** or Python **`LogMode.redacted` / `structured_only`** when prompts may contain sensitive text, and layer **`--redact-key FIELD`** (or project config **`redact_keys = [...]`**) when specific structured keys such as `email` or `token` should never land in the log. See [`docs/RUN_LOG_SCHEMA.md`](docs/RUN_LOG_SCHEMA.md) and [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
 
@@ -593,6 +595,7 @@ The full table of common asks, rationale, and **composition patterns** (approval
 Teams often want SSO-gated approvals, org policy checks before `resume`, pytest-driven regression loops, or planner-style frameworks inside "the workflow." Those belong in **your** process wrapper or app layer. replayt stays a **Runner** with explicit states and local JSONL, not a hosted control plane, RBAC product, or bundled eval suite ([docs/SCOPE.md](docs/SCOPE.md)).
 
 - **Approvals + identity:** read paused runs from JSONL/SQLite and resolve gates from a UI or chatbot. See **Pattern: approval bridge (local UI)** in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md). For notifications and policy logging without a second engine, use **Pattern: webhook / lifecycle callbacks** or `Runner(..., before_step=..., after_step=...)`.
+- **CLI policy subprocesses:** optional **`run_hook`**, **`resume_hook`**, **`export_hook`**, and **`seal_hook`** (plus env overrides) run trusted argv before new events, tarball export, or standalone seal manifests; see [`docs/CONFIG.md`](docs/CONFIG.md). Verify OIDC/JWT or SAML in **your** bridge or wrapper, then call **`replayt resume`** / **`replayt seal`** with credentials replayt never sees.
 - **Harness-style runs:** call `Runner.run` from pytest with frozen inputs and assert on final context or events. See **Pattern: golden path test (pytest)**. For many jobs, use an outer loop such as **Pattern: batch driver (Airflow / Celery / plain loop)**.
 - **Streaming or LangChain-style graphs:** keep provider SDKs and planners **inside one step**, then transition on one Pydantic-shaped outcome. See **Pattern: stream inside step, log structured summary** and **Pattern: framework in a sandbox step**.
 

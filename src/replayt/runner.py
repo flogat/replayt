@@ -258,6 +258,7 @@ class Runner:
                     "presence_penalty": settings.presence_penalty,
                     "seed": settings.seed,
                     "max_tokens": settings.max_tokens,
+                    "stop": list(settings.stop) if settings.stop else None,
                     "max_response_bytes": settings.max_response_bytes,
                     "max_parse_response_chars": settings.max_parse_response_chars,
                     "max_schema_json_chars": settings.max_schema_json_chars,

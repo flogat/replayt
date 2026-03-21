@@ -132,6 +132,31 @@ def test_llm_bridge_with_settings_merges_into_effective_and_request() -> None:
     assert "content_preview" in resp
 
 
+def test_llm_bridge_with_settings_passes_stop_to_client_and_effective() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="k", model="m")
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "s",
+    ).with_settings(stop=["###", "END"])
+
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    assert mock_cc.call_args.kwargs["stop"] == ["###", "END"]
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["stop"] == ["###", "END"]
+
+
 def test_llm_bridge_with_settings_passes_penalties_and_seed_to_client() -> None:
     events: list[tuple[str, dict]] = []
 

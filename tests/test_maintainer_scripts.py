@@ -6,6 +6,8 @@ import sys
 import textwrap
 from pathlib import Path
 
+import pytest
+
 
 def _load_script(module_name: str, filename: str):
     root = Path(__file__).resolve().parents[1]
@@ -227,6 +229,166 @@ def test_version_consistency_replayt_repo_matches() -> None:
     mod = _load_script("version_consistency_replayt", "version_consistency.py")
     root = Path(__file__).resolve().parents[1]
     report = mod.version_consistency_report(root)
+    assert report["ok"] is True, report
+
+
+def test_maintainer_checks_tmp_pass_skipping_public_api(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project]
+        name = "demo"
+        version = "1.0.0"
+        """,
+    )
+    _write(
+        tmp_path / "src" / "replayt" / "__init__.py",
+        """
+        __version__ = "1.0.0"
+        """,
+    )
+    _write(
+        tmp_path / "CHANGELOG.md",
+        """
+        # Changelog
+
+        ## Unreleased
+
+        - Note one.
+
+        ## 0.1.0 - 2026-03-21
+
+        - Initial release.
+        """,
+    )
+    _write(
+        tmp_path / "README.md",
+        """
+        # demo
+
+        ## Documentation map
+
+        - [Docs index](docs/README.md)
+        - [CLI](docs/CLI.md)
+        """,
+    )
+    _write(
+        tmp_path / "docs" / "README.md",
+        """
+        # Documentation
+
+        - [CLI.md](CLI.md)
+        - [SCOPE.md](SCOPE.md)
+        - [architecture.mmd](architecture.mmd)
+        - [Root README](../README.md)
+        """,
+    )
+    _write(tmp_path / "docs" / "CLI.md", "# CLI\n")
+    _write(tmp_path / "docs" / "SCOPE.md", "# Scope\n")
+    _write(tmp_path / "docs" / "architecture.mmd", "flowchart TD\n")
+
+    mod = _load_script("maintainer_checks_tmp", "maintainer_checks.py")
+    report = mod.maintainer_checks_report(tmp_path, skip_public_api=True)
+
+    assert report["schema"] == "replayt.maintainer_checks.v1"
+    assert report["ok"] is True
+    assert report["checks"]["version_consistency"]["ok"] is True
+    assert report["checks"]["changelog_unreleased"]["ok"] is True
+    assert report["checks"]["docs_index"]["ok"] is True
+
+
+def test_maintainer_checks_version_only_failure(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project]
+        name = "demo"
+        version = "2.0.0"
+        """,
+    )
+    _write(
+        tmp_path / "src" / "replayt" / "__init__.py",
+        """
+        __version__ = "1.0.0"
+        """,
+    )
+    mod = _load_script("maintainer_checks_ver", "maintainer_checks.py")
+    report = mod.maintainer_checks_report(
+        tmp_path,
+        skip_changelog=True,
+        skip_docs_index=True,
+        skip_public_api=True,
+    )
+
+    assert report["ok"] is False
+    assert "version_consistency" in report["checks"]
+    assert report["checks"]["version_consistency"]["ok"] is False
+
+
+def test_maintainer_checks_changelog_nonempty_fails_on_empty_bullets(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project]
+        name = "demo"
+        version = "1.0.0"
+        """,
+    )
+    _write(
+        tmp_path / "src" / "replayt" / "__init__.py",
+        """
+        __version__ = "1.0.0"
+        """,
+    )
+    _write(
+        tmp_path / "CHANGELOG.md",
+        """
+        # Changelog
+
+        ## Unreleased
+
+        ## 0.1.0 - 2026-03-21
+
+        - Initial release.
+        """,
+    )
+    mod = _load_script("maintainer_checks_cl", "maintainer_checks.py")
+    report = mod.maintainer_checks_report(
+        tmp_path,
+        changelog_nonempty=True,
+        skip_docs_index=True,
+        skip_public_api=True,
+    )
+
+    assert report["ok"] is False
+    assert report["checks"]["changelog_unreleased"]["ok"] is False
+    assert report["checks"]["changelog_unreleased"]["item_count"] == 0
+
+
+def test_maintainer_checks_main_all_skips_exits_2(capsys) -> None:
+    mod = _load_script("maintainer_checks_skipall", "maintainer_checks.py")
+    code = mod.main(
+        [
+            "--skip-version",
+            "--skip-changelog",
+            "--skip-docs-index",
+            "--skip-public-api",
+        ]
+    )
+    assert code == 2
+
+
+def test_maintainer_checks_load_script_missing_file() -> None:
+    mod = _load_script("maintainer_checks_noscript", "maintainer_checks.py")
+    with pytest.raises(FileNotFoundError, match="maintainer helper script not found"):
+        mod._load_script("x", "definitely_missing_replayt_helper_404.py")
+
+
+def test_maintainer_checks_real_repo_full() -> None:
+    mod = _load_script("maintainer_checks_replayt", "maintainer_checks.py")
+    root = Path(__file__).resolve().parents[1]
+    report = mod.maintainer_checks_report(root, changelog_nonempty=True)
+
     assert report["ok"] is True, report
 
 

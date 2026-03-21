@@ -78,6 +78,12 @@ def export_hook_argv(cfg: dict[str, Any]) -> list[str] | None:
     return _hook_argv(cfg, env_var="REPLAYT_EXPORT_HOOK", config_key="export_hook")
 
 
+def seal_hook_argv(cfg: dict[str, Any]) -> list[str] | None:
+    """Argv for the optional pre-seal policy subprocess (trusted project config / env only)."""
+
+    return _hook_argv(cfg, env_var="REPLAYT_SEAL_HOOK", config_key="seal_hook")
+
+
 def invoke_hook(argv: list[str], *, extra_env: dict[str, str], timeout_seconds: float | None) -> None:
     """Run *argv* with extra env vars; *argv* must come from trusted config."""
 
@@ -165,6 +171,31 @@ def invoke_export_hook(
     if report_style is not None:
         extra["REPLAYT_BUNDLE_REPORT_STYLE"] = report_style
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
+
+
+def invoke_seal_hook(
+    argv: list[str],
+    *,
+    run_id: str,
+    log_dir: Path,
+    jsonl_path: Path,
+    seal_out: Path,
+    line_count: int,
+    timeout_seconds: float | None,
+) -> None:
+    """Run *argv* before ``replayt seal`` writes the manifest; *argv* is trusted config only."""
+
+    invoke_hook(
+        argv,
+        extra_env={
+            "REPLAYT_RUN_ID": run_id,
+            "REPLAYT_LOG_DIR": str(log_dir.resolve()),
+            "REPLAYT_SEAL_JSONL": str(jsonl_path.resolve()),
+            "REPLAYT_SEAL_OUT": str(seal_out.resolve()),
+            "REPLAYT_SEAL_LINE_COUNT": str(line_count),
+        },
+        timeout_seconds=timeout_seconds,
+    )
 
 
 def build_internal_run_argv(

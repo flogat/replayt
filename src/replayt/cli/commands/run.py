@@ -15,6 +15,7 @@ from typing import Any, Literal
 import typer
 
 from replayt.cli.ci_artifacts import (
+    parse_ci_metadata_from_env,
     resolve_ci_junit_path,
     resolve_ci_summary_json_path,
     should_write_github_step_summary,
@@ -25,6 +26,7 @@ from replayt.cli.config import (
     get_project_config,
     parse_log_mode,
     resolve_approval_actor_required_keys,
+    resolve_cli_target,
     resolve_llm_settings,
     resolve_log_dir,
     resolve_log_mode_setting,
@@ -144,11 +146,12 @@ def cmd_init(
 
 
 def cmd_run(
-    target: str = typer.Argument(
-        ...,
-        metavar="TARGET",
+    target: str | None = typer.Argument(
+        None,
+        metavar="[TARGET]",
         help=(
             "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Optional when REPLAYT_TARGET is set or [tool.replayt] / .replaytrc.toml defines target. "
             "Loading a .py file executes that file as code—use only trusted paths."
         ),
     ),
@@ -239,12 +242,13 @@ def cmd_run(
 ) -> None:
     if resume and not run_id:
         typer.echo("When using --resume, you must pass --run-id", err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     inputs_resolved = inputs_json_from_options(inputs_json, inputs_file)
 
     in_child = os.environ.get("REPLAYT_SUBPROCESS_RUN") == "1"
-    cfg, cfg_path = get_project_config()
+    cfg, cfg_path, _ = get_project_config()
+    target = resolve_cli_target(target, cfg=cfg)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     sqlite, _sqlite_source = resolve_sqlite_path(sqlite, cfg, config_path=cfg_path)
     strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite)
@@ -258,7 +262,7 @@ def cmd_run(
     if dry_check:
         if resume:
             typer.echo("--dry-check cannot be used with --resume", err=True)
-            raise typer.Exit(code=2)
+            raise typer.Exit(code=1)
         errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
         report = validation_report(
             target=target,
@@ -311,6 +315,14 @@ def cmd_run(
     junit_for_ci = resolve_ci_junit_path(replayt_internal_junit_xml)
     summary_json_for_ci = resolve_ci_summary_json_path(replayt_internal_summary_json)
     github_summary_for_ci = should_write_github_step_summary(replayt_internal_github_summary)
+
+    ci_metadata_for_summary: dict[str, Any] | None = None
+    if summary_json_for_ci is not None:
+        try:
+            ci_metadata_for_summary = parse_ci_metadata_from_env()
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
 
     if not in_child and timeout is not None and timeout > 0:
         argv = build_internal_run_argv(
@@ -462,6 +474,7 @@ def cmd_run(
         sqlite=sqlite,
         dry_run=dry_run,
         duration_ms=duration_ms,
+        ci_metadata=ci_metadata_for_summary,
     )
     exit_for_run_result(result)
 
@@ -634,11 +647,12 @@ def cmd_try(
 
 def cmd_ci(
     ctx: typer.Context,
-    target: str = typer.Argument(
-        ...,
-        metavar="TARGET",
+    target: str | None = typer.Argument(
+        None,
+        metavar="[TARGET]",
         help=(
             "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Optional when REPLAYT_TARGET is set or [tool.replayt] / .replaytrc.toml defines target. "
             "Loading a .py file executes that file as code—use only trusted paths."
         ),
     ),
@@ -785,7 +799,7 @@ def cmd_resume(
         help="Case-insensitive structured field name to scrub from logged payloads (repeatable).",
     ),
 ) -> None:
-    cfg, cfg_path = get_project_config()
+    cfg, cfg_path, _ = get_project_config()
     if sqlite is None and cfg.get("sqlite"):
         sqlite = resolve_project_path(cfg["sqlite"], config_path=cfg_path)
     strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite)
@@ -825,7 +839,7 @@ def cmd_resume(
     missing = missing_actor_fields(actor, required_fields=required_actor_keys)
     if missing:
         typer.echo("approval actor is missing required keys: " + ", ".join(missing), err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
     with open_store(log_dir, sqlite, strict_mirror=strict_mirror) as store:
         resolve_approval_on_store(
             store,

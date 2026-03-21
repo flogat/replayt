@@ -12,6 +12,7 @@ from pydantic import BaseModel
 
 from replayt.llm_coercion import (
     coerce_llm_seed,
+    coerce_llm_stop_sequences,
     coerce_max_tokens_for_api,
     coerce_openai_penalty,
     coerce_temperature,
@@ -96,6 +97,8 @@ class LLMSettings:
     presence_penalty: float | None = None
     seed: int | None = None
     max_tokens: int | None = None
+    #: Up to four stop strings forwarded to OpenAI-compatible ``/chat/completions`` when set.
+    stop: tuple[str, ...] | None = None
     extra_headers: dict[str, str] = field(default_factory=dict)
     http_retries: int = 0
     #: Upper bound on ``LLMBridge.parse`` response text length (after ``complete_text``) before ``json.loads``.
@@ -278,6 +281,7 @@ class OpenAICompatClient:
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
         response_format: dict[str, Any] | None = None,
+        stop: list[str] | None = None,
     ) -> dict[str, Any]:
         url = (base_url or self.settings.base_url).rstrip("/") + "/chat/completions"
         eff_max = max_tokens if max_tokens is not None else self.settings.max_tokens
@@ -296,6 +300,8 @@ class OpenAICompatClient:
             payload["seed"] = seed
         if eff_max is not None:
             payload["max_tokens"] = eff_max
+        if stop:
+            payload["stop"] = stop
         if response_format is not None:
             payload["response_format"] = response_format
         headers: dict[str, str] = {
@@ -384,6 +390,7 @@ class LLMBridge:
         extra_headers: dict[str, str] | None = None,
         native_response_format: bool | None = None,
         experiment: dict[str, Any] | None = None,
+        stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> LLMBridge:
         """Return a new bridge with merged per-call defaults (logged on each request as ``effective``)."""
 
@@ -420,6 +427,12 @@ class LLMBridge:
                 merged["experiment"] = {**prev, **experiment}
             else:
                 merged["experiment"] = dict(experiment)
+        if stop is not None:
+            coerced_stop = coerce_llm_stop_sequences(stop)
+            if coerced_stop is None:
+                merged.pop("stop", None)
+            else:
+                merged["stop"] = coerced_stop
         return LLMBridge(
             emit=self._emit,
             client=self._client,
@@ -442,6 +455,7 @@ class LLMBridge:
         provider: str | None,
         base_url: str | None,
         extra_headers: dict[str, str] | None,
+        stop: list[str] | tuple[str, ...] | str | None,
     ) -> tuple[dict[str, Any], dict[str, str], str]:
         d = self._defaults
         base = self._client.settings
@@ -504,6 +518,12 @@ class LLMBridge:
         hdrs.update(dict(base.extra_headers or {}))
         hdrs.update(dict(d.get("extra_headers") or {}))
         hdrs.update(extra_headers or {})
+        if stop is not None:
+            eff_stop = coerce_llm_stop_sequences(stop)
+        elif "stop" in d:
+            eff_stop = coerce_llm_stop_sequences(d.get("stop"))
+        else:
+            eff_stop = coerce_llm_stop_sequences(base.stop)
         effective: dict[str, Any] = {
             "model": eff_model,
             "base_url": eff_base_url,
@@ -521,6 +541,8 @@ class LLMBridge:
         exp = d.get("experiment")
         if isinstance(exp, dict) and exp:
             effective["experiment"] = dict(exp)
+        if eff_stop:
+            effective["stop"] = list(eff_stop)
         return effective, hdrs, eff_base_url
 
     @staticmethod
@@ -548,6 +570,7 @@ class LLMBridge:
         extra_headers: dict[str, str] | None = None,
         response_format: dict[str, Any] | None = None,
         effective_extras: dict[str, Any] | None = None,
+        stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         state = self._state_getter()
         effective, hdrs, eff_base_url = self._merge_call(
@@ -562,6 +585,7 @@ class LLMBridge:
             provider=provider,
             base_url=base_url,
             extra_headers=extra_headers,
+            stop=stop,
         )
         if effective_extras:
             effective = {**effective, **effective_extras}
@@ -573,6 +597,7 @@ class LLMBridge:
         eff_seed = coerce_llm_seed(effective.get("seed"))
         eff_max = effective["max_tokens"]
         eff_timeout = float(effective["timeout_seconds"])
+        eff_stop_list = list(effective["stop"]) if effective.get("stop") else None
 
         req_payload: dict[str, Any] = {"state": state, "effective": effective}
         if self._log_mode == LogMode.full:
@@ -599,6 +624,7 @@ class LLMBridge:
             base_url=eff_base_url,
             extra_headers=hdrs if hdrs else None,
             response_format=response_format,
+            stop=eff_stop_list,
         )
         dt_ms = int((time.perf_counter() - t0) * 1000)
         choice = (data.get("choices") or [{}])[0]
@@ -668,6 +694,7 @@ class LLMBridge:
         provider: str | None = None,
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> str:
         text, _effective = self._request_text(
             messages=messages,
@@ -682,6 +709,7 @@ class LLMBridge:
             provider=provider,
             base_url=base_url,
             extra_headers=extra_headers,
+            stop=stop,
         )
         return text
 
@@ -702,6 +730,7 @@ class LLMBridge:
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
         native_response_format: bool | None = None,
+        stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> T:
         use_native_response_format = (
             bool(self._defaults.get("native_response_format"))
@@ -745,6 +774,7 @@ class LLMBridge:
             extra_headers=extra_headers,
             response_format=response_format,
             effective_extras={"structured_output_mode": structured_output_mode},
+            stop=stop,
         )
         cap = self._client.settings.max_parse_response_chars
         if len(text) > cap:

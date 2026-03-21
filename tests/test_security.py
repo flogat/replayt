@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from replayt.security import (
+    extraneous_llm_credential_env_names,
+    llm_credential_env_presence,
     log_directory_permission_trust_checks,
     missing_actor_fields,
     normalize_name_list,
@@ -148,3 +150,31 @@ def test_redact_named_fields_nested() -> None:
 
 def test_missing_actor_fields_reports_empty_strings() -> None:
     assert missing_actor_fields({"email": " "}, required_fields=["email"]) == ["email"]
+
+
+def test_llm_credential_env_presence_never_includes_values(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "super-secret")
+    rows = llm_credential_env_presence()
+    assert all(set(r.keys()) == {"name", "present"} for r in rows)
+    anthropic = next(r for r in rows if r["name"] == "ANTHROPIC_API_KEY")
+    assert anthropic["present"] is True
+    blob = str(rows)
+    assert "super-secret" not in blob
+
+
+def test_extraneous_llm_credential_env_names_ignores_openai_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "x")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert extraneous_llm_credential_env_names() == ()
+
+
+def test_extraneous_llm_credential_env_names_lists_non_openai(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("GROQ_API_KEY", "k")
+    assert extraneous_llm_credential_env_names() == ("GROQ_API_KEY",)

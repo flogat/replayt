@@ -99,6 +99,17 @@ jq -r '.run_id, .status, .exit_code' .replayt/ci-summary.json
 
 For shell wrappers that already rely on env vars, **`REPLAYT_SUMMARY_JSON=path/to/summary.json replayt run ...`** writes the same machine-readable payload.
 
+To attach pipeline context without hard-coding vendor env var names into replayt, build a small JSON object and pass it as **`REPLAYT_CI_METADATA_JSON`** (only read when a summary path is in effect):
+
+```bash
+export REPLAYT_CI_METADATA_JSON="$(
+  jq -n --arg url "${CI_PIPELINE_URL:-}" --arg sha "${CI_COMMIT_SHA:-}" \
+    '{pipeline_url:$url, commit:$sha}'
+)"
+replayt ci mypkg.workflow:wf --summary-json .replayt/ci-summary.json
+# jq '.ci_metadata' .replayt/ci-summary.json
+```
+
 For one-command preflight before the real job, **`replayt doctor --skip-connectivity --target TARGET --strict-graph`** now loads the workflow, validates its graph/input flags, and checks that the resolved log / SQLite destinations are usable without executing the run.
 
 ### GitHub Actions and exit code `2`

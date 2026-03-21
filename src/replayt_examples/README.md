@@ -25,6 +25,10 @@ If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTA
 4. Inspect the run and compare the resulting context and events with the explanation here.
 5. Change the sample input and run again to see different behavior.
 
+### Optional: interactive onboarding TUIs and terminal recordings
+
+Some teams want a built-in **interactive onboarding wizard** or **asciinema** record/play commands. replayt keeps those out of core so install stays small and control flow stays explicit in your shell history. Treat **`docs/QUICKSTART.md`**, **`replayt try --list`**, **`replayt doctor`**, and the numbered sections below as your checklist. For shareable terminal demos, record with **asciinema** (or any screen recorder) in your own repo, or start from **`docs/DEMO.md`** and the checked-in cast **`docs/replayt-demo.cast`**.
+
 ### Install (PyPI, no clone required)
 
 ```bash
@@ -37,6 +41,16 @@ export OPENAI_API_KEY=...   # only for sections that call a live model
 Runnable tutorials ship in the **`replayt_examples`** package on PyPI (namespaced so it does not collide with a generic `examples` module in your own code).
 
 To skip reading this file front to back, run `replayt try --list`, then `replayt try --example issue-triage` (or another key) to execute a packaged sample with its default inputs. Add `--inputs-json @my-inputs.json` when you want the same example shape with your own payload. To edit the tutorial code in your repo, run `replayt try --example KEY --copy-to ./my-flow` (writes `workflow.py` and `inputs.example.json`; use `--force` to replace).
+
+### Default target for `replayt run` / `replayt ci`
+
+When you are iterating on one workflow, avoid repeating the module path on every command. Set **`REPLAYT_TARGET=my_pkg.workflow:wf`** in your environment, or add **`target = "my_pkg.workflow:wf"`** under **`[tool.replayt]`** (or in **`.replaytrc.toml`**). Then you can run:
+
+```bash
+replayt run --dry-run --inputs-json @inputs.example.json
+```
+
+An explicit **`TARGET` positional argument always overrides** the default. Check what applies in your shell with **`replayt config --format json`** (`run.default_target`, `run.default_target_source`). **`replayt resume`**, **`replayt validate`**, **`replayt graph`**, and **`replayt contract`** still require a target on the command line (or **`doctor --target`** for preflight only).
 
 ### Install (from this repository)
 
@@ -69,6 +83,10 @@ CMD ["replayt", "ci", "your_pkg.workflow:wf", "--strict-graph", "--summary-json"
 
 For GitHub Actions, keep **`--github-summary`** or **`REPLAYT_GITHUB_SUMMARY=1`** explicit in the workflow file so local runs and other CI vendors do not pick up surprising markdown behavior.
 
+### Beyond core: SARIF, vendor CI YAML, and Kubernetes Job specs
+
+Some teams want **SARIF** uploads, checked-in **GitLab**/**Circle** job definitions, or **Kubernetes Job** manifests co-located with replayt. Those formats are policy- and cluster-specific; replayt stays a workflow runner and emits **JUnit**, **GitHub step summaries** (when asked), and **`replayt.ci_run_summary.v1`** JSON instead of owning a security-scanner interchange or a blessed platform template repo. Generate SARIF or wrap Job YAML in **your** infra repository: drive **`replayt ci`** the same way as in any container, then post-process **`--summary-json`** with **`jq`** or a small script. For Kubernetes, mount your code image and run the same argv you use in GitHub Actions—no replayt-side operator is required.
+
 ## Beyond core: streaming, hooks, approvals, and logs
 
 replayt keeps explicit states, append-only **JSONL**, and structured LLM outputs. Use **`ctx.llm.with_settings(...)`** for per-call overrides; they show up under **`effective`** on **`llm_request`** events. Core does **not** log per-token streams because that is too noisy for replay. Stream inside a step, then store a **Pydantic-validated** result or a short summary. **`replayt resume`** covers many approval flows; richer UIs can read the same JSONL and resolve gates in **your** app. Notifications, trace IDs, and policy hooks belong in wrappers or callbacks. If you need stronger audit handoff, hash, encrypt, or archive **your** logs; the runtime cannot prove integrity if an attacker can write the log directory (see **Security and trust boundaries** in [`README.md`](../../README.md)).
@@ -85,6 +103,14 @@ Share a read-only timeline for review without building a server:
 ```bash
 replayt replay <run_id> --format html --out run.html
 ```
+
+**Markdown run summary** (paste into tickets or chat; same **`--style`** rules as HTML). Paused runs include a copy-paste **`replayt resume TARGET …`** line—replace **`TARGET`** with your **`module:wf`** or workflow path.
+
+```bash
+replayt report <run_id> --format markdown --style support --out handoff.md
+```
+
+**`bundle-export`** still ships **`report.html`** only; generate **`.md`** in CI with **`--format markdown`** when your process wants both.
 
 Optional **line/file SHA-256 manifest** for a JSONL run (extra audit packet, not proof against someone who can edit the log dir):
 
@@ -142,6 +168,25 @@ def with_langgraph(ctx):
 ```
 
 Human gates stay replayt-native: **`ctx.request_approval`** or the **Pattern: approval bridge** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)**.
+
+### Finding runs that used a typed tool
+
+Each **`ctx.tools.call(...)`** still emits normal **`tool_call`** / **`tool_result`** lines. To list local runs that invoked a particular registered tool (for example after wrapping LangChain tool nodes in one sandbox step), filter by exact tool name:
+
+```bash
+replayt runs --tool search_repo --tool fetch_url --limit 50
+```
+
+Pair with **`replayt inspect RUN_ID --event-type tool_call`** when you only want those events from one run.
+
+### Beyond core: graph checkpoints and model-driven multi-tool turns
+
+replayt does not import LangGraph **checkpoints** or thread blobs into the parent JSONL timeline; keep checkpoints inside the graph library and persist **one** validated exit shape to replayt context (see **Pattern: workflow composition via explicit sub-run** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** when you need a separate child **`run_id`**). The runtime also does not fan out a single model **`tool_calls` array** into parallel replayt states—that would hide scheduling order. Execute tool calls in a deterministic order inside the handler, then transition explicitly:
+
+```python
+for spec in tool_calls_from_model:
+    ctx.tools.call(spec["name"], spec["arguments"])
+```
 
 ## 1. Hello world - `replayt_examples.e01_hello_world`
 

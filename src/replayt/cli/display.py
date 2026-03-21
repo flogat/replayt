@@ -174,6 +174,35 @@ def experiment_filters_match(run_exp: dict[str, Any], filters: dict[str, str]) -
     return all(k in run_exp and str(run_exp[k]) == v for k, v in filters.items())
 
 
+def parse_tool_name_filters(raw: list[str] | None) -> frozenset[str] | None:
+    """Normalize repeatable `--tool` CLI values (exact name match; OR semantics across values)."""
+    if not raw:
+        return None
+    normalized: list[str] = []
+    for item in raw:
+        name = str(item).strip()
+        if not name:
+            raise typer.BadParameter(
+                "Empty --tool is not allowed; omit the flag or pass a tool `name` "
+                "(exact match against JSONL `tool_call` payload `name`; repeat for OR)."
+            )
+        normalized.append(name)
+    return frozenset(normalized)
+
+
+def run_matches_tool_name_filter(events: list[dict[str, Any]], wanted: frozenset[str] | None) -> bool:
+    if wanted is None:
+        return True
+    for e in events:
+        if e.get("type") != "tool_call":
+            continue
+        payload = e.get("payload") or {}
+        n = payload.get("name")
+        if isinstance(n, str) and n in wanted:
+            return True
+    return False
+
+
 def parse_iso_ts(ts: str | None) -> datetime | None:
     if not ts:
         return None

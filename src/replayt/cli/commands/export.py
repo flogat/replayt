@@ -19,9 +19,16 @@ from replayt.cli.config import (
     get_project_config,
     parse_log_mode,
     resolve_log_dir,
+    seal_hook_timeout_seconds,
 )
 from replayt.cli.display import replay_html
-from replayt.cli.run_support import export_hook_argv, invoke_export_hook
+from replayt.cli.run_id_hints import echo_missing_run_hints
+from replayt.cli.run_support import (
+    export_hook_argv,
+    invoke_export_hook,
+    invoke_seal_hook,
+    seal_hook_argv,
+)
 from replayt.cli.stores import read_store
 from replayt.cli.targets import load_target
 from replayt.export_run import events_to_jsonl_lines
@@ -41,7 +48,7 @@ def _maybe_invoke_export_hook(
     event_count: int,
     report_style: str | None = None,
 ) -> None:
-    cfg, _ = get_project_config()
+    cfg, _, _ = get_project_config()
     hook = export_hook_argv(cfg)
     if not hook:
         return
@@ -70,6 +77,42 @@ def _maybe_invoke_export_hook(
         raise typer.Exit(code=1) from exc
     except subprocess.CalledProcessError as exc:
         typer.echo(f"export_hook exited with code {exc.returncode}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _maybe_invoke_seal_hook(
+    *,
+    run_id: str,
+    log_dir: Path,
+    jsonl_path: Path,
+    seal_out: Path,
+    line_count: int,
+) -> None:
+    cfg, _, _ = get_project_config()
+    hook = seal_hook_argv(cfg)
+    if not hook:
+        return
+    hook_timeout = seal_hook_timeout_seconds(cfg)
+    try:
+        invoke_seal_hook(
+            hook,
+            run_id=run_id,
+            log_dir=log_dir,
+            jsonl_path=jsonl_path,
+            seal_out=seal_out,
+            line_count=line_count,
+            timeout_seconds=hook_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
+        typer.echo(
+            f"seal_hook timed out (limit {lim}); set REPLAYT_SEAL_HOOK_TIMEOUT or "
+            "seal_hook_timeout in project config (<=0 for no limit).",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    except subprocess.CalledProcessError as exc:
+        typer.echo(f"seal_hook exited with code {exc.returncode}", err=True)
         raise typer.Exit(code=1) from exc
 
 
@@ -125,7 +168,7 @@ def cmd_seal(
         safe_run_id = validate_run_id(run_id)
     except ValueError as exc:
         typer.echo(str(exc), err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     log_root = log_dir.resolve()
     path = (log_dir / f"{safe_run_id}.jsonl").resolve()
@@ -136,19 +179,20 @@ def cmd_seal(
             f"Refusing to seal JSONL outside log directory: {path} is not under {log_root}",
             err=True,
         )
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
     if not path.is_file():
         typer.echo(
             f"No JSONL at {path} (``seal`` applies to the primary JSONL file, not SQLite-only stores).",
             err=True,
         )
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
+    raw = path.read_bytes()
     manifest = _seal_manifest(
         schema="replayt.seal.v1",
         run_id=safe_run_id,
         jsonl_path=str(path.resolve()),
-        raw=path.read_bytes(),
+        raw=raw,
         note=(
             "Best-effort integrity record. Anyone who can write the log directory can replace "
             "both the JSONL and this manifest; use WORM storage or external signing for stronger guarantees."
@@ -156,6 +200,13 @@ def cmd_seal(
     )
     out_path = out if out is not None else log_dir / f"{safe_run_id}.seal.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
+    _maybe_invoke_seal_hook(
+        run_id=safe_run_id,
+        log_dir=log_dir,
+        jsonl_path=path,
+        seal_out=out_path,
+        line_count=int(manifest["line_count"]),
+    )
     out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if output == "json":
         typer.echo(json.dumps({**manifest, "manifest_path": str(out_path.resolve())}, indent=2))
@@ -192,18 +243,18 @@ def cmd_verify_seal(
         safe_run_id = validate_run_id(run_id)
     except ValueError as exc:
         typer.echo(str(exc), err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     manifest_path = manifest if manifest is not None else log_dir / f"{safe_run_id}.seal.json"
     if not manifest_path.is_file():
         typer.echo(f"No seal manifest at {manifest_path}", err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     try:
         data: dict[str, Any] = json.loads(manifest_path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         typer.echo(f"Invalid JSON in manifest: {exc}", err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     schema = data.get("schema")
     if schema not in _SEAL_VERIFY_SCHEMAS:
@@ -211,12 +262,12 @@ def cmd_verify_seal(
             f"Unsupported manifest schema {schema!r} (expected one of {sorted(_SEAL_VERIFY_SCHEMAS)})",
             err=True,
         )
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     mid = data.get("run_id")
     if mid != safe_run_id:
         typer.echo(f"Manifest run_id {mid!r} does not match argument {safe_run_id!r}", err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     expected_file = data.get("file_sha256")
     expected_lines = data.get("line_sha256")
@@ -225,10 +276,10 @@ def cmd_verify_seal(
         expected_count, int
     ):
         typer.echo("Manifest is missing file_sha256, line_sha256, or line_count", err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
     if not all(isinstance(x, str) for x in expected_lines):
         typer.echo("Manifest line_sha256 must be a list of strings", err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     jsonl_path: Path | None = None
     if jsonl is not None:
@@ -249,12 +300,12 @@ def cmd_verify_seal(
                 f"Refusing to verify JSONL outside log directory: {candidate} is not under {log_root}",
                 err=True,
             )
-            raise typer.Exit(code=2)
+            raise typer.Exit(code=1)
         jsonl_path = candidate
 
     if not jsonl_path.is_file():
         typer.echo(f"No JSONL at {jsonl_path}", err=True)
-        raise typer.Exit(code=2)
+        raise typer.Exit(code=1)
 
     raw = jsonl_path.read_bytes()
     file_digest, line_digests, line_count = compute_seal_digests(raw)
@@ -302,19 +353,29 @@ def cmd_report(
         "--style",
         help="default (full), stakeholder, or support (failure/approval-first; omits tool/token sections).",
     ),
+    report_format: Literal["html", "markdown"] = typer.Option(
+        "html",
+        "--format",
+        help="html (self-contained page) or markdown (paste into tickets / chat).",
+    ),
 ) -> None:
-    """Generate a self-contained HTML report for a run."""
+    """Generate a self-contained HTML or Markdown report for a run."""
 
-    from replayt.cli.report_template import build_run_report_html
+    from replayt.cli.report_template import build_run_report_html, build_run_report_markdown
 
+    cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r}", err=True)
-        raise typer.Exit(code=2)
+        echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+        raise typer.Exit(code=1)
 
-    report = build_run_report_html(run_id, events, style=style)
+    if report_format == "markdown":
+        report = build_run_report_markdown(run_id, events, style=style)
+    else:
+        report = build_run_report_html(run_id, events, style=style)
 
     if out:
         out_path = Path(out)
@@ -337,16 +398,19 @@ def cmd_report_diff(
 
     from replayt.cli.report_template import build_report_diff_html, collect_report_context
 
+    cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
     with read_store(log_dir, sqlite) as store:
         events_a = store.load_events(run_a)
         events_b = store.load_events(run_b)
     if not events_a:
         typer.echo(f"No events for run_id={run_a!r}", err=True)
-        raise typer.Exit(code=2)
+        echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+        raise typer.Exit(code=1)
     if not events_b:
         typer.echo(f"No events for run_id={run_b!r}", err=True)
-        raise typer.Exit(code=2)
+        echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+        raise typer.Exit(code=1)
     ctx_a = collect_report_context(events_a)
     ctx_b = collect_report_context(events_b)
     doc = build_report_diff_html(run_a, run_b, ctx_a, ctx_b)
@@ -379,13 +443,15 @@ def cmd_export_run(
 ) -> None:
     """Write a shareable .tar.gz: sanitized events.jsonl + manifest.json."""
 
+    cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
     lm = parse_log_mode(export_mode)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r}", err=True)
-        raise typer.Exit(code=2)
+        echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+        raise typer.Exit(code=1)
 
     _maybe_invoke_export_hook(
         run_id=run_id,
@@ -473,13 +539,15 @@ def cmd_bundle_export(
 
     from replayt.cli.report_template import build_run_report_html
 
+    cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
     lm = parse_log_mode(export_mode)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r}", err=True)
-        raise typer.Exit(code=2)
+        echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+        raise typer.Exit(code=1)
 
     _maybe_invoke_export_hook(
         run_id=run_id,

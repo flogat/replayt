@@ -21,7 +21,7 @@ Commits on the first-parent line from **`v0.2.0`** (`6a06bc9`) through **`f4a676
 | Commit | Summary | Primary themes |
 | ------ | ------- | -------------- |
 | `8ceda2c` | Harden security, fix bugs, improve docs for 0.2.0 | Security (XSS, safe YAML format), LLM client pooling + retries, MultiStore mirrors, templates, CHANGELOG / CONTRIBUTING |
-| `c415ea6` | Critical bugs, resource leak, robustness (code review) | CLI tool events (`name` / `arguments`), YAML scaffold `next`, Runner + httpx lifecycle, snapshot deep copy, `diff --sqlite`, MultiStore.append, tests |
+| `c415ea6` | Critical bugs, resource leak, reliability (code review) | CLI tool events (`name` / `arguments`), YAML scaffold `next`, Runner + httpx lifecycle, snapshot deep copy, `diff --sqlite`, MultiStore.append, tests |
 | `cf3879f` | Remove AI-slop patterns from README, DEMO, examples | Documentation tone |
 | `2b46cc3` | Animated SVG demos (run / inspect / replay, approval, debug, comparison) | Docs / UX, examples README |
 | `b47852b` | Fix clip-path so replay command text is visible | Docs (SVG) |
@@ -29,7 +29,7 @@ Commits on the first-parent line from **`v0.2.0`** (`6a06bc9`) through **`f4a676
 | `98b01cb` | Hero demo: refund story + annotations | Docs (SVG) |
 | `3b9d371` | Quickstart, scope split, README onboarding, Beta classifier | Docs site map, PyPI Beta, CONTRIBUTING |
 | `a93f07a` | GTM-style doc split + INSTALL / CLI / CONFIG / COMPARISON | New doc files, JSONL tail recovery, MultiStore, runner/YAML/CLI/report, cast asset |
-| `fb8f94c` | **feat! v0.3.0** — `replayt_examples` rename + doc overhaul | **Breaking** package rename, PRODUCTION / RECIPES, Cursor skills, CLI / types / LLM / tests |
+| `fb8f94c` | **feat! v0.3.0:** `replayt_examples` rename + doc overhaul | **Breaking** package rename, PRODUCTION / RECIPES, Cursor skills, CLI / types / LLM / tests |
 | `59d5f38` | Seal, runner hooks, CI changelog gate, try / ci / report / dry-check | `replayt seal`, `before_step` / `after_step`, `try` / `ci`, dry-check, stakeholder report, workflow meta + LLM experiment, CI gate + tests |
 | `7f31743` | Export bundles, report-diff, run metadata, log dir env / subdir | `export-run` tarball + schema, report-diff HTML, `REPLAYT_LOG_DIR`, `--log-subdir`, `--metadata-json`, run-meta filters, state validation, tutorial LangGraph note |
 | `f4a676a` | Split Typer app into modules, LLM coercion, CI artifacts | `cli/commands/*`, `llm_coercion`, `ci_artifacts`, `validation`, stores/targets/run_support, approval id string storage, expanded tests + docs |

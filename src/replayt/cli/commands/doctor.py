@@ -24,7 +24,12 @@ from replayt.cli.validation import (
     validate_workflow_graph,
     validation_report,
 )
-from replayt.security import log_directory_permission_trust_checks, trust_boundary_checks
+from replayt.security import (
+    extraneous_llm_credential_env_names,
+    llm_credential_env_presence,
+    log_directory_permission_trust_checks,
+    trust_boundary_checks,
+)
 
 
 def cmd_doctor(
@@ -74,7 +79,7 @@ def cmd_doctor(
     except ImportError:
         pkg_ver = "unknown"
 
-    cfg, cfg_path = get_project_config()
+    cfg, cfg_path, unknown_cfg_keys = get_project_config()
     settings, llm_report = resolve_llm_settings(cfg)
     settings_error = llm_report.get("error")
     resolved_log_mode, _log_mode_source = resolve_log_mode_setting("redacted", cfg)
@@ -87,6 +92,16 @@ def cmd_doctor(
         checks.append(("project_config", True, cfg_path))
     else:
         checks.append(("project_config", False, "No project config found"))
+    if unknown_cfg_keys:
+        checks.append(
+            (
+                "project_config_unknown_keys",
+                False,
+                "ignored: " + ", ".join(sorted(unknown_cfg_keys)),
+            )
+        )
+    else:
+        checks.append(("project_config_unknown_keys", True, "none"))
     pyver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     checks.append(("python", True, pyver))
     checks.append(
@@ -104,6 +119,23 @@ def cmd_doctor(
             "set" if llm_report["api_key_present"] else "missing",
         )
     )
+    extra_cred_env = extraneous_llm_credential_env_names()
+    if extra_cred_env:
+        checks.append(
+            (
+                "credential_env_extra_providers",
+                False,
+                "non-empty env (not read by replayt's OpenAI-compat client): " + ", ".join(extra_cred_env),
+            )
+        )
+    else:
+        checks.append(
+            (
+                "credential_env_extra_providers",
+                True,
+                "no extra provider credential env vars (see credential_env in JSON for full name/presence map)",
+            )
+        )
     if settings_error is None and settings is not None:
         checks.append(("openai_base_url", True, f"{settings.base_url} ({llm_report['base_url_source']})"))
         checks.append(("model", True, f"{settings.model} ({llm_report['model_source']})"))
@@ -125,23 +157,25 @@ def cmd_doctor(
     elif skip_connectivity:
         checks.append(("provider_connectivity", True, "skipped (--skip-connectivity)"))
     else:
-        try:
-            import httpx
+        if settings is None:
+            checks.append(("provider_connectivity", False, "skipped (no resolved LLM settings)"))
+        else:
+            try:
+                import httpx
 
-            assert settings is not None
-            with httpx.Client(timeout=5.0) as http_client:
-                headers: dict[str, str] = {}
-                if settings.api_key:
-                    headers["Authorization"] = f"Bearer {settings.api_key}"
-                r = http_client.get(settings.base_url.rstrip("/") + "/models", headers=headers)
-            reachable = r.status_code < 500
-            detail = f"HTTP {r.status_code}"
-            if r.status_code == 404:
-                detail += " (/models not implemented - try a chat request)"
-            connectivity_detail = detail if reachable else f"{detail} (server error)"
-            checks.append(("provider_connectivity", reachable, connectivity_detail))
-        except Exception as exc:  # noqa: BLE001
-            checks.append(("provider_connectivity", False, str(exc)))
+                with httpx.Client(timeout=5.0) as http_client:
+                    headers: dict[str, str] = {}
+                    if settings.api_key:
+                        headers["Authorization"] = f"Bearer {settings.api_key}"
+                    r = http_client.get(settings.base_url.rstrip("/") + "/models", headers=headers)
+                reachable = r.status_code < 500
+                detail = f"HTTP {r.status_code}"
+                if r.status_code == 404:
+                    detail += " (/models not implemented - try a chat request)"
+                connectivity_detail = detail if reachable else f"{detail} (server error)"
+                checks.append(("provider_connectivity", reachable, connectivity_detail))
+            except Exception as exc:  # noqa: BLE001
+                checks.append(("provider_connectivity", False, str(exc)))
 
     for check in trust_boundary_checks(base_url=llm_report.get("base_url"), log_mode=resolved_log_mode):
         checks.append((check.name, check.ok, check.detail))
@@ -185,11 +219,19 @@ def cmd_doctor(
         "openai_api_key": "export OPENAI_API_KEY=... (see docs/QUICKSTART.md)",
         "yaml_extra": "pip install 'replayt[yaml]' for .yaml workflow targets",
         "project_config": "optional [tool.replayt] - docs/CONFIG.md",
+        "project_config_unknown_keys": (
+            "Remove or rename keys to match docs/CONFIG.md; run `replayt config --format json` "
+            "and inspect project_config.unknown_keys."
+        ),
         "provider_config": "set OPENAI_BASE_URL to an OpenAI-compatible gateway or use a supported preset",
         "provider_connectivity": "try replayt doctor --skip-connectivity; check OPENAI_BASE_URL",
         "trust_log_mode": "Prefer redacted or structured_only for logs that may contain sensitive text.",
         "trust_base_url_transport": "Use HTTPS for remote providers; keep plain HTTP for localhost-only gateways.",
         "trust_base_url_credentials": "Move secrets out of OPENAI_BASE_URL and into headers or env vars.",
+        "credential_env_extra_providers": (
+            "replayt does not load these vendor env vars; unset them in this shell or document why they "
+            "remain for other tools—see README security notes and credential_env in doctor JSON."
+        ),
         "trust_log_dir_other_readable": (
             "Tighten log_dir permissions so other OS accounts cannot read JSONL audit files."
         ),
@@ -207,18 +249,21 @@ def cmd_doctor(
         soft = {
             "openai_api_key",
             "project_config",
+            "project_config_unknown_keys",
             "yaml_extra",
             "trust_log_mode",
             "trust_base_url_transport",
             "trust_base_url_credentials",
             "trust_log_dir_other_readable",
             "trust_log_dir_other_writable",
+            "credential_env_extra_providers",
         }
         healthy = all(ok for n, ok, _ in checks if n not in soft)
         payload = {
             "schema": "replayt.doctor_report.v1",
             "healthy": healthy,
             "checks": [{"name": n, "ok": o, "detail": d, "hint": hints.get(n)} for n, o, d in checks],
+            "credential_env": llm_credential_env_presence(),
             "resolved_paths": {
                 "log_dir": str(resolved_log_dir),
                 "sqlite": str(resolved_sqlite) if resolved_sqlite is not None else None,

@@ -13,6 +13,7 @@ from replayt.cli.config import (
     DEFAULT_LOG_DIR,
     export_hook_timeout_seconds,
     get_project_config,
+    preview_default_cli_target,
     resolve_approval_actor_required_keys,
     resolve_llm_settings,
     resolve_log_dir,
@@ -23,10 +24,15 @@ from replayt.cli.config import (
     resolve_timeout_setting,
     resume_hook_timeout_seconds,
     run_hook_timeout_seconds,
+    seal_hook_timeout_seconds,
 )
 from replayt.cli.path_readiness import readiness_checks
-from replayt.cli.run_support import export_hook_argv, resume_hook_argv, run_hook_argv
-from replayt.security import log_directory_permission_trust_checks, trust_boundary_checks
+from replayt.cli.run_support import export_hook_argv, resume_hook_argv, run_hook_argv, seal_hook_argv
+from replayt.security import (
+    extraneous_llm_credential_env_names,
+    log_directory_permission_trust_checks,
+    trust_boundary_checks,
+)
 
 
 def _config_report(
@@ -37,7 +43,7 @@ def _config_report(
     log_mode: str,
     timeout: int | None,
 ) -> dict[str, object]:
-    cfg, cfg_path = get_project_config()
+    cfg, cfg_path, unknown_keys = get_project_config()
     resolved_log_dir = resolve_log_dir(log_dir, log_subdir)
     sqlite_path, sqlite_source = resolve_sqlite_path(sqlite, cfg, config_path=cfg_path)
     resolved_log_mode, log_mode_source = resolve_log_mode_setting(log_mode, cfg)
@@ -52,6 +58,7 @@ def _config_report(
     else:
         strict_mirror_source = "derived:no-sqlite"
     llm_settings, llm_report = resolve_llm_settings(cfg)
+    default_target, default_target_source = preview_default_cli_target(cfg)
 
     env_run_hook = os.environ.get("REPLAYT_RUN_HOOK", "").strip()
     run_hook = run_hook_argv(cfg)
@@ -103,6 +110,23 @@ def _config_report(
         export_hook_timeout_source = "project_config:export_hook_timeout"
     else:
         export_hook_timeout_source = "default:120"
+
+    env_seal_hook = os.environ.get("REPLAYT_SEAL_HOOK", "").strip()
+    seal_hook = seal_hook_argv(cfg)
+    if env_seal_hook:
+        seal_hook_source = "env:REPLAYT_SEAL_HOOK"
+    elif cfg.get("seal_hook"):
+        seal_hook_source = "project_config:seal_hook"
+    else:
+        seal_hook_source = "unset"
+
+    env_seal_hook_timeout = os.environ.get("REPLAYT_SEAL_HOOK_TIMEOUT", "").strip()
+    if env_seal_hook_timeout:
+        seal_hook_timeout_source = "env:REPLAYT_SEAL_HOOK_TIMEOUT"
+    elif cfg.get("seal_hook_timeout") is not None:
+        seal_hook_timeout_source = "project_config:seal_hook_timeout"
+    else:
+        seal_hook_timeout_source = "default:120"
     trust_checks = trust_boundary_checks(
         base_url=llm_report.get("base_url"),
         log_mode=resolved_log_mode,
@@ -114,6 +138,7 @@ def _config_report(
         "project_config": {
             "path": cfg_path,
             "keys": sorted(cfg.keys()),
+            "unknown_keys": sorted(unknown_keys),
         },
         "paths": {
             "log_dir": str(resolved_log_dir),
@@ -133,6 +158,8 @@ def _config_report(
             "strict_mirror_source": strict_mirror_source,
         },
         "run": {
+            "default_target": default_target,
+            "default_target_source": default_target_source,
             "hook_argv": run_hook,
             "hook_source": run_hook_source,
             "hook_timeout_seconds": run_hook_timeout_seconds(cfg),
@@ -151,6 +178,12 @@ def _config_report(
             "hook_source": export_hook_source,
             "hook_timeout_seconds": export_hook_timeout_seconds(cfg),
             "hook_timeout_source": export_hook_timeout_source,
+        },
+        "seal": {
+            "hook_argv": seal_hook,
+            "hook_source": seal_hook_source,
+            "hook_timeout_seconds": seal_hook_timeout_seconds(cfg),
+            "hook_timeout_source": seal_hook_timeout_source,
         },
         "llm": {
             **llm_report,
@@ -212,8 +245,12 @@ def cmd_config(
     run = report["run"]
     resume = report["resume"]
     export = report["export"]
+    seal = report["seal"]
     llm = report["llm"]
     typer.echo(f"project_config={project['path'] or '(none)'}")
+    uk = project.get("unknown_keys") or []
+    if uk:
+        typer.echo(f"project_config_unknown_keys={uk} (ignored; see docs/CONFIG.md#unknown-keys)")
     typer.echo(f"log_dir={paths['log_dir']} ({paths['log_dir_source']})")
     typer.echo(f"log_subdir={paths['log_subdir'] or '(none)'}")
     typer.echo(f"sqlite={paths['sqlite'] or '(none)'} ({paths['sqlite_source']})")
@@ -221,6 +258,8 @@ def cmd_config(
     typer.echo(f"redact_keys={runtime['redact_keys'] or '(none)'} ({runtime['redact_keys_source']})")
     typer.echo(f"timeout_seconds={runtime['timeout_seconds']} ({runtime['timeout_source']})")
     typer.echo(f"strict_mirror={runtime['strict_mirror']} ({runtime['strict_mirror_source']})")
+    dt = run["default_target"]
+    typer.echo(f"default_target={dt or '(none)'} ({run['default_target_source']})")
     typer.echo(f"run_hook={run['hook_argv'] or '(none)'} ({run['hook_source']})")
     typer.echo(f"run_hook_timeout_seconds={run['hook_timeout_seconds']} ({run['hook_timeout_source']})")
     typer.echo(f"resume_hook={resume['hook_argv'] or '(none)'} ({resume['hook_source']})")
@@ -236,10 +275,20 @@ def cmd_config(
         f"export_hook_timeout_seconds={export['hook_timeout_seconds']} "
         f"({export['hook_timeout_source']})"
     )
+    typer.echo(f"seal_hook={seal['hook_argv'] or '(none)'} ({seal['hook_source']})")
+    typer.echo(
+        f"seal_hook_timeout_seconds={seal['hook_timeout_seconds']} ({seal['hook_timeout_source']})"
+    )
     typer.echo(f"provider={llm['provider']} ({llm['provider_source']})")
     typer.echo(f"base_url={llm.get('base_url') or '(invalid)'} ({llm['base_url_source']})")
     typer.echo(f"model={llm.get('model') or '(invalid)'} ({llm['model_source']})")
     typer.echo(f"openai_api_key={'set' if llm['api_key_present'] else 'missing'} ({llm['api_key_source']})")
+    extra_cred = extraneous_llm_credential_env_names()
+    if extra_cred:
+        typer.echo(
+            "credential_env_note=These env vars are set but are not read by replayt's OpenAI-compat "
+            f"client: {', '.join(extra_cred)} (presence-only audit; see --format json llm.credential_env)."
+        )
     if llm.get("error"):
         typer.echo(f"provider_error={llm['error']}")
     for warning in report["trust_boundary"]["warnings"]:

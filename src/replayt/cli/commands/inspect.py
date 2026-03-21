@@ -20,12 +20,15 @@ from replayt.cli.display import (
     parse_iso_ts,
     parse_meta_filters,
     parse_tag_filters,
+    parse_tool_name_filters,
     replay_html,
     replay_timeline_lines,
     run_diff_data,
+    run_matches_tool_name_filter,
     run_meta_filters_match,
     tags_match,
 )
+from replayt.cli.run_id_hints import echo_missing_run_hints
 from replayt.cli.stores import read_store
 from replayt.cli.targets import load_target
 from replayt.cli.validation import inputs_json_from_options, validate_workflow_graph, validation_report
@@ -91,13 +94,15 @@ def cmd_inspect(
         help="text (default) or json.",
     ),
 ) -> None:
+    cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
     type_filters = _event_type_filters(event_type)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r} in {log_dir}", err=True)
-        raise typer.Exit(code=2)
+        echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+        raise typer.Exit(code=1)
     filtered = _filter_events_by_type(events, type_filters)
     use_json = as_json or output == "json"
     if use_json:
@@ -153,12 +158,14 @@ def cmd_replay(
 ) -> None:
     """Print a human-readable timeline from the recorded run (does not call model APIs)."""
 
+    cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r}", err=True)
-        raise typer.Exit(code=2)
+        echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+        raise typer.Exit(code=1)
     if format == "html":
         doc = replay_html(run_id, events)
         if out is not None:
@@ -321,6 +328,11 @@ def cmd_runs(
         "--experiment",
         help="Filter by run_started.experiment key=value (string match; repeatable).",
     ),
+    tool: list[str] | None = typer.Option(
+        None,
+        "--tool",
+        help="Only runs that recorded a `tool_call` with this `name` (exact match; repeatable; OR).",
+    ),
 ) -> None:
     """List recent local runs from JSONL logs."""
 
@@ -328,6 +340,7 @@ def cmd_runs(
     tag_filters = parse_tag_filters(tag)
     meta_filters = parse_meta_filters(run_meta)
     exp_filters = parse_tag_filters(experiment)
+    tool_filters = parse_tool_name_filters(tool)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     with read_store(log_dir, sqlite) as store:
         runs_data: list[tuple[str, dict[str, Any]]] = []
@@ -341,6 +354,8 @@ def cmd_runs(
             if exp_filters and not experiment_filters_match(summary.get("experiment") or {}, exp_filters):
                 continue
             if status_filters is not None and summary.get("status") not in status_filters:
+                continue
+            if not run_matches_tool_name_filter(events, tool_filters):
                 continue
             runs_data.append((rid, summary))
 
@@ -384,6 +399,11 @@ def cmd_stats(
         "--experiment",
         help="Filter by run_started.experiment key=value (repeatable).",
     ),
+    tool: list[str] | None = typer.Option(
+        None,
+        "--tool",
+        help="Only runs that recorded a `tool_call` with this `name` (exact match; repeatable; OR).",
+    ),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """Summarize local run logs: counts, LLM latency averages, token usage, common failure states."""
@@ -391,6 +411,7 @@ def cmd_stats(
     tag_filters = parse_tag_filters(tag)
     meta_filters = parse_meta_filters(run_meta)
     exp_filters = parse_tag_filters(experiment)
+    tool_filters = parse_tool_name_filters(tool)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     now = datetime.now(timezone.utc)
     cutoff = None
@@ -428,6 +449,8 @@ def cmd_stats(
         if meta_filters and not run_meta_filters_match(summ.get("run_metadata") or {}, meta_filters):
             continue
         if exp_filters and not experiment_filters_match(summ.get("experiment") or {}, exp_filters):
+            continue
+        if not run_matches_tool_name_filter(events, tool_filters):
             continue
         total += 1
         st = str(summ.get("status", "unknown"))
@@ -514,16 +537,19 @@ def cmd_diff(
 ) -> None:
     """Compare two runs side by side: states, outputs, tool calls, status, latency."""
 
+    cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
     with read_store(log_dir, sqlite) as store:
         events_a = store.load_events(run_a)
         events_b = store.load_events(run_b)
     if not events_a:
         typer.echo(f"No events for run_id={run_a!r}", err=True)
-        raise typer.Exit(code=2)
+        echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+        raise typer.Exit(code=1)
     if not events_b:
         typer.echo(f"No events for run_id={run_b!r}", err=True)
-        raise typer.Exit(code=2)
+        echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+        raise typer.Exit(code=1)
 
     da = run_diff_data(events_a)
     db = run_diff_data(events_b)
@@ -628,7 +654,7 @@ def cmd_gc(
     if sqlite is not None:
         if not sqlite.is_file():
             typer.echo(f"SQLite store not found: {sqlite}", err=True)
-            raise typer.Exit(code=2)
+            raise typer.Exit(code=1)
         sqlite_store = SQLiteStore(sqlite)
     run_ids = set(jsonl_store.list_run_ids())
     if sqlite_store is not None:

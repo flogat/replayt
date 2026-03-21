@@ -248,6 +248,7 @@ def test_runner_run_started_includes_runtime_snapshot(tmp_path: Path) -> None:
     assert runtime["llm"]["frequency_penalty"] == 0.1
     assert runtime["llm"]["presence_penalty"] == -0.2
     assert runtime["llm"]["seed"] == 7
+    assert runtime["llm"]["stop"] is None
     assert runtime["llm"]["api_key_present"] is True
     assert runtime["trust_boundary"]["warnings"] == ["full log mode stores raw LLM request and response bodies on disk"]
 

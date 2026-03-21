@@ -47,12 +47,15 @@ The workflow lives in `.github/workflows/publish.yml` and triggers on any tag ma
 During release prep or API review, these repo-local scripts keep the public surface and docs inventory explicit:
 
 ```bash
+python scripts/maintainer_checks.py
+python scripts/maintainer_checks.py --format json --changelog-nonempty
 python scripts/public_api_report.py --format json
 python scripts/check_docs_index.py
 python scripts/changelog_unreleased.py --check-nonempty
 python scripts/version_consistency.py
 ```
 
+- `maintainer_checks.py` runs the version, Unreleased changelog, docs index, and public API surface checks above in one process (optional `--changelog-nonempty`, `--skip-*` for partial trees, `--verbose` JSON with embedded sub-reports).
 - `public_api_report.py` snapshots the top-level `replayt` exports from `__all__`, including any declared-but-missing names that would make semver review or docs examples misleading.
 - `check_docs_index.py` verifies that `docs/README.md` still indexes every top-level docs file and that the main README documentation links resolve.
 - `changelog_unreleased.py` extracts `CHANGELOG.md` -> `## Unreleased` as text or JSON so release-note work does not depend on ad hoc markdown parsing.

@@ -2,7 +2,42 @@
 
 from __future__ import annotations
 
+import math
 from typing import Any
+
+# OpenAI-compatible chat APIs accept up to four stop sequences; cap string length to keep logs bounded.
+_MAX_LLM_STOP_SLOTS = 4
+_MAX_LLM_STOP_STR_CHARS = 512
+
+
+def coerce_llm_stop_sequences(value: Any) -> list[str] | None:
+    """Normalize ``stop`` for OpenAI-style ``/chat/completions`` (omit from JSON when ``None``)."""
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        return None if not s else [s]
+    if isinstance(value, (list, tuple)):
+        seqs: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise TypeError(f"stop sequences must be strings, got {type(item).__name__}")
+            t = item.strip()
+            if t:
+                seqs.append(t)
+        if not seqs:
+            return None
+    else:
+        raise TypeError(f"stop must be str, list, or tuple, got {type(value).__name__}")
+    if len(seqs) > _MAX_LLM_STOP_SLOTS:
+        raise ValueError(f"at most {_MAX_LLM_STOP_SLOTS} stop sequences allowed, got {len(seqs)}")
+    for i, s in enumerate(seqs):
+        if len(s) > _MAX_LLM_STOP_STR_CHARS:
+            raise ValueError(
+                f"stop sequence [{i}] length {len(s)} exceeds max {_MAX_LLM_STOP_STR_CHARS} characters"
+            )
+    return seqs
 
 
 def coerce_temperature(value: Any, *, default: float = 0.0) -> float:
@@ -104,10 +139,18 @@ def coerce_max_tokens_for_api(value: Any) -> int | None:
     if isinstance(value, int):
         return value if value >= 0 else None
     if isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("max_tokens must be a finite number")
         return max(0, int(round(value)))
     if isinstance(value, str):
         s = value.strip()
         if not s:
             return None
-        return max(0, int(round(float(s))))
+        try:
+            x = float(s)
+        except ValueError as exc:
+            raise ValueError(f"max_tokens must be numeric, got {s!r}") from exc
+        if not math.isfinite(x):
+            raise ValueError("max_tokens must be a finite number")
+        return max(0, int(round(x)))
     raise TypeError(f"max_tokens must be numeric or numeric string, got {type(value).__name__}")

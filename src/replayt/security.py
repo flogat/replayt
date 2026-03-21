@@ -13,6 +13,38 @@ _LOCAL_HOSTS = {"127.0.0.1", "::1", "localhost"}
 _SECRETISH_QUERY_PARTS = ("auth", "key", "password", "secret", "sig", "signature", "token")
 _REDACTION_SENTINEL = {"_redacted": True}
 
+# Common LLM-related env vars. replayt's OpenAI-compat client reads OPENAI_API_KEY / OPENAI_BASE_URL
+# / REPLAYT_*; other names are audited for presence only (never values) for compliance reviews.
+LLM_CREDENTIAL_ENV_VARS: tuple[str, ...] = (
+    "OPENAI_API_KEY",
+    "ANTHROPIC_API_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "AZURE_OPENAI_ENDPOINT",
+    "OPENROUTER_API_KEY",
+    "GROQ_API_KEY",
+    "MISTRAL_API_KEY",
+    "COHERE_API_KEY",
+    "HF_TOKEN",
+    "HUGGINGFACE_HUB_TOKEN",
+)
+
+
+def _env_nonempty(name: str) -> bool:
+    raw = os.environ.get(name)
+    return raw is not None and bool(str(raw).strip())
+
+
+def llm_credential_env_presence() -> list[dict[str, bool]]:
+    """Return fixed-name credential env flags for machine-readable doctor/config reports."""
+
+    return [{"name": name, "present": _env_nonempty(name)} for name in LLM_CREDENTIAL_ENV_VARS]
+
+
+def extraneous_llm_credential_env_names() -> tuple[str, ...]:
+    """Env vars from :data:`LLM_CREDENTIAL_ENV_VARS` (except OPENAI_API_KEY) that are non-empty."""
+
+    return tuple(n for n in LLM_CREDENTIAL_ENV_VARS if n != "OPENAI_API_KEY" and _env_nonempty(n))
+
 
 def _base_url_safe_label(url: str) -> str:
     """Strip userinfo and query from a URL for operator-facing messages (avoid echoing secrets)."""

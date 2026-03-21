@@ -45,7 +45,7 @@ def read_store(log_dir: Path, sqlite: Path | None) -> Iterator[JSONLStore | SQLi
     if sqlite is not None:
         if not sqlite.is_file():
             typer.echo(f"SQLite store not found: {sqlite}", err=True)
-            raise typer.Exit(code=2)
+            raise typer.Exit(code=1)
         store = SQLiteStore(sqlite)
         try:
             yield store

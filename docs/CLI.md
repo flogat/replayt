@@ -6,15 +6,17 @@ All commands support Typer's `--help`. Most read/write commands accept `--log-di
 
 Write `workflow.py` or `workflow.yaml`, `inputs.example.json`, `.env.example`, and a `.gitignore` snippet (`.replayt/`, `.env`, ...). Refuses to overwrite unless `--force`. **`--template`** supports `basic`, `approval`, `tool-using`, `yaml`, `issue-triage`, and `publishing-preflight`. **`--ci github`** also writes `.github/workflows/replayt.yml` (replace `CHANGE_ME_MODULE:wf` with your target).
 
-## `replayt run TARGET`
+## `replayt run [TARGET]`
 
-Run a workflow from a module reference, Python file, or YAML file. Common flags: `--output text|json`, `--log-mode ...`, `--redact-key FIELD` (repeatable, scrubs matching structured keys from logged payloads), `--resume`, `--tag key=value` (repeatable), `--metadata-json '{...}'` (`run_started.run_metadata`), **`--experiment-json '{...}'`** (`run_started.experiment`, merged into per-call LLM `effective`), `--log-subdir NAME` (one segment under the resolved log root), `--timeout SECONDS`, **`--inputs-json`** or **`--inputs-file PATH`** (mutually exclusive; `--inputs-json @path.json` is a shortcut for reading a file), `--dry-run` (placeholder LLM), `--dry-check` (validate graph + optional JSON blobs; with **`--output json`** prints a `replayt.validate_report.v1` object and exits `1` if not ok), `--strict-graph` (fail validation when there are 2+ states but no declared transitions). Graph validation runs before every real execution (not only `--dry-check`). `run_started` now also records a safe `runtime` snapshot (engine/store class plus non-secret LLM settings such as base URL and model).
+Run a workflow from a module reference, Python file, or YAML file. **`TARGET` is optional** when env **`REPLAYT_TARGET`** is set or project config defines **`target`** (see [`CONFIG.md`](CONFIG.md)); an explicit **`TARGET` argument always wins**. Common flags: `--output text|json`, `--log-mode ...`, `--redact-key FIELD` (repeatable, scrubs matching structured keys from logged payloads), `--resume`, `--tag key=value` (repeatable), `--metadata-json '{...}'` (`run_started.run_metadata`), **`--experiment-json '{...}'`** (`run_started.experiment`, merged into per-call LLM `effective`), `--log-subdir NAME` (one segment under the resolved log root), `--timeout SECONDS`, **`--inputs-json`** or **`--inputs-file PATH`** (mutually exclusive; `--inputs-json @path.json` is a shortcut for reading a file), `--dry-run` (placeholder LLM), `--dry-check` (validate graph + optional JSON blobs; with **`--output json`** prints a `replayt.validate_report.v1` object and exits `1` if not ok), `--strict-graph` (fail validation when there are 2+ states but no declared transitions). Graph validation runs before every real execution (not only `--dry-check`). `run_started` now also records a safe `runtime` snapshot (engine/store class plus non-secret LLM settings such as base URL and model).
 
 If project config defines **`run_hook`** (argv list) or env **`REPLAYT_RUN_HOOK`** is set, that command runs before execution with `REPLAYT_TARGET`, `REPLAYT_RUN_ID`, `REPLAYT_RUN_MODE` (`run` or `resume`), `REPLAYT_LOG_DIR`, `REPLAYT_LOG_MODE`, `REPLAYT_DRY_RUN`, and optional `REPLAYT_SQLITE` in the environment; non-zero exit aborts before replayt writes new events. A default 120s wall-clock limit applies unless you set **`run_hook_timeout`** / **`REPLAYT_RUN_HOOK_TIMEOUT`** (`<= 0` = no limit). See [`CONFIG.md`](CONFIG.md).
 
 **Exit codes:** `0` completed, `1` failed, `2` paused (approval required).
 
-**CI-style artifacts (optional):** set env **`REPLAYT_JUNIT_XML`** to a path to write the same minimal JUnit XML as **`replayt ci --junit-xml`**, **`REPLAYT_SUMMARY_JSON`** to write the same machine-readable JSON artifact as **`replayt ci --summary-json`**, and **`REPLAYT_GITHUB_SUMMARY=1`** to append the same markdown summary as **`replayt ci --github-summary`** when **`GITHUB_STEP_SUMMARY`** is set.
+Listing, inspection, export, and seal helpers use **`1`** for missing runs, invalid arguments, or verification failures so **`2`** stays reserved for approval pauses on **`replayt run`** / **`replayt ci`**.
+
+**CI-style artifacts (optional):** set env **`REPLAYT_JUNIT_XML`** to a path to write the same minimal JUnit XML as **`replayt ci --junit-xml`**, **`REPLAYT_SUMMARY_JSON`** to write the same machine-readable JSON artifact as **`replayt ci --summary-json`**, and **`REPLAYT_GITHUB_SUMMARY=1`** to append the same markdown summary as **`replayt ci --github-summary`** when **`GITHUB_STEP_SUMMARY`** is set. When a summary path is in effect (flag or **`REPLAYT_SUMMARY_JSON`**), optional env **`REPLAYT_CI_METADATA_JSON`** may hold a JSON **object** of pipeline fields (build id, commit, job URL); valid values are merged into the summary payload as **`ci_metadata`** (invalid JSON or a non-object fails fast before the run starts). See [`CONFIG.md`](CONFIG.md) and [`RECIPES.md`](RECIPES.md).
 
 ## `replayt try`
 
@@ -22,9 +24,9 @@ Run one of the packaged tutorial workflows without creating a local file first. 
 
 **Materialize locally:** **`--copy-to DIR`** copies the example module as **`workflow.py`** plus **`inputs.example.json`** from the catalog (no run). Refuses to overwrite unless **`--force`**. **`--output json`** prints **`replayt.try_copy.v1`** with absolute paths. Cannot be combined with **`--list`**, **`--live`**, **`--dry-check`**, **`--inputs-json`**, **`--inputs-file`**, **`--run-id`**, or **`--timeout`**.
 
-## `replayt ci TARGET`
+## `replayt ci [TARGET]`
 
-Same behavior and flags as `replayt run` (including **`--inputs-file`**, **`--metadata-json`**, **`--experiment-json`**), plus **`--strict-graph`**, **`--junit-xml PATH`** (minimal JUnit file for the run outcome), **`--summary-json PATH`** (machine-readable `replayt.ci_run_summary.v1`: workflow, `run_id`, status, final state, error, **`exit_code`** matching the CLI, **`target`**, resolved **`log_dir`**, optional **`sqlite`**, **`dry_run`**, and wall-clock **`duration_ms`**), and **`--github-summary`** (append markdown to `GITHUB_STEP_SUMMARY` when that env var is set). Prints a one-line reminder of exit codes for pipelines. See [`RECIPES.md`](RECIPES.md) for GitHub Actions examples.
+Same behavior and flags as `replayt run` (including optional **`TARGET`** resolution via **`REPLAYT_TARGET`** / project **`target`**, **`--inputs-file`**, **`--metadata-json`**, **`--experiment-json`**), plus **`--strict-graph`**, **`--junit-xml PATH`** (minimal JUnit file for the run outcome), **`--summary-json PATH`** (machine-readable `replayt.ci_run_summary.v1`: workflow, `run_id`, status, final state, error, **`exit_code`** matching the CLI, **`target`**, resolved **`log_dir`**, optional **`sqlite`**, **`dry_run`**, wall-clock **`duration_ms`**, and optional **`ci_metadata`** when **`REPLAYT_CI_METADATA_JSON`** is set), and **`--github-summary`** (append markdown to `GITHUB_STEP_SUMMARY` when that env var is set). Prints a one-line reminder of exit codes for pipelines. See [`RECIPES.md`](RECIPES.md) for GitHub Actions examples.
 
 `TARGET` can be:
 
@@ -38,13 +40,15 @@ If `module:variable` fails with an import error, replayt prints hints: install y
 
 Summary and event list for a run. `--output json` (or legacy `--json`) prints `{"summary": ..., "events": ...}`. Repeat **`--event-type TYPE`** to restrict the printed / JSON `events` array to matching JSONL `type` values (OR semantics); **`summary`** still describes the full run. When filtering is active, JSON also includes **`event_type_filter`**.
 
+If there is no JSONL timeline for that id, replayt exits **1** (lookup / user error; not the same as exit **2** for paused runs) and prints a hint to run **`replayt runs --limit 10`**, repeating **`--log-dir`**, **`--log-subdir`**, and **`--sqlite`** only when you passed them on the failing command so the listing hits the same store. The same hint appears for **`replay`**, **`report`**, **`report-diff`**, **`export-run`**, and **`bundle-export`** when the id is missing or empty.
+
 ## `replayt replay RUN_ID`
 
 Recorded execution timeline **without** calling model APIs. `--format html` emits a self-contained page (Tailwind CDN); `--out PATH` writes a file.
 
 ## `replayt report RUN_ID`
 
-Self-contained HTML report (summary, states, structured outputs, tool calls, token usage, approvals when present). `--style default|stakeholder|support` - **stakeholder** hides tool-call and token sections and leads with run + approval context, while **support** also leads with failure, retry, and parse-failure context for PM/support handoffs. Approval cards now surface resolver / reason / actor fields from `approval_resolved` plus the applied resume path when present in JSONL. `--out PATH` writes a file; omit `--out` for stdout.
+Self-contained HTML report (summary, states, structured outputs, tool calls, token usage, approvals when present), or Markdown via **`--format markdown`** for pasting into tickets, chat, or email (same `--style` rules: **stakeholder** / **support** still omit tool-call and token sections). `--style default|stakeholder|support` - **stakeholder** hides tool-call and token sections and leads with run + approval context, while **support** also leads with failure, retry, and parse-failure context for PM/support handoffs. Paused runs in Markdown include a copy-paste **`replayt resume TARGET …`** hint (replace `TARGET` with your workflow). Approval cards now surface resolver / reason / actor fields from `approval_resolved` plus the applied resume path when present in JSONL. `--out PATH` writes a file; omit `--out` for stdout.
 
 ## `replayt report-diff RUN_A RUN_B`
 
@@ -80,7 +84,7 @@ Print a snapshot-friendly workflow contract. `--format json` emits `replayt.work
 
 ## `replayt validate TARGET`
 
-Validate workflow graph without calling an LLM: initial state set and must name a declared `@wf.step`, transition targets exist, no orphan states (when `note_transition` edges are present), handlers present. **`--strict-graph`** additionally requires at least one declared transition when there are two or more states. Optional **`--inputs-json` / `--inputs-file`**, **`--metadata-json`**, **`--experiment-json`** only check JSON parse/serializability (same as `run --dry-check`). **`--format text|json`** - JSON emits `replayt.validate_report.v1` and exits `1` when not ok. Exit `0` if valid, `1` if not. CI-friendly.
+Validate workflow graph without calling an LLM: initial state set and must name a declared `@wf.step`, transition targets exist, no orphan states (when `note_transition` edges are present), handlers present. **`--strict-graph`** also requires at least one declared transition when there are two or more states. Optional **`--inputs-json` / `--inputs-file`**, **`--metadata-json`**, **`--experiment-json`** only check JSON parse/serializability (same as `run --dry-check`). **`--format text|json`** - JSON emits `replayt.validate_report.v1` and exits `1` when not ok. Exit `0` if valid, `1` if not. CI-friendly.
 
 ## `replayt diff RUN_A RUN_B`
 
@@ -89,6 +93,8 @@ Compare two runs: states visited, structured outputs, tool calls, status, latenc
 ## `replayt seal RUN_ID`
 
 Write a JSON manifest next to the run's JSONL file (default `<log-dir>/<run_id>.seal.json`) with per-line and full-file SHA-256 digests. **Best-effort** audit helper: anyone who can edit the log directory can replace both files - use WORM storage or external signing if you need stronger guarantees. SQLite-only runs are not supported (no primary JSONL path).
+
+If project config defines **`seal_hook`** or env **`REPLAYT_SEAL_HOOK`** is set, that command runs after the JSONL is read and digests are computed but **before** the manifest is written, with `REPLAYT_RUN_ID`, `REPLAYT_LOG_DIR`, `REPLAYT_SEAL_JSONL`, `REPLAYT_SEAL_OUT`, and `REPLAYT_SEAL_LINE_COUNT` in the environment; non-zero exit aborts without creating the manifest. Default **120s** wall-clock limit unless **`seal_hook_timeout`** / **`REPLAYT_SEAL_HOOK_TIMEOUT`** (`<= 0` = no limit). See [`CONFIG.md`](CONFIG.md). Tarball **`export-run`** / **`bundle-export`** gates still use **`export_hook`** only.
 
 ## `replayt verify-seal RUN_ID`
 
@@ -100,19 +106,19 @@ Delete JSONL run logs older than a duration (`90d`, `24h`, ...). `--dry-run` to 
 
 ## `replayt runs`
 
-List recent local runs. **`--status completed|failed|paused|unknown`** (repeatable; OR semantics) filters on the best-effort terminal status derived from JSONL the same way as the listing columns (`unknown` when the log has no `run_completed` / `run_paused` yet). `--tag key=value` (repeatable) to filter. `--run-meta key=value` (repeatable) filters on `run_started.run_metadata` (string equality). **`--experiment key=value`** filters on `run_started.experiment`.
+List recent local runs. **`--status completed|failed|paused|unknown`** (repeatable; OR semantics) filters on the best-effort terminal status derived from JSONL the same way as the listing columns (`unknown` when the log has no `run_completed` / `run_paused` yet). `--tag key=value` (repeatable) to filter. `--run-meta key=value` (repeatable) filters on `run_started.run_metadata` (string equality). **`--experiment key=value`** filters on `run_started.experiment`. **`--tool NAME`** (repeatable; OR) keeps runs that recorded at least one JSONL **`tool_call`** whose payload **`name`** equals **`NAME`** (exact string match).
 
-## `replayt stats [--days N] [--tag key=value] [--run-meta key=value] [--experiment key=value] [--output text|json]`
+## `replayt stats [--days N] [--tag key=value] [--run-meta key=value] [--experiment key=value] [--tool NAME] [--output text|json]`
 
-Aggregate counts, average `llm_response` latency, token usage, top failure states, event time range.
+Aggregate counts, average `llm_response` latency, token usage, top failure states, event time range. **`--tool`** uses the same **`tool_call`** **`name`** filter as **`replayt runs`**.
 
 ## `replayt doctor`
 
-Check install, env vars, optional YAML extra, default provider connectivity, and best-effort filesystem readiness for the resolved `log_dir` / optional SQLite mirror path. `doctor` also reports soft trust-boundary warnings for risky defaults such as remote plain-HTTP base URLs, embedded credentials in `OPENAI_BASE_URL`, `log_mode=full`, or (on POSIX) a **`log_dir`** that is world-readable or world-writable. Optional **`--target TARGET`** plus **`--strict-graph`** / **`--inputs-json`** / **`--inputs-file`** preflight-loads a workflow and runs the same graph/input validation as `replayt validate` without executing it. **`--format json`** prints `replayt.doctor_report.v1` with a **`healthy`** boolean: exit `0` when healthy, `1` otherwise. **`healthy`** ignores missing **`openai_api_key`**, missing project config, and these soft trust warnings so CI can validate graphs without secrets; other checks (including **`yaml_extra`**, **`provider_connectivity`** unless `--skip-connectivity`, path-readiness failures, and optional `target_validation`) must pass.
+Check install, env vars, optional YAML extra, default provider connectivity, and best-effort filesystem readiness for the resolved `log_dir` / optional SQLite mirror path. `doctor` also reports soft trust-boundary warnings for risky defaults such as remote plain-HTTP base URLs, embedded credentials in `OPENAI_BASE_URL`, `log_mode=full`, or (on POSIX) a **`log_dir`** that is world-readable or world-writable. JSON output includes **`credential_env`**: a fixed list of common third-party LLM credential variable names each with boolean **`present`** (never values), plus a soft **`credential_env_extra_providers`** check when non-`OPENAI_API_KEY` entries from that list are non-empty in the process environment (replayt's default client does not read them). Optional **`--target TARGET`** plus **`--strict-graph`** / **`--inputs-json`** / **`--inputs-file`** preflight-loads a workflow and runs the same graph/input validation as `replayt validate` without executing it. **`--format json`** prints `replayt.doctor_report.v1` with a **`healthy`** boolean: exit `0` when healthy, `1` otherwise. **`healthy`** ignores missing **`openai_api_key`**, missing project config, and these soft trust warnings so CI can validate graphs without secrets; other checks (including **`yaml_extra`**, **`provider_connectivity`** unless `--skip-connectivity`, path-readiness failures, and optional `target_validation`) must pass.
 
 ## `replayt config`
 
-Print the effective CLI defaults after CLI flags, project config, and environment variables are resolved. `--format json` emits `replayt.config_report.v1` with the resolved log paths, mirror policy, run/resume policy-hook settings, redaction keys, approval-actor requirements, trust-boundary warnings (including POSIX **`log_dir`** permission hints when applicable), filesystem-readiness checks for the effective log / SQLite destinations, and the active provider/base URL/model plus source labels such as `project_config:model` or `env:OPENAI_BASE_URL`.
+Print the effective CLI defaults after CLI flags, project config, and environment variables are resolved. `--format json` emits `replayt.config_report.v1` with the resolved log paths, mirror policy, run/resume policy-hook settings, redaction keys, approval-actor requirements, **`project_config.unknown_keys`** for typo detection (unsupported keys are ignored; see [`CONFIG.md`](CONFIG.md#unknown-keys)), trust-boundary warnings (including POSIX **`log_dir`** permission hints when applicable), filesystem-readiness checks for the effective log / SQLite destinations, the active provider/base URL/model plus source labels such as `project_config:model` or `env:OPENAI_BASE_URL`, and **`llm.credential_env`** (same presence-only name list as **`replayt doctor`** JSON). Text output may print a **`credential_env_note`** when extra vendor credential env vars are set but not consumed by replayt's OpenAI-compat client.
 
 ## `replayt version`
 

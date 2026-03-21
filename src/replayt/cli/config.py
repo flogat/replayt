@@ -9,7 +9,7 @@ from typing import Any
 import typer
 
 from replayt.llm import LLMSettings
-from replayt.security import normalize_name_list
+from replayt.security import llm_credential_env_presence, normalize_name_list
 from replayt.types import LogMode
 
 SUPPORTED_CONFIG_KEYS = frozenset(
@@ -22,21 +22,72 @@ SUPPORTED_CONFIG_KEYS = frozenset(
         "model",
         "timeout",
         "strict_mirror",
+        "target",
         "run_hook",
         "run_hook_timeout",
         "resume_hook",
         "resume_hook_timeout",
         "export_hook",
         "export_hook_timeout",
+        "seal_hook",
+        "seal_hook_timeout",
         "approval_actor_required_keys",
     }
 )
 
 _PROJECT_CONFIG: dict[str, Any] | None = None
 _PROJECT_CONFIG_PATH: str | None = None
+_PROJECT_CONFIG_UNKNOWN_KEYS: frozenset[str] | None = None
 _PROJECT_CONFIG_CWD: str | None = None
 
 DEFAULT_LOG_DIR = Path(".replayt/runs")
+
+REPLAYT_TARGET_ENV = "REPLAYT_TARGET"
+
+
+def resolve_cli_target(explicit: str | None, *, cfg: dict[str, Any]) -> str:
+    """Resolve ``replayt run`` / ``replayt ci`` target: CLI arg, then env, then project config."""
+
+    if explicit is not None and str(explicit).strip():
+        return str(explicit).strip()
+    env_t = os.environ.get(REPLAYT_TARGET_ENV, "").strip()
+    if env_t:
+        return env_t
+    raw = cfg.get("target")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip()
+    raise typer.BadParameter(
+        "Missing workflow target: pass TARGET (MODULE:VAR or workflow file), "
+        f"set {REPLAYT_TARGET_ENV}, or set `target = \"...\"` in [tool.replayt] / .replaytrc.toml "
+        "(see docs/CONFIG.md)."
+    )
+
+
+def preview_default_cli_target(cfg: dict[str, Any]) -> tuple[str | None, str]:
+    """Target used when TARGET is omitted on ``run`` / ``ci``; does not raise."""
+
+    env_t = os.environ.get(REPLAYT_TARGET_ENV, "").strip()
+    if env_t:
+        return env_t, f"env:{REPLAYT_TARGET_ENV}"
+    raw = cfg.get("target")
+    if isinstance(raw, str) and raw.strip():
+        return raw.strip(), "project_config:target"
+    return None, "unset"
+
+
+def _split_supported_section(section: dict[str, Any]) -> tuple[dict[str, Any], frozenset[str]]:
+    """Keep only supported keys; return unknown top-level keys (e.g. TOML typos) for diagnostics."""
+
+    filtered: dict[str, Any] = {}
+    unknown: set[str] = set()
+    for key, value in section.items():
+        if not isinstance(key, str):
+            continue
+        if key in SUPPORTED_CONFIG_KEYS:
+            filtered[key] = value
+        else:
+            unknown.add(key)
+    return filtered, frozenset(unknown)
 
 
 def resolve_project_path(raw_path: str | Path, *, config_path: str | None) -> Path:
@@ -48,7 +99,7 @@ def resolve_project_path(raw_path: str | Path, *, config_path: str | None) -> Pa
     return Path(config_path).resolve().parent / path
 
 
-def load_project_config() -> tuple[dict[str, Any], str | None]:
+def load_project_config() -> tuple[dict[str, Any], str | None, frozenset[str]]:
     """Walk up from cwd looking for ``pyproject.toml`` (``[tool.replayt]``) or ``.replaytrc.toml``."""
 
     try:
@@ -57,7 +108,7 @@ def load_project_config() -> tuple[dict[str, Any], str | None]:
         try:
             import tomli as tomllib  # type: ignore[import-not-found,no-redef]
         except ImportError:
-            return {}, None
+            return {}, None, frozenset()
 
     cur = Path.cwd().resolve()
     for directory in (cur, *cur.parents):
@@ -65,7 +116,10 @@ def load_project_config() -> tuple[dict[str, Any], str | None]:
         if rc.is_file():
             with open(rc, "rb") as f:
                 data = tomllib.load(f)
-            return {k: v for k, v in data.items() if k in SUPPORTED_CONFIG_KEYS}, str(rc)
+            if not isinstance(data, dict):
+                return {}, str(rc), frozenset()
+            filtered, unknown = _split_supported_section(data)
+            return filtered, str(rc), unknown
 
         pyproject = directory / "pyproject.toml"
         if pyproject.is_file():
@@ -73,17 +127,18 @@ def load_project_config() -> tuple[dict[str, Any], str | None]:
                 data = tomllib.load(f)
             section = (data.get("tool") or {}).get("replayt")
             if isinstance(section, dict):
-                return {k: v for k, v in section.items() if k in SUPPORTED_CONFIG_KEYS}, str(pyproject)
-    return {}, None
+                filtered, unknown = _split_supported_section(section)
+                return filtered, str(pyproject), unknown
+    return {}, None, frozenset()
 
 
-def get_project_config() -> tuple[dict[str, Any], str | None]:
-    global _PROJECT_CONFIG, _PROJECT_CONFIG_PATH, _PROJECT_CONFIG_CWD  # noqa: PLW0603
+def get_project_config() -> tuple[dict[str, Any], str | None, frozenset[str]]:
+    global _PROJECT_CONFIG, _PROJECT_CONFIG_PATH, _PROJECT_CONFIG_UNKNOWN_KEYS, _PROJECT_CONFIG_CWD  # noqa: PLW0603
     cwd = str(Path.cwd().resolve())
     if _PROJECT_CONFIG is None or _PROJECT_CONFIG_CWD != cwd:
-        _PROJECT_CONFIG, _PROJECT_CONFIG_PATH = load_project_config()
+        _PROJECT_CONFIG, _PROJECT_CONFIG_PATH, _PROJECT_CONFIG_UNKNOWN_KEYS = load_project_config()
         _PROJECT_CONFIG_CWD = cwd
-    return _PROJECT_CONFIG, _PROJECT_CONFIG_PATH
+    return _PROJECT_CONFIG, _PROJECT_CONFIG_PATH, _PROJECT_CONFIG_UNKNOWN_KEYS
 
 
 def sanitize_log_subdir(raw: str) -> str:
@@ -100,7 +155,7 @@ def sanitize_log_subdir(raw: str) -> str:
 def resolve_log_dir(cli_log_dir: Path, log_subdir: str | None = None) -> Path:
     """Apply ``[tool.replayt]`` / ``REPLAYT_LOG_DIR`` defaults and optional tenant subdir."""
 
-    cfg, cfg_path = get_project_config()
+    cfg, cfg_path, _unknown = get_project_config()
     base = cli_log_dir
     if cli_log_dir == DEFAULT_LOG_DIR:
         if cfg.get("log_dir"):
@@ -212,6 +267,7 @@ def resolve_llm_settings(cfg: dict[str, Any]) -> tuple[LLMSettings | None, dict[
         "base_url_source": base_url_source,
         "api_key_present": bool(api_key),
         "api_key_source": api_key_source,
+        "credential_env": llm_credential_env_presence(),
     }
     try:
         settings = LLMSettings.from_sources(
@@ -273,6 +329,16 @@ def export_hook_timeout_seconds(cfg: dict[str, Any]) -> float | None:
     """
 
     return _hook_timeout_seconds(cfg, env_var="REPLAYT_EXPORT_HOOK_TIMEOUT", config_key="export_hook_timeout")
+
+
+def seal_hook_timeout_seconds(cfg: dict[str, Any]) -> float | None:
+    """Wall-clock limit for the ``seal_hook`` subprocess (seconds).
+
+    ``None`` means no limit. Env ``REPLAYT_SEAL_HOOK_TIMEOUT`` overrides config; value ``<= 0``
+    means unlimited. Default when unset: 120 seconds.
+    """
+
+    return _hook_timeout_seconds(cfg, env_var="REPLAYT_SEAL_HOOK_TIMEOUT", config_key="seal_hook_timeout")
 
 
 def parse_log_mode(log_mode: str) -> LogMode:

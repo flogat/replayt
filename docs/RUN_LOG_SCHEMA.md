@@ -58,7 +58,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 ### `llm_request`
 
 - `state` (string)
-- `effective` (object): resolved settings for this call, including `model`, `temperature`, `top_p`, optional `frequency_penalty` / `presence_penalty` / `seed` (omitted from the HTTP payload when null), `max_tokens`, `timeout_seconds`, `base_url`, `extra_header_names`, optional `provider`, optional `structured_output_mode`, and optional `experiment`
+- `effective` (object): resolved settings for this call, including `model`, `temperature`, `top_p`, optional `frequency_penalty` / `presence_penalty` / `seed` (omitted from the HTTP payload when null), optional `stop` (array of up to four strings; omitted from the HTTP payload when unset), `max_tokens`, `timeout_seconds`, `base_url`, `extra_header_names`, optional `provider`, optional `structured_output_mode`, and optional `experiment`
 - `messages_summary` (object): counts and roles when logging mode is not `full`
 - `messages` (array): only when logging mode is `full`
 
