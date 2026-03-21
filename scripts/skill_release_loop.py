@@ -13,12 +13,14 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-DEFAULT_SKILLS = ("createfeatures", "improvedoc", "deslopdoc", "reviewcodebase")
+# Ralph-style pipeline: ideation → review → remediation → doc tone (docs last, after code settles).
+DEFAULT_SKILLS = ("createfeatures", "improvedoc", "reviewcodebase", "deslopdoc")
 DEFAULT_TASK = (
-    "Run the repository skill loop in this order: createfeatures, improvedoc, deslopdoc, "
-    "reviewcodebase. Apply the changes directly in the repo, keep CHANGELOG.md updated under "
-    "Unreleased, and leave the workspace ready for the outer release loop to bump the patch "
-    "version, create the tag, and push once all checks pass."
+    "Run the repository skill loop in this order: createfeatures (new feature ideas), improvedoc "
+    "(deep code review), reviewcodebase (review plus apply fixes in-repo), deslopdoc (de-AI / "
+    "humanize documentation). Apply changes directly in the working tree, keep CHANGELOG.md "
+    "updated under Unreleased, and leave the workspace ready for the outer release loop to bump "
+    "the patch version, create the tag, and push once all checks pass."
 )
 SKILL_ALIASES = {"createfeature": "createfeatures"}
 PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
@@ -210,6 +212,14 @@ def build_prompt(skill: SkillSpec, task: str, repo: Path, iteration: int, max_it
 
 def ensure_repo_preflight(repo: Path, allow_dirty: bool, dry_run: bool) -> None:
     require_git_repo(repo)
+    if dry_run or allow_dirty:
+        return
+    status = git_stdout(repo, ["status", "--porcelain"]).strip()
+    if status:
+        raise LoopError(
+            "Working tree is not clean; commit or stash changes before running the release loop, "
+            "or pass --allow-dirty."
+        )
 
 
 def require_git_repo(repo: Path) -> None:

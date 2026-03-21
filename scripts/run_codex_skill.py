@@ -99,11 +99,10 @@ def main(argv: list[str] | None = None) -> int:
     else:
         command.append("--full-auto")
     command.append("-")
+    # Pass UTF-8 bytes so Windows does not use the console code page (e.g. cp1252) for stdin.
     result = subprocess.run(
         [str(binary), *command],
-        input=prompt,
-        text=True,
-        encoding="utf-8",
+        input=prompt.encode("utf-8"),
         cwd=repo_root(),
         env=env,
     )

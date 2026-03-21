@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import pytest
 import subprocess
 import sys
 import textwrap
@@ -157,7 +158,7 @@ def test_default_task_and_skill_command(tmp_path: Path, monkeypatch) -> None:
     assert args.checks is None
 
 
-def test_preflight_allows_dirty_worktree(tmp_path: Path) -> None:
+def test_preflight_rejects_dirty_worktree(tmp_path: Path) -> None:
     mod = _load_script()
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -168,7 +169,22 @@ def test_preflight_allows_dirty_worktree(tmp_path: Path) -> None:
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "initial")
     _write(repo / "tracked.txt", "dirty\n")
-    mod.ensure_repo_preflight(repo, allow_dirty=False, dry_run=False)
+    with pytest.raises(mod.LoopError, match="not clean"):
+        mod.ensure_repo_preflight(repo, allow_dirty=False, dry_run=False)
+
+
+def test_preflight_allows_dirty_with_flag(tmp_path: Path) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "config", "user.email", "test@example.com")
+    _write(repo / "tracked.txt", "base\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    _write(repo / "tracked.txt", "dirty\n")
+    mod.ensure_repo_preflight(repo, allow_dirty=True, dry_run=False)
 
 
 def test_release_loop_runs_until_checks_pass_and_tags_release(tmp_path: Path, monkeypatch) -> None:
@@ -203,12 +219,12 @@ def test_release_loop_runs_until_checks_pass_and_tags_release(tmp_path: Path, mo
     assert order == [
         "1:createfeatures",
         "1:improvedoc",
-        "1:deslopdoc",
         "1:reviewcodebase",
+        "1:deslopdoc",
         "2:createfeatures",
         "2:improvedoc",
-        "2:deslopdoc",
         "2:reviewcodebase",
+        "2:deslopdoc",
     ]
 
     assert _git(repo, "log", "-1", "--pretty=%s") == "release: v0.4.1"
