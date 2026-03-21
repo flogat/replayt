@@ -302,6 +302,32 @@ def test_push_release_uses_explicit_branch_and_tag(monkeypatch) -> None:
     monkeypatch.setattr(mod, "run_git", fake_run_git)
     mod.push_release(Path("."), "origin", "main", "v1.2.3")
     assert calls == [
-        ["push", "origin", "HEAD:refs/heads/main"],
-        ["push", "origin", "refs/tags/v1.2.3"],
+        ["push", "origin", "HEAD:refs/heads/main", "refs/tags/v1.2.3"],
     ]
+
+
+def test_git_stdout_ignores_mis_set_git_dir(tmp_path: Path, monkeypatch) -> None:
+    """Regression: inherited GIT_DIR must not make tags/commits target another repository."""
+    mod = _load_script()
+    repo_a = tmp_path / "a"
+    repo_b = tmp_path / "b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+    _git(repo_a, "init")
+    _git(repo_b, "init")
+    _git(repo_a, "branch", "-M", "main")
+    _git(repo_b, "branch", "-M", "main")
+    _git(repo_a, "config", "user.name", "Test User")
+    _git(repo_a, "config", "user.email", "a@example.com")
+    _git(repo_b, "config", "user.name", "Test User")
+    _git(repo_b, "config", "user.email", "b@example.com")
+    _write(repo_a / "f.txt", "a\n")
+    _write(repo_b / "g.txt", "b\n")
+    _git(repo_a, "add", ".")
+    _git(repo_b, "add", ".")
+    _git(repo_a, "commit", "-m", "a")
+    _git(repo_b, "commit", "-m", "b")
+
+    expected_head = mod.git_stdout(repo_a, ["rev-parse", "HEAD"]).strip()
+    monkeypatch.setenv("GIT_DIR", str(repo_b / ".git"))
+    assert mod.git_stdout(repo_a, ["rev-parse", "HEAD"]).strip() == expected_head

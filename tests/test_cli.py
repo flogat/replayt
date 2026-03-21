@@ -470,6 +470,83 @@ def start(ctx):
     assert run_id in runs.stdout
 
 
+def test_cli_run_with_sqlite_closes_store_after_command(tmp_path: Path) -> None:
+    db_path = tmp_path / "events.sqlite3"
+    runner = CliRunner()
+
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path / "jsonl"),
+            "--sqlite",
+            str(db_path),
+            "--inputs-json",
+            '{"customer_name":"Sam"}',
+            "--dry-run",
+        ],
+    )
+
+    assert run.exit_code == 0
+    db_path.unlink()
+    assert not db_path.exists()
+
+
+def test_cli_resume_with_sqlite_closes_store_after_command(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module_path = tmp_path / "approval_flow.py"
+    module_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("approval_flow")
+wf.set_initial("gate")
+wf.note_transition("gate", "done")
+
+@wf.step("gate")
+def gate(ctx):
+    if ctx.is_approved("ship"):
+        return "done"
+    ctx.request_approval("ship", summary="Ship it?")
+
+@wf.step("done")
+def done(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    db_path = tmp_path / "events.sqlite3"
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        ["run", "approval_flow:wf", "--log-dir", str(tmp_path / "jsonl"), "--sqlite", str(db_path)],
+    )
+    assert run.exit_code == 2
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    resume = runner.invoke(
+        app,
+        [
+            "resume",
+            "approval_flow:wf",
+            run_id,
+            "--approval",
+            "ship",
+            "--log-dir",
+            str(tmp_path / "jsonl"),
+            "--sqlite",
+            str(db_path),
+        ],
+    )
+
+    assert resume.exit_code == 0
+    db_path.unlink()
+    assert not db_path.exists()
+
+
 def test_cli_read_commands_reject_missing_sqlite_without_creating_database(tmp_path: Path) -> None:
     missing_db = tmp_path / "missing.sqlite3"
     runner = CliRunner()
@@ -1524,6 +1601,65 @@ def a(ctx):
     assert "utf-8" in (r.stdout + r.stderr).lower()
 
 
+def test_cli_run_invalid_inputs_json_reports_bad_parameter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    r = runner.invoke(
+        app,
+        ["run", str(wf_path), "--log-dir", str(tmp_path / "logs"), "--inputs-json", "{bad}"],
+    )
+
+    assert r.exit_code == 2
+    assert r.exception is not None
+    assert "inputs must be valid json" in (r.stdout + r.stderr).lower()
+
+
+def test_cli_run_invalid_metadata_and_experiment_json_report_bad_parameter(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+
+    bad_meta = runner.invoke(
+        app,
+        ["run", str(wf_path), "--log-dir", str(tmp_path / "logs"), "--metadata-json", "{bad}"],
+    )
+    bad_exp = runner.invoke(
+        app,
+        ["run", str(wf_path), "--log-dir", str(tmp_path / "logs"), "--experiment-json", "{bad}"],
+    )
+
+    assert bad_meta.exit_code == 2
+    assert "--metadata-json must be valid json" in (bad_meta.stdout + bad_meta.stderr).lower()
+    assert bad_exp.exit_code == 2
+    assert "--experiment-json must be valid json" in (bad_exp.stdout + bad_exp.stderr).lower()
+
+
 def test_cli_validate_inputs_file_invalid_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     wf_path = tmp_path / "v.py"
     wf_path.write_text(
@@ -1625,6 +1761,19 @@ def test_cli_doctor_format_json_healthy(monkeypatch: pytest.MonkeyPatch) -> None
     assert data["healthy"] is True
 
 
+def test_cli_doctor_reports_invalid_anthropic_provider_config(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REPLAYT_PROVIDER", "anthropic")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    runner = CliRunner()
+    r = runner.invoke(app, ["doctor", "--skip-connectivity", "--format", "json"])
+    assert r.exit_code == 1
+    data = json.loads(r.stdout)
+    assert data["healthy"] is False
+    provider_config = next(check for check in data["checks"] if check["name"] == "provider_config")
+    assert provider_config["ok"] is False
+    assert "OPENAI_BASE_URL" in provider_config["detail"]
+
+
 def test_cli_bundle_export_creates_tarball(tmp_path: Path) -> None:
     runner = CliRunner()
     run = runner.invoke(
@@ -1707,6 +1856,46 @@ def done(ctx):
     assert p["reason"] == "ticket-1"
     assert p["resolver"] == "bridge"
     assert p["actor"] == {"email": "a@example.com"}
+
+
+def test_cli_resume_invalid_actor_json_reports_bad_parameter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    module_path = tmp_path / "approval_flow.py"
+    module_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("approval_flow")
+wf.set_initial("gate")
+
+@wf.step("gate")
+def gate(ctx):
+    ctx.request_approval("ship", summary="Ship it?")
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    runner = CliRunner()
+    run = runner.invoke(app, ["run", "approval_flow:wf", "--log-dir", str(tmp_path)])
+    assert run.exit_code == 2
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    resume = runner.invoke(
+        app,
+        [
+            "resume",
+            "approval_flow:wf",
+            run_id,
+            "--approval",
+            "ship",
+            "--log-dir",
+            str(tmp_path),
+            "--actor-json",
+            "{bad}",
+        ],
+    )
+
+    assert resume.exit_code == 2
+    assert "--actor-json must be valid json" in (resume.stdout + resume.stderr).lower()
 
 
 def test_cli_init_ci_github_writes_workflow(tmp_path: Path) -> None:

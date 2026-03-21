@@ -587,10 +587,23 @@ def git_stdout(repo: Path, args: list[str]) -> str:
     return completed.stdout
 
 
+def _git_env() -> dict[str, str]:
+    """Environment for git subprocesses: never inherit GIT_DIR / GIT_WORK_TREE from the parent.
+
+    Those variables force Git to use a foreign object database; cwd=repo alone does not override
+    them, so tags/commits could land in the wrong repository while Python edits files in repo.
+    """
+    env = os.environ.copy()
+    env.pop("GIT_DIR", None)
+    env.pop("GIT_WORK_TREE", None)
+    return env
+
+
 def run_git(repo: Path, args: list[str], *, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
     completed = subprocess.run(
-        ["git", *args],
+        ["git", "-C", str(repo), *args],
         cwd=repo,
+        env=_git_env(),
         text=True,
         stdout=subprocess.PIPE if capture_output else None,
         stderr=subprocess.PIPE if capture_output else None,
@@ -685,8 +698,9 @@ def ensure_remote(repo: Path, remote: str) -> None:
 
 def ensure_tag_absent(repo: Path, tag_name: str) -> None:
     result = subprocess.run(
-        ["git", "rev-parse", "-q", "--verify", f"refs/tags/{tag_name}"],
+        ["git", "-C", str(repo), "rev-parse", "-q", "--verify", f"refs/tags/{tag_name}"],
         cwd=repo,
+        env=_git_env(),
         text=True,
         capture_output=True,
     )
@@ -705,8 +719,8 @@ def create_tag(repo: Path, tag_name: str) -> None:
 
 
 def push_release(repo: Path, remote: str, branch: str, tag_name: str) -> None:
-    run_git(repo, ["push", remote, f"HEAD:refs/heads/{branch}"])
-    run_git(repo, ["push", remote, f"refs/tags/{tag_name}"])
+    # One push with both refspecs so the release tag cannot be left behind if a second push is skipped.
+    run_git(repo, ["push", remote, f"HEAD:refs/heads/{branch}", f"refs/tags/{tag_name}"])
 
 
 def main(argv: list[str] | None = None) -> int:

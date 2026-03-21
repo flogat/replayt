@@ -23,13 +23,13 @@ def cmd_doctor(
         "text",
         "--format",
         "-f",
-        help="text (default) or json (machine-readable; exit 1 unless healthy — see docs/CLI.md).",
+        help="text (default) or json (machine-readable; exit 1 unless healthy - see docs/CLI.md).",
     ),
 ) -> None:
     """Check local install health for replayt's default OpenAI-compatible setup.
 
     Without ``--skip-connectivity``, this command sends a request to ``OPENAI_BASE_URL`` (see README
-    security notes): the URL and optional API key come from your environment—only use connectivity
+    security notes): the URL and optional API key come from your environment. Only use connectivity
     checks against hosts you trust.
     """
 
@@ -41,7 +41,13 @@ def cmd_doctor(
         pkg_ver = "unknown"
 
     cfg, cfg_path = get_project_config()
-    settings = LLMSettings.from_env()
+    settings_error: str | None = None
+    settings: LLMSettings | None = None
+    try:
+        settings = LLMSettings.from_env()
+    except ValueError as exc:
+        settings_error = str(exc)
+
     checks: list[tuple[str, bool, str]] = []
     checks.append(("replayt", True, pkg_ver))
     if cfg_path:
@@ -52,9 +58,19 @@ def cmd_doctor(
     checks.append(("python", True, pyver))
     prov = os.environ.get("REPLAYT_PROVIDER", "")
     checks.append(("replayt_provider", True, prov or "(unset, OpenRouter preset)"))
-    checks.append(("openai_api_key", bool(settings.api_key), "set" if settings.api_key else "missing"))
-    checks.append(("openai_base_url", True, settings.base_url))
-    checks.append(("model", True, settings.model))
+
+    raw_api_key = os.environ.get("OPENAI_API_KEY")
+    raw_base_url = os.environ.get("OPENAI_BASE_URL")
+    raw_model = os.environ.get("REPLAYT_MODEL")
+    checks.append(("openai_api_key", bool(raw_api_key), "set" if raw_api_key else "missing"))
+    if settings_error is None and settings is not None:
+        checks.append(("openai_base_url", True, settings.base_url))
+        checks.append(("model", True, settings.model))
+    else:
+        checks.append(("provider_config", False, settings_error or "Invalid provider configuration"))
+        checks.append(("openai_base_url", bool(raw_base_url), raw_base_url or "missing"))
+        checks.append(("model", True, raw_model or "(provider default unavailable)"))
+
     try:
         import yaml  # type: ignore[import-not-found]
 
@@ -63,12 +79,15 @@ def cmd_doctor(
     except ImportError:
         checks.append(("yaml_extra", False, "missing (pip install replayt[yaml])"))
 
-    if skip_connectivity:
+    if settings_error is not None:
+        checks.append(("provider_connectivity", False, "skipped (invalid provider config)"))
+    elif skip_connectivity:
         checks.append(("provider_connectivity", True, "skipped (--skip-connectivity)"))
     else:
         try:
             import httpx
 
+            assert settings is not None
             with httpx.Client(timeout=5.0) as http_client:
                 headers: dict[str, str] = {}
                 if settings.api_key:
@@ -77,16 +96,17 @@ def cmd_doctor(
             reachable = r.status_code < 500
             detail = f"HTTP {r.status_code}"
             if r.status_code == 404:
-                detail += " (/models not implemented — try a chat request)"
+                detail += " (/models not implemented - try a chat request)"
             connectivity_detail = detail if reachable else f"{detail} (server error)"
             checks.append(("provider_connectivity", reachable, connectivity_detail))
         except Exception as exc:  # noqa: BLE001
             checks.append(("provider_connectivity", False, str(exc)))
 
     hints = {
-        "openai_api_key": "export OPENAI_API_KEY=… (see docs/QUICKSTART.md)",
+        "openai_api_key": "export OPENAI_API_KEY=... (see docs/QUICKSTART.md)",
         "yaml_extra": "pip install 'replayt[yaml]' for .yaml workflow targets",
-        "project_config": "optional [tool.replayt] — docs/CONFIG.md",
+        "project_config": "optional [tool.replayt] - docs/CONFIG.md",
+        "provider_config": "set OPENAI_BASE_URL to an OpenAI-compatible gateway or use a supported preset",
         "provider_connectivity": "try replayt doctor --skip-connectivity; check OPENAI_BASE_URL",
     }
     if output == "json":
@@ -103,7 +123,7 @@ def cmd_doctor(
         icon = "OK" if ok else "WARN"
         typer.echo(f"[{icon}] {name}: {detail}")
         if not ok and name in hints:
-            typer.echo(f"       → {hints[name]}")
+            typer.echo(f"       -> {hints[name]}")
     typer.echo(
         "Tip: `replayt try` runs the PyPI tutorial workflow without a local file (offline unless --live). "
         "For YAML targets, install the extra: pip install 'replayt[yaml]'."

@@ -15,7 +15,7 @@ The `dev` extra includes the YAML dependency and package build tooling so local 
 
 ## Scope
 
-replayt keeps a narrow core scope. PRs that push it toward a general agent platform will likely be declined.
+replayt keeps a narrow core scope. PRs that push it toward a general agent platform probably will not land.
 
 ## Versioning (semver)
 

@@ -46,6 +46,16 @@ def check_json_object_string(raw: str | None, *, label: str) -> tuple[bool, str 
     return True, None
 
 
+def parse_json_object_option(raw: str, *, label: str) -> dict[str, Any]:
+    try:
+        obj = json.loads(raw)
+    except json.JSONDecodeError as e:
+        raise typer.BadParameter(f"{label} must be valid JSON ({e})") from e
+    if not isinstance(obj, dict):
+        raise typer.BadParameter(f"{label} must be a JSON object")
+    return obj
+
+
 def validation_report(
     *,
     target: str,

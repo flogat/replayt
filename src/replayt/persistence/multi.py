@@ -26,7 +26,8 @@ class MultiStore:
     ``(operation, store, exception)`` for alerting or metrics.
 
     With ``strict_mirror=True``, any mirror write failure is re-raised after logging
-    so the primary and mirrors stay consistent or the run fails loudly.
+    so the run fails loudly. It does **not** provide cross-store atomicity: the primary
+    may already contain the event that the mirror missed.
     """
 
     def __init__(

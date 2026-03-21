@@ -96,6 +96,8 @@ class LLMSettings:
     max_response_bytes: int = 32 * 1024 * 1024
     #: Upper bound on JSON Schema text embedded in :meth:`LLMBridge.parse` system prompts.
     max_schema_json_chars: int = 250_000
+    #: Default model slug when routing Anthropic traffic through an OpenAI-compatible gateway.
+    anthropic_gateway_model: ClassVar[str] = "claude-3-5-sonnet-20241022"
 
     _provider_presets: ClassVar[dict[str, tuple[str, str]]] = {
         "openai": ("https://api.openai.com/v1", "gpt-4o-mini"),
@@ -103,23 +105,28 @@ class LLMSettings:
         "groq": ("https://api.groq.com/openai/v1", "llama-3.1-8b-instant"),
         "together": ("https://api.together.xyz/v1", "meta-llama/Llama-3.1-8B-Instruct-Turbo"),
         "openrouter": ("https://openrouter.ai/api/v1", "anthropic/claude-sonnet-4.6"),
-        # Anthropic native HTTP is not OpenAI-compat; use a gateway or SDK-in-step (replayt_examples README).
-        "anthropic": (
-            "https://api.anthropic.com/v1",
-            "claude-3-5-sonnet-20241022",
-        ),
     }
+
+    @classmethod
+    def _anthropic_gateway_error(cls) -> str:
+        return (
+            "Provider 'anthropic' requires OPENAI_BASE_URL to point at an OpenAI-compatible gateway; "
+            "Anthropic's native API does not expose /chat/completions. Set OPENAI_BASE_URL explicitly "
+            "or call the anthropic SDK inside a workflow step."
+        )
 
     @classmethod
     def for_provider(cls, name: str, *, api_key: str | None = None, model: str | None = None) -> LLMSettings:
         """Build settings from a named OpenAI-*compatible* preset (URLs only; some vendors need a compat proxy).
 
-        Presets: ``openai``, ``ollama``, ``groq``, ``together``, ``openrouter``, ``anthropic`` (set
-        ``OPENAI_BASE_URL`` to your Anthropic OpenAI-compat gateway if the default host does not speak
-        ``/chat/completions``).
+        Presets: ``openai``, ``ollama``, ``groq``, ``together``, ``openrouter``. Anthropic's native
+        API is not OpenAI-compatible; use ``OPENAI_BASE_URL`` with an OpenAI-compatible gateway or call
+        Anthropic's SDK inside a workflow step.
         """
 
         key = name.strip().lower()
+        if key == "anthropic":
+            raise ValueError(cls._anthropic_gateway_error())
         if key not in cls._provider_presets:
             allowed = ", ".join(sorted(cls._provider_presets.keys()))
             raise ValueError(f"Unknown provider {name!r}; expected one of: {allowed}")
@@ -133,10 +140,17 @@ class LLMSettings:
     @classmethod
     def from_env(cls) -> LLMSettings:
         provider = os.environ.get("REPLAYT_PROVIDER", "").strip().lower()
+        env_base_url = os.environ.get("OPENAI_BASE_URL", "").strip()
         if provider:
-            preset = cls.for_provider(provider)
-            preset_base = preset.base_url
-            preset_model = preset.model
+            if provider == "anthropic":
+                if not env_base_url:
+                    raise ValueError(cls._anthropic_gateway_error())
+                preset_base = env_base_url
+                preset_model = cls.anthropic_gateway_model
+            else:
+                preset = cls.for_provider(provider)
+                preset_base = preset.base_url
+                preset_model = preset.model
         else:
             preset_base, preset_model = cls._provider_presets["openrouter"]
         max_rb = 32 * 1024 * 1024
@@ -159,7 +173,7 @@ class LLMSettings:
                 ) from None
         return cls(
             api_key=os.environ.get("OPENAI_API_KEY"),
-            base_url=os.environ.get("OPENAI_BASE_URL", preset_base),
+            base_url=env_base_url or preset_base,
             model=os.environ.get("REPLAYT_MODEL", preset_model),
             max_response_bytes=max_rb,
             max_schema_json_chars=max_schema,

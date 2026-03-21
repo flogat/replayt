@@ -50,7 +50,7 @@ Preflight with `replayt doctor` in an init container or a separate CI job if you
 - Default log directory is under `.replayt/runs/` (override with `--log-dir` or config—see [`CONFIG.md`](CONFIG.md)).
 - Choose **`LogMode`** explicitly in Python (`LogMode.redacted`, `structured_only`, or full) or via CLI `--log-mode`. **Redacted** is a good default when prompts or payloads may contain PII; see [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md) for what each event records.
 - Optional **SQLite** mirror: same events; treat the files as **data you own** (backup, encryption at rest, retention).
-- **SQLite mirror consistency:** With `strict_mirror = false` (default in some templates), a failed mirror write leaves the JSONL primary ahead of SQLite—mirror failures are logged at WARNING and the run continues. Set **`strict_mirror = true`** in project config when SQLite must match JSONL or the run should abort on mirror errors. See [`CONFIG.md`](CONFIG.md).
+- **SQLite mirror consistency:** With `strict_mirror = false`, a failed mirror write leaves the JSONL primary ahead of SQLite and the run continues after a warning. With **`strict_mirror = true`**, the run aborts on a mirror error, but it still does **not** provide cross-store atomicity: the primary write may already be on disk before SQLite fails. See [`CONFIG.md`](CONFIG.md).
 - **Disk permissions:** restrict who can read or write the log directory (same trust model as credential files). For shareable evidence packets, use `replayt export-run` / `replayt seal` and store artifacts on WORM media or signed archives if policy requires it—see README *Security and trust boundaries*.
 
 ## Human approvals

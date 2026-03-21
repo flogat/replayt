@@ -20,6 +20,26 @@ def make_store(log_dir: Path, sqlite: Path | None, *, strict_mirror: bool = Fals
     return MultiStore(primary, SQLiteStore(sqlite), strict_mirror=strict_mirror)
 
 
+def close_store(store: JSONLStore | MultiStore | SQLiteStore) -> None:
+    closer = getattr(store, "close", None)
+    if callable(closer):
+        closer()
+
+
+@contextmanager
+def open_store(
+    log_dir: Path,
+    sqlite: Path | None,
+    *,
+    strict_mirror: bool = False,
+) -> Iterator[JSONLStore | MultiStore]:
+    store = make_store(log_dir, sqlite, strict_mirror=strict_mirror)
+    try:
+        yield store
+    finally:
+        close_store(store)
+
+
 @contextmanager
 def read_store(log_dir: Path, sqlite: Path | None) -> Iterator[JSONLStore | SQLiteStore]:
     if sqlite is not None:

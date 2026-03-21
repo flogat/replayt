@@ -39,6 +39,28 @@ def test_for_provider_openai_uses_openai_model_slug() -> None:
     assert s.model == "gpt-4o-mini"
 
 
+def test_for_provider_anthropic_requires_gateway() -> None:
+    with pytest.raises(ValueError, match="OPENAI_BASE_URL"):
+        LLMSettings.for_provider("anthropic")
+
+
+def test_from_env_anthropic_requires_gateway(monkeypatch) -> None:
+    monkeypatch.setenv("REPLAYT_PROVIDER", "anthropic")
+    monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+    monkeypatch.delenv("REPLAYT_MODEL", raising=False)
+    with pytest.raises(ValueError, match="OPENAI_BASE_URL"):
+        LLMSettings.from_env()
+
+
+def test_from_env_anthropic_uses_gateway_override(monkeypatch) -> None:
+    monkeypatch.setenv("REPLAYT_PROVIDER", "anthropic")
+    monkeypatch.setenv("OPENAI_BASE_URL", "https://gateway.example/v1")
+    monkeypatch.delenv("REPLAYT_MODEL", raising=False)
+    s = LLMSettings.from_env()
+    assert s.base_url == "https://gateway.example/v1"
+    assert s.model == LLMSettings.anthropic_gateway_model
+
+
 def test_from_env_rejects_non_integer_max_response_bytes(monkeypatch) -> None:
     monkeypatch.setenv("REPLAYT_LLM_MAX_RESPONSE_BYTES", "not-a-number")
     monkeypatch.delenv("REPLAYT_PROVIDER", raising=False)

@@ -59,7 +59,8 @@ OPENAI_API_KEY=
 # Optional - default model (overrides provider preset default).
 # REPLAYT_MODEL=anthropic/claude-sonnet-4.6
 
-# Optional - openai | ollama | groq | together | openrouter | anthropic (see README).
+# Optional - openai | ollama | groq | together | openrouter (see README).
+# For Anthropic, set OPENAI_BASE_URL to an OpenAI-compatible gateway or use the native SDK example.
 # REPLAYT_PROVIDER=openrouter
 """
 

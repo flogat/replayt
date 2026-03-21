@@ -73,7 +73,7 @@ replayt replay <run_id>
 # step through every decision the workflow recorded (offline; no new LLM calls)
 ```
 
-That is the main loop. The log exists so you can inspect and replay the recorded run.
+That is the loop: run, inspect, and replay.
 
 replayt gives you a small, strict workflow runner where:
 
@@ -129,13 +129,13 @@ replayt is for teams that need explicit branches, schema-shaped outputs, and a r
   <img src="docs/demo-why.svg" alt="comparison: implicit agent planner vs replayt explicit states and offline replay" width="820"/>
 </p>
 
-The core rules are simple: explicit workflow, strict validation, local logs, and replay of the recorded timeline.
+The rules are simple: explicit workflow, strict validation, local logs, and replay of the recorded timeline.
 
 ---
 
 ## What replayt is
 
-replayt is a **finite-state-machine-first runtime for LLM workflows**. The run log is a first-class output, not an afterthought.
+replayt is a **finite-state-machine-first runtime for LLM workflows**. The run log is part of the product.
 
 A workflow can include:
 
@@ -162,8 +162,6 @@ A replayt workflow should answer:
 - What required human approval?
 - Can I replay the run and inspect it step by step?
 
-That is what the run log is for.
-
 ---
 
 ## What replayt is not
@@ -183,7 +181,7 @@ It is **not**:
 - an “AI workforce” platform
 - “Temporal for agents”
 
-The goal is a small tool you can understand quickly.
+It stays small on purpose.
 
 ---
 

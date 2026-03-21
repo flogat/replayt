@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.4.3 - 2026-03-21
+
+- **CLI hardening:** write-path commands now close SQLite-backed stores deterministically after `replayt run` / `resume`, which fixes leaked file handles and locked `events.sqlite3` files on Windows, and CLI JSON-object options now fail with `BadParameter` instead of uncaught `JSONDecodeError`; covered by new CLI regressions for SQLite cleanup plus invalid `--inputs-json`, `--metadata-json`, `--experiment-json`, and `--actor-json`.
+- **Roadmap docs:** refresh [`docs/ARCHETYPE_FEATURE_BRAINSTORM.md`](docs/ARCHETYPE_FEATURE_BRAINSTORM.md) with a new `createfeatures` pass: ten fresh archetype-driven backlog ideas, updated in-core versus composition classifications, and explicit citations to the existing README/tutorial headings that already cover eval harnesses, enterprise approval brokers, and framework composition outside core.
+- **LLM config hardening:** `REPLAYT_PROVIDER=anthropic` no longer points the OpenAI-compatible client at Anthropic's native `/v1` host by default. `LLMSettings.from_env()` now requires `OPENAI_BASE_URL` for that provider, `LLMSettings.for_provider("anthropic")` fails fast with guidance, and `replayt doctor` reports the misconfiguration cleanly instead of crashing; covered by new LLM settings and CLI doctor regressions.
+- **Docs:** correct `strict_mirror` wording in [`docs/CONFIG.md`](docs/CONFIG.md), [`docs/PRODUCTION.md`](docs/PRODUCTION.md), and [`src/replayt/persistence/multi.py`](src/replayt/persistence/multi.py) so the docs match the implementation and existing tests: strict mode fails loudly, but it does not provide cross-store atomicity once the primary write has happened.
+- **Docs:** de-slop [`README.md`](README.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/CODE_REVIEW_2026-03-21.md`](docs/CODE_REVIEW_2026-03-21.md), and [`src/replayt_examples/README.md`](src/replayt_examples/README.md) by replacing filler lead-ins, summary-style headings, and repetitive "Expected outcome" phrasing with plainer wording.
+
 ## 0.4.2 - 2026-03-21
 
 - **CLI hardening:** read-only `--sqlite` commands now fail fast instead of creating empty SQLite files when the requested database is missing, and `replayt gc --sqlite` applies the same guard; covered by new CLI regressions for missing-database reads and GC.

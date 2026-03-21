@@ -36,14 +36,14 @@ from replayt.cli.run_support import (
     run_result_payload,
     subprocess_env_child,
 )
-from replayt.cli.stores import make_store
+from replayt.cli.stores import open_store
 from replayt.cli.targets import load_target
 from replayt.cli.validation import (
     inputs_json_from_options,
+    parse_json_object_option,
     validate_workflow_graph,
     validation_report,
 )
-from replayt.persistence import MultiStore
 from replayt.runner import Runner, resolve_approval_on_store
 
 
@@ -302,8 +302,7 @@ def cmd_run(
             typer.echo(f"Run timed out after {timeout}s", err=True)
             if run_id is not None:
                 try:
-                    store = make_store(log_dir, sqlite, strict_mirror=strict_mirror)
-                    try:
+                    with open_store(log_dir, sqlite, strict_mirror=strict_mirror) as store:
                         note = (
                             "Parent subprocess timeout; event appended via same store layout as the run "
                             "(including SQLite mirror when configured)."
@@ -320,9 +319,6 @@ def cmd_run(
                                 "note": note,
                             },
                         )
-                    finally:
-                        if isinstance(store, MultiStore):
-                            store.close()
                 except Exception:
                     pass
             raise typer.Exit(code=1)
@@ -331,9 +327,7 @@ def cmd_run(
 
     inputs: dict[str, Any] | None = None
     if inputs_resolved is not None:
-        inputs = json.loads(inputs_resolved)
-        if not isinstance(inputs, dict):
-            raise typer.BadParameter("inputs must be a JSON object")
+        inputs = parse_json_object_option(inputs_resolved, label="inputs")
     tags_dict: dict[str, str] | None = None
     if tag:
         tags_dict = {}
@@ -344,46 +338,32 @@ def cmd_run(
             tags_dict[k] = v
     run_meta: dict[str, Any] | None = None
     if metadata_json is not None:
-        parsed_m = json.loads(metadata_json)
-        if not isinstance(parsed_m, dict):
-            raise typer.BadParameter("--metadata-json must be a JSON object")
-        try:
-            json.dumps(parsed_m)
-        except (TypeError, ValueError) as exc:
-            raise typer.BadParameter("--metadata-json must be JSON-serializable") from exc
-        run_meta = parsed_m
+        run_meta = parse_json_object_option(metadata_json, label="--metadata-json")
     experiment: dict[str, Any] | None = None
     if experiment_json is not None:
-        parsed_e = json.loads(experiment_json)
-        if not isinstance(parsed_e, dict):
-            raise typer.BadParameter("--experiment-json must be a JSON object")
-        try:
-            json.dumps(parsed_e)
-        except (TypeError, ValueError) as exc:
-            raise typer.BadParameter("--experiment-json must be JSON-serializable") from exc
-        experiment = parsed_e
+        experiment = parse_json_object_option(experiment_json, label="--experiment-json")
     lm = parse_log_mode(log_mode)
-    store = make_store(log_dir, sqlite, strict_mirror=strict_mirror)
-    if dry_run:
-        from replayt.testing import DryRunLLMClient
+    with open_store(log_dir, sqlite, strict_mirror=strict_mirror) as store:
+        if dry_run:
+            from replayt.testing import DryRunLLMClient
 
-        typer.echo("Dry run: LLM calls return placeholder responses")
-        runner = Runner(wf, store, log_mode=lm, llm_client=DryRunLLMClient())
-    else:
-        runner = Runner(wf, store, log_mode=lm)
-    try:
-        result = runner.run(
-            run_id=run_id,
-            resume=resume,
-            inputs=inputs,
-            tags=tags_dict,
-            run_metadata=run_meta,
-            experiment=experiment,
-        )
-    except KeyboardInterrupt:
-        raise typer.Exit(code=1)
-    finally:
-        runner.close()
+            typer.echo("Dry run: LLM calls return placeholder responses")
+            runner = Runner(wf, store, log_mode=lm, llm_client=DryRunLLMClient())
+        else:
+            runner = Runner(wf, store, log_mode=lm)
+        try:
+            result = runner.run(
+                run_id=run_id,
+                resume=resume,
+                inputs=inputs,
+                tags=tags_dict,
+                run_metadata=run_meta,
+                experiment=experiment,
+            )
+        except KeyboardInterrupt:
+            raise typer.Exit(code=1)
+        finally:
+            runner.close()
     if output == "json":
         typer.echo(json.dumps(run_result_payload(wf, result), indent=2, default=str))
     else:
@@ -597,7 +577,6 @@ def cmd_resume(
         log_mode = cfg["log_mode"]
     wf = load_target(target)
     lm = parse_log_mode(log_mode)
-    store = make_store(log_dir, sqlite, strict_mirror=strict_mirror)
     hook = resume_hook_argv(cfg)
     if hook:
         hook_timeout = resume_hook_timeout_seconds(cfg)
@@ -623,25 +602,22 @@ def cmd_resume(
             raise typer.Exit(code=1) from exc
     actor: dict[str, Any] | None = None
     if actor_json is not None:
-        parsed_a = json.loads(actor_json)
-        if not isinstance(parsed_a, dict):
-            raise typer.BadParameter("--actor-json must be a JSON object")
-        json.dumps(parsed_a)
-        actor = parsed_a
-    resolve_approval_on_store(
-        store,
-        run_id,
-        approval_id,
-        approved=not reject,
-        resolver=resolver,
-        reason=reason,
-        actor=actor,
-    )
-    runner = Runner(wf, store, log_mode=lm)
-    try:
-        result = runner.run(run_id=run_id, resume=True)
-    finally:
-        runner.close()
+        actor = parse_json_object_option(actor_json, label="--actor-json")
+    with open_store(log_dir, sqlite, strict_mirror=strict_mirror) as store:
+        resolve_approval_on_store(
+            store,
+            run_id,
+            approval_id,
+            approved=not reject,
+            resolver=resolver,
+            reason=reason,
+            actor=actor,
+        )
+        runner = Runner(wf, store, log_mode=lm)
+        try:
+            result = runner.run(run_id=run_id, resume=True)
+        finally:
+            runner.close()
     typer.echo(f"run_id={result.run_id}")
     typer.echo(f"workflow={wf.name}@{wf.version}")
     typer.echo(f"status={result.status}")
