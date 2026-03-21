@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Callable
 from typing import Any
 
@@ -31,6 +32,19 @@ class DryRunLLMClient(OpenAICompatClient):
         """Generate a minimal valid JSON object from a JSON Schema, including nested ``$ref``."""
         if _defs is None:
             _defs = schema.get("$defs", schema.get("definitions", {}))
+        if "$ref" in schema:
+            ref_path = schema["$ref"]
+            ref_name = ref_path.rsplit("/", 1)[-1]
+            ref_schema = _defs.get(ref_name, {})
+            return cls._minimal_json_from_schema(ref_schema, _defs=_defs)
+        if "allOf" in schema:
+            merged: dict[str, Any] = {}
+            for sub in schema["allOf"]:
+                value = cls._minimal_value(sub, _defs)
+                if isinstance(value, dict):
+                    merged.update(value)
+            if merged:
+                return merged
         props = schema.get("properties", {})
         required = set(schema.get("required", []))
         result: dict[str, Any] = {}
@@ -42,6 +56,10 @@ class DryRunLLMClient(OpenAICompatClient):
 
     @classmethod
     def _minimal_value(cls, prop: dict[str, Any], defs: dict[str, Any]) -> Any:
+        if "const" in prop:
+            return prop["const"]
+        if "default" in prop:
+            return prop["default"]
         if "$ref" in prop:
             ref_path = prop["$ref"]
             ref_name = ref_path.rsplit("/", 1)[-1]
@@ -57,21 +75,79 @@ class DryRunLLMClient(OpenAICompatClient):
             if variants:
                 return cls._minimal_value(variants[0], defs)
         typ = prop.get("type", "string")
+        if isinstance(typ, list):
+            typ = next((candidate for candidate in typ if candidate != "null"), typ[0] if typ else "string")
         if typ == "string":
-            return prop.get("enum", [""])[0] if "enum" in prop else ""
+            if "enum" in prop:
+                return prop["enum"][0]
+            min_length = max(int(prop.get("minLength", 0) or 0), 0)
+            return "x" * min_length if min_length > 0 else ""
         if typ == "integer":
-            return 0
+            return cls._minimal_number(prop, integer=True)
         if typ == "number":
-            return 0
+            return cls._minimal_number(prop, integer=False)
         if typ == "boolean":
             return False
         if typ == "array":
-            return []
+            return cls._minimal_array(prop, defs)
         if typ == "object":
             if "properties" in prop:
                 return cls._minimal_json_from_schema(prop, _defs=defs)
             return {}
         return ""
+
+    @classmethod
+    def _minimal_number(cls, prop: dict[str, Any], *, integer: bool) -> int | float:
+        exclusive_min = prop.get("exclusiveMinimum")
+        minimum = prop.get("minimum")
+        multiple_of = prop.get("multipleOf")
+
+        if integer:
+            if exclusive_min is not None:
+                value: int | float = math.floor(float(exclusive_min)) + 1
+            elif minimum is not None:
+                value = math.ceil(float(minimum))
+            else:
+                value = 0
+        else:
+            if exclusive_min is not None:
+                value = float(exclusive_min) + 1.0
+            elif minimum is not None:
+                value = float(minimum)
+            else:
+                value = 0.0
+
+        if multiple_of not in (None, 0):
+            step = float(multiple_of)
+            if step > 0:
+                if value == 0:
+                    value = step
+                else:
+                    value = math.ceil(float(value) / step) * step
+                    if exclusive_min is not None and value <= float(exclusive_min):
+                        value += step
+
+        return int(value) if integer else float(value)
+
+    @classmethod
+    def _minimal_array(cls, prop: dict[str, Any], defs: dict[str, Any]) -> list[Any]:
+        min_items = max(int(prop.get("minItems", 0) or 0), 0)
+        prefix_items = prop.get("prefixItems")
+        items = prop.get("items")
+        out: list[Any] = []
+        if isinstance(prefix_items, list):
+            out.extend(cls._minimal_value(item, defs) if isinstance(item, dict) else "" for item in prefix_items)
+        item_schema: dict[str, Any]
+        if isinstance(items, dict):
+            item_schema = items
+        elif isinstance(prefix_items, list) and prefix_items:
+            last_prefix = prefix_items[-1]
+            item_schema = last_prefix if isinstance(last_prefix, dict) else {"type": "string"}
+        else:
+            item_schema = {"type": "string"}
+        while len(out) < min_items:
+            out.append(cls._minimal_value(item_schema, defs))
+        return out
 
     @staticmethod
     def _schema_from_parse_prompt(messages: list[dict[str, Any]]) -> dict[str, Any] | None:

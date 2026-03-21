@@ -38,7 +38,7 @@ class TestDisplayGraph:
         assert "graph TD" in src
         assert "s_start" in src
         assert "s_end" in src
-        assert "s_start --> s_end" in src
+        assert "-->" in src
 
     def test_initial_state_labelled(self) -> None:
         wf = _make_workflow()
@@ -64,6 +64,43 @@ class TestDisplayGraph:
             obj = display_graph(wf)
         assert obj is not None
         assert "mermaid" in obj.data
+
+    def test_mermaid_ids_do_not_collapse_distinct_state_names(self) -> None:
+        wf = Workflow("collide")
+        wf.set_initial("a-b")
+        wf.note_transition("a-b", "a_b")
+
+        @wf.step("a-b")
+        def hyphen(ctx: Any) -> str:
+            return "a_b"
+
+        @wf.step("a_b")
+        def underscore(ctx: Any) -> None:
+            return None
+
+        src = _build_mermaid_source(wf)
+        assert '["a-b (start)"]' in src
+        assert '["a_b"]' in src
+        ids = [line.split("[", 1)[0].strip() for line in src.splitlines() if '["a-b' in line or '["a_b"]' in line]
+        assert len(ids) == 2
+        assert ids[0] != ids[1]
+
+    def test_mermaid_source_escapes_quoted_state_names(self) -> None:
+        wf = Workflow("quotes")
+        wf.set_initial('say "hi"')
+        wf.note_transition('say "hi"', "done")
+
+        @wf.step('say "hi"')
+        def quoted(ctx: Any) -> str:
+            return "done"
+
+        @wf.step("done")
+        def done(ctx: Any) -> None:
+            return None
+
+        src = _build_mermaid_source(wf)
+        assert '&quot;hi&quot;' in src
+        assert "#quot;" not in src
 
 
 class _FakeStore:

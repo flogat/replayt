@@ -4,6 +4,9 @@ import html
 import json
 from typing import TYPE_CHECKING, Any
 
+from replayt.graph_export import m_id as _graph_m_id
+from replayt.graph_export import mermaid_label as _mermaid_label
+
 if TYPE_CHECKING:
     from replayt.persistence.base import EventStore
     from replayt.workflow import Workflow
@@ -20,17 +23,16 @@ except ImportError:
 
 
 def _m_id(state: str) -> str:
-    safe = "".join(ch if ch.isalnum() else "_" for ch in state)
-    return f"s_{safe}"
+    return _graph_m_id(state)
 
 
 def _build_mermaid_source(wf: Workflow) -> str:
     lines = ["graph TD"]
     for name in wf.step_names():
-        label = name.replace('"', "#quot;")
+        label = _mermaid_label(name)
         nid = _m_id(name)
         if name == wf.initial_state:
-            lines.append(f'    {nid}["{label} (start)"]')
+            lines.append(f'    {nid}["{_mermaid_label(f"{name} (start)")}"]')
         else:
             lines.append(f'    {nid}["{label}"]')
     for src, dst in wf.edges():

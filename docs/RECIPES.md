@@ -1,6 +1,6 @@
 # Recipes
 
-Operational snippets that are easy to copy. For onboarding, use [`QUICKSTART.md`](QUICKSTART.md). For architecture boundaries, see [`PRODUCTION.md`](PRODUCTION.md).
+Copyable operational snippets. For onboarding, use [`QUICKSTART.md`](QUICKSTART.md). For architecture boundaries, see [`PRODUCTION.md`](PRODUCTION.md).
 
 ## Configure the LLM client (base URL, model, timeouts)
 
@@ -8,12 +8,12 @@ replayt uses a small OpenAI-compatible HTTP client. Configure it at two levels: 
 
 **Environment (CLI and Python if you omit `llm_settings`):**
 
-- `OPENAI_API_KEY` — required for live model calls
-- `OPENAI_BASE_URL` — if unset, defaults to the **`REPLAYT_PROVIDER`** preset base URL, else **`https://openrouter.ai/api/v1`**
-- `REPLAYT_MODEL` — if unset, defaults to the **`REPLAYT_PROVIDER`** preset model, else **`anthropic/claude-sonnet-4.6`** (OpenRouter slug)
-- `REPLAYT_PROVIDER` — optional preset name: if unset, behavior matches **`openrouter`**; explicit values: `openai`, `ollama`, `groq`, `together`, `openrouter`, `anthropic` (native Anthropic hosts often need an OpenAI-compatible gateway—see [`src/replayt_examples/README.md`](../src/replayt_examples/README.md))
+- `OPENAI_API_KEY` - required for live model calls
+- `OPENAI_BASE_URL` - if unset, defaults to the **`REPLAYT_PROVIDER`** preset base URL, else **`https://openrouter.ai/api/v1`**
+- `REPLAYT_MODEL` - if unset, defaults to the **`REPLAYT_PROVIDER`** preset model, else **`anthropic/claude-sonnet-4.6`** (OpenRouter slug)
+- `REPLAYT_PROVIDER` - optional preset name: if unset, behavior matches **`openrouter`**; explicit values: `openai`, `ollama`, `groq`, `together`, `openrouter`, `anthropic` (native Anthropic hosts often need an OpenAI-compatible gateway; see [`src/replayt_examples/README.md`](../src/replayt_examples/README.md))
 
-**Python defaults** — pick a preset without memorizing URLs:
+**Python defaults** - pick a preset without memorizing URLs:
 
 ```python
 import os
@@ -24,7 +24,7 @@ LLMSettings.for_provider("ollama")  # local Ollama OpenAI-compat
 LLMSettings.for_provider("groq", api_key=os.environ["GROQ_API_KEY"])
 ```
 
-**`Runner` in Python** — pass `llm_settings` for a non-default base URL, timeout, or headers without changing global env:
+**`Runner` in Python** - pass `llm_settings` for a non-default base URL, timeout, or headers without changing global env:
 
 ```python
 import os
@@ -34,7 +34,7 @@ from replayt import LogMode, Runner, Workflow
 from replayt.llm import LLMSettings
 from replayt.persistence import JSONLStore
 
-wf = Workflow("demo", version="1")  # define steps on wf …
+wf = Workflow("demo", version="1")  # define steps on wf ...
 
 runner = Runner(
     wf,
@@ -50,9 +50,9 @@ runner = Runner(
 )
 ```
 
-**Per-call** — tighten one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., timeout_seconds=..., max_tokens=..., extra_headers={...}, experiment={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events (use `experiment` for prompt hashes, dataset ids, or A/B labels — not a full eval product; see [`SCOPE.md`](SCOPE.md)).
+**Per-call** - override one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., timeout_seconds=..., max_tokens=..., extra_headers={...}, experiment={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events (use `experiment` for prompt hashes, dataset ids, or A/B labels, not as a full eval product; see [`SCOPE.md`](SCOPE.md)).
 
-For timeouts, retries, or betas exposed only through the official `openai` SDK, keep replayt’s graph and approvals as-is and call the SDK **inside a single step** (see **Pattern: OpenAI Python SDK inside a step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md)).
+For timeouts, retries, or betas exposed only through the official `openai` SDK, keep replayt's graph and approvals as-is and call the SDK **inside a single step** (see **Pattern: OpenAI Python SDK inside a step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md)).
 
 ## replayt in CI
 

@@ -1,8 +1,8 @@
 # Documentation
 
-## What's here
+## Docs
 
-- [`QUICKSTART.md`](QUICKSTART.md): five-minute path with install, first run, replay semantics, an annotated JSONL sample, failed-run inspect, and a minimal LLM step.
+- [`QUICKSTART.md`](QUICKSTART.md): install, first run, replay semantics, an annotated JSONL sample, failed-run inspect, and a minimal LLM step.
 - [`INSTALL.md`](INSTALL.md): venv shells, `.env` loading, and common install errors.
 - [`PRODUCTION.md`](PRODUCTION.md): finite-run model, logs and PII, approvals, CI, and a multi-tenant sketch.
 - [`RECIPES.md`](RECIPES.md): LLM client configuration, CI exit codes, and mock guidance.
@@ -16,8 +16,9 @@
 - [`STYLE.md`](STYLE.md): lightweight style guidance for future UI and docs additions.
 - [`architecture.mmd`](architecture.mmd): Mermaid source for the architecture diagram.
 
-## Maintainers
+## Maintainer docs
 
+- [`CODE_REVIEW_2026-03-21.md`](CODE_REVIEW_2026-03-21.md): standing standalone review record with findings, mitigations, and verification notes from the current repo pass.
 - [`RELEASE_INVENTORY.md`](RELEASE_INVENTORY.md): commit-level rollup since git tag **`v0.2.0`** for release-note work.
 - [`ARCHETYPE_FEATURE_BRAINSTORM.md`](ARCHETYPE_FEATURE_BRAINSTORM.md): ten backlog ideas from ten developer archetypes, each marked as in-core or composition.
 

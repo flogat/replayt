@@ -23,6 +23,7 @@ from replayt.cli.config import (
     get_project_config,
     parse_log_mode,
     resolve_log_dir,
+    resolve_project_path,
     resolve_strict_mirror,
     resume_hook_timeout_seconds,
 )
@@ -205,10 +206,10 @@ def cmd_run(
     inputs_resolved = inputs_json_from_options(inputs_json, inputs_file)
 
     in_child = os.environ.get("REPLAYT_SUBPROCESS_RUN") == "1"
-    cfg, _ = get_project_config()
+    cfg, cfg_path = get_project_config()
     log_dir = resolve_log_dir(log_dir, log_subdir)
     if sqlite is None and cfg.get("sqlite"):
-        sqlite = Path(cfg["sqlite"])
+        sqlite = resolve_project_path(cfg["sqlite"], config_path=cfg_path)
     strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite)
     if log_mode == "redacted" and cfg.get("log_mode"):
         log_mode = cfg["log_mode"]
@@ -347,7 +348,8 @@ def cmd_run(
         if dry_run:
             from replayt.testing import DryRunLLMClient
 
-            typer.echo("Dry run: LLM calls return placeholder responses")
+            if output != "json":
+                typer.echo("Dry run: LLM calls return placeholder responses")
             runner = Runner(wf, store, log_mode=lm, llm_client=DryRunLLMClient())
         else:
             runner = Runner(wf, store, log_mode=lm)
@@ -568,9 +570,9 @@ def cmd_resume(
     sqlite: Path | None = typer.Option(None),
     log_mode: str = typer.Option("redacted", case_sensitive=False),
 ) -> None:
-    cfg, _ = get_project_config()
+    cfg, cfg_path = get_project_config()
     if sqlite is None and cfg.get("sqlite"):
-        sqlite = Path(cfg["sqlite"])
+        sqlite = resolve_project_path(cfg["sqlite"], config_path=cfg_path)
     strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     if log_mode == "redacted" and cfg.get("log_mode"):

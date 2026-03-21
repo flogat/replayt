@@ -1,16 +1,23 @@
 from __future__ import annotations
 
 import hashlib
+import html
 
 from replayt.workflow import Workflow
+
+
+def mermaid_label(text: str) -> str:
+    """Escape Mermaid node labels so quotes and HTML-sensitive characters stay parse-safe."""
+
+    return html.escape(text, quote=True)
 
 
 def workflow_to_mermaid(wf: Workflow) -> str:
     lines: list[str] = ["flowchart TD"]
     init = wf.initial_state or "start"
-    lines.append(f'  _entry(["entry: {init}"])')
+    lines.append(f'  _entry(["{mermaid_label(f"entry: {init}")}"])')
     for n in wf.step_names():
-        lines.append(f'  {m_id(n)}["{n}"]')
+        lines.append(f'  {m_id(n)}["{mermaid_label(n)}"]')
     if wf.initial_state:
         lines.append(f"  _entry --> {m_id(wf.initial_state)}")
     for a, b in wf.edges():

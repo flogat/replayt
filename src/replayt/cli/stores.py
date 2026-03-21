@@ -52,4 +52,4 @@ def read_store(log_dir: Path, sqlite: Path | None) -> Iterator[JSONLStore | SQLi
         finally:
             store.close()
     else:
-        yield JSONLStore(log_dir)
+        yield JSONLStore(log_dir, create=False)

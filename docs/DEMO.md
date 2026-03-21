@@ -1,6 +1,6 @@
 # Demo checklist
 
-Overview, diagrams, and the main narrative are in the [**README**](../README.md). This file covers **smoke tests**, **terminal recordings**, and **release** reminders.
+The [**README**](../README.md) has the overview and diagrams. This file is for **smoke tests**, **terminal recordings**, and **release** reminders.
 
 ## The three-step loop (reminder)
 
@@ -10,16 +10,16 @@ Overview, diagrams, and the main narrative are in the [**README**](../README.md)
 
 See also [Five-minute quickstart](QUICKSTART.md).
 
-## Recorded walkthrough (asciinema)
+## Asciinema cast
 
-The repo includes a **short illustrative cast** (synthetic output): [`replayt-demo.cast`](replayt-demo.cast).
+The repo includes a **short demo cast** (synthetic output): [`replayt-demo.cast`](replayt-demo.cast).
 
 ```bash
 # pip install asciinema  OR: npx asciinema-terminal  (tooling varies by platform)
 asciinema play docs/replayt-demo.cast
 ```
 
-To produce a **real** cast from your machine, which is usually better for sharing:
+To record a **real** cast from your machine:
 
 1. `replayt graph replayt_examples.issue_triage:wf`
 2. `replayt run replayt_examples.issue_triage:wf --inputs-json '{"issue":{"title":"Crash on save","body":"Steps: open, save, crash."}}'`
@@ -28,7 +28,7 @@ To produce a **real** cast from your machine, which is usually better for sharin
 
 Record with [asciinema](https://asciinema.org/) or any screen recorder. Upload to asciinema.org and add the player link or raw cast URL to the main README if you want an embed.
 
-## One-liner smoke test
+## Smoke test
 
 ```bash
 pip install -e ".[dev]"

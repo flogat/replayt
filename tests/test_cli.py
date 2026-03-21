@@ -163,6 +163,40 @@ def start(ctx):
     assert '"run_id"' in result.stdout
 
 
+def test_cli_run_dry_run_json_output_is_machine_readable(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "json_dry_run_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("json_dry_run")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            str(workflow_path),
+            "--log-dir",
+            str(tmp_path),
+            "--dry-run",
+            "--output",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["status"] == "completed"
+    assert data["workflow"] == "json_dry_run@1"
+
+
 def test_cli_init_scaffold(tmp_path: Path) -> None:
     runner = CliRunner()
     r = runner.invoke(app, ["init", "--path", str(tmp_path)])
@@ -558,6 +592,20 @@ def test_cli_read_commands_reject_missing_sqlite_without_creating_database(tmp_p
     assert not missing_db.exists()
 
 
+def test_cli_read_commands_do_not_create_missing_log_dir(tmp_path: Path) -> None:
+    missing_log_dir = tmp_path / "missing-logs"
+    runner = CliRunner()
+
+    runs = runner.invoke(app, ["runs", "--log-dir", str(missing_log_dir)])
+    stats = runner.invoke(app, ["stats", "--log-dir", str(missing_log_dir), "--output", "json"])
+
+    assert runs.exit_code == 0
+    assert "No runs found" in runs.stdout
+    assert stats.exit_code == 0
+    assert json.loads(stats.stdout)["runs_total_on_disk"] == 0
+    assert not missing_log_dir.exists()
+
+
 def test_replay_html_embeds_valid_css() -> None:
     html = _replay_html(
         "run-123",
@@ -608,6 +656,58 @@ def test_project_config_doctor_output(tmp_path: Path, monkeypatch) -> None:
     assert result.exit_code == 0
     assert "project_config" in result.stdout
     assert "pyproject.toml" in result.stdout
+
+
+def test_resolve_log_dir_uses_project_config_directory(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    worktree = repo / "pkg" / "cli"
+    worktree.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text('[tool.replayt]\nlog_dir = "logs"\n', encoding="utf-8")
+    monkeypatch.chdir(worktree)
+    import replayt.cli.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
+
+    assert cfg_mod.resolve_log_dir(cfg_mod.DEFAULT_LOG_DIR) == (repo / "logs").resolve()
+
+
+def test_cli_run_uses_config_relative_log_dir_and_sqlite(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = tmp_path / "repo"
+    worktree = repo / "services" / "demo"
+    worktree.mkdir(parents=True)
+    (repo / "pyproject.toml").write_text(
+        '[tool.replayt]\nlog_dir = "logs"\nsqlite = "data/events.sqlite3"\n',
+        encoding="utf-8",
+    )
+    wf_path = worktree / "cfg_flow.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("cfg_flow")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.chdir(worktree)
+    import replayt.cli.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["run", "cfg_flow.py", "--dry-run"])
+
+    assert result.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in result.stdout.splitlines() if line.startswith("run_id="))
+    assert (repo / "logs" / f"{run_id}.jsonl").is_file()
+    assert (repo / "data" / "events.sqlite3").is_file()
 
 
 def test_cli_doctor_skip_connectivity(tmp_path: Path, monkeypatch) -> None:

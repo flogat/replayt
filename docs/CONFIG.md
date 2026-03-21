@@ -12,9 +12,9 @@ So you get **one** config file: the nearest ancestor that defines either `.repla
 
 | Key | Purpose |
 |-----|---------|
-| `log_dir` | Default JSONL directory (string path), used when you omit `--log-dir` on the CLI default of `.replayt/runs`. |
+| `log_dir` | Default JSONL directory (string path), used when you omit `--log-dir` on the CLI default of `.replayt/runs`. Relative paths are resolved from the config file's directory. |
 | `log_mode` | Default log mode: `redacted`, `structured_only`, or `full`. |
-| `sqlite` | Optional path to SQLite mirror file. |
+| `sqlite` | Optional path to SQLite mirror file. Relative paths are resolved from the config file's directory. |
 | `provider` | Preset name for base URL/model (`openai`, `ollama`, `groq`, …)—same idea as `REPLAYT_PROVIDER`. |
 | `model` | Default model name. |
 | `timeout` | LLM HTTP timeout (seconds). |
@@ -46,6 +46,10 @@ strict_mirror = false
 ```
 
 Environment variables and explicit CLI flags still override these defaults when you pass them.
+
+For path-valued config keys such as `log_dir` and `sqlite`, relative paths are interpreted relative to the
+config file that declared them, not the shell's current working directory. That keeps runs launched from
+subdirectories writing to the same project-owned locations.
 
 ## `REPLAYT_RESUME_HOOK_TIMEOUT`
 

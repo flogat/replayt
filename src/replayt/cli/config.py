@@ -30,6 +30,15 @@ _PROJECT_CONFIG_PATH: str | None = None
 DEFAULT_LOG_DIR = Path(".replayt/runs")
 
 
+def resolve_project_path(raw_path: str | Path, *, config_path: str | None) -> Path:
+    """Resolve project-configured paths relative to the config file that declared them."""
+
+    path = Path(str(raw_path))
+    if path.is_absolute() or config_path is None:
+        return path
+    return Path(config_path).resolve().parent / path
+
+
 def load_project_config() -> tuple[dict[str, Any], str | None]:
     """Walk up from cwd looking for ``pyproject.toml`` (``[tool.replayt]``) or ``.replaytrc.toml``."""
 
@@ -80,11 +89,11 @@ def sanitize_log_subdir(raw: str) -> str:
 def resolve_log_dir(cli_log_dir: Path, log_subdir: str | None = None) -> Path:
     """Apply ``[tool.replayt]`` / ``REPLAYT_LOG_DIR`` defaults and optional tenant subdir."""
 
-    cfg, _ = get_project_config()
+    cfg, cfg_path = get_project_config()
     base = cli_log_dir
     if cli_log_dir == DEFAULT_LOG_DIR:
         if cfg.get("log_dir"):
-            base = Path(str(cfg["log_dir"]))
+            base = resolve_project_path(cfg["log_dir"], config_path=cfg_path)
         else:
             env_ld = os.environ.get("REPLAYT_LOG_DIR")
             if env_ld:

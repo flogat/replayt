@@ -50,18 +50,22 @@ class SQLiteStore:
     def append_event(self, run_id: str, *, ts: str, typ: str, payload: dict[str, Any]) -> dict[str, Any]:
         run_id = _validate_run_id(run_id)
         payload_json = json.dumps(payload, default=str)
-        self._cx.execute("BEGIN IMMEDIATE")
-        seq = int(
+        try:
+            self._cx.execute("BEGIN IMMEDIATE")
+            seq = int(
+                self._cx.execute(
+                    "SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?",
+                    (run_id,),
+                ).fetchone()[0]
+            )
             self._cx.execute(
-                "SELECT COALESCE(MAX(seq), 0) + 1 FROM events WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()[0]
-        )
-        self._cx.execute(
-            "INSERT INTO events (run_id, seq, type, ts, payload_json) VALUES (?,?,?,?,?)",
-            (run_id, seq, typ, ts, payload_json),
-        )
-        self._cx.commit()
+                "INSERT INTO events (run_id, seq, type, ts, payload_json) VALUES (?,?,?,?,?)",
+                (run_id, seq, typ, ts, payload_json),
+            )
+            self._cx.commit()
+        except Exception:
+            self._cx.rollback()
+            raise
         return {"ts": ts, "run_id": run_id, "seq": seq, "type": typ, "payload": payload}
 
     def append(self, run_id: str, event: dict[str, Any]) -> None:
@@ -75,9 +79,13 @@ class SQLiteStore:
                 "INSERT INTO events (run_id, seq, type, ts, payload_json) VALUES (?,?,?,?,?)",
                 (run_id, seq, typ, ts, payload),
             )
+            self._cx.commit()
         except sqlite3.IntegrityError as e:
+            self._cx.rollback()
             raise RuntimeError(f"Duplicate event sequence for run_id={run_id!r}: seq={seq}") from e
-        self._cx.commit()
+        except Exception:
+            self._cx.rollback()
+            raise
 
     def load_events(self, run_id: str) -> list[dict[str, Any]]:
         run_id = _validate_run_id(run_id)

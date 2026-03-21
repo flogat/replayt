@@ -6,6 +6,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+from pathlib import Path
 
 
 def is_protected_path(path: str) -> bool:
@@ -14,15 +15,20 @@ def is_protected_path(path: str) -> bool:
     return path.startswith("src/replayt/") or path.startswith("src/replayt_examples/")
 
 
+def _git_command(repo: Path, *args: str) -> list[str]:
+    return ["git", "-c", f"safe.directory={repo.resolve()}", *args]
+
+
 def changed_files_vs_base(base_branch: str) -> list[str]:
+    repo = Path.cwd()
     # Shallow fetch so origin/<base> exists in PR jobs.
     subprocess.run(
-        ["git", "fetch", "--depth=256", "origin", base_branch],
+        _git_command(repo, "fetch", "--depth=256", "origin", base_branch),
         check=False,
         capture_output=True,
     )
     result = subprocess.run(
-        ["git", "diff", "--name-only", f"origin/{base_branch}...HEAD"],
+        _git_command(repo, "diff", "--name-only", f"origin/{base_branch}...HEAD"),
         check=True,
         capture_output=True,
         text=True,

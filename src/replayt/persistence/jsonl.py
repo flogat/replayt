@@ -85,9 +85,10 @@ def validate_run_id(run_id: str) -> str:
 class JSONLStore:
     """Append-only JSONL per run under a base directory."""
 
-    def __init__(self, base_dir: Path) -> None:
+    def __init__(self, base_dir: Path, *, create: bool = True) -> None:
         self.base_dir = base_dir
-        self.base_dir.mkdir(parents=True, exist_ok=True)
+        if create:
+            self.base_dir.mkdir(parents=True, exist_ok=True)
 
     def _path(self, run_id: str) -> Path:
         safe_run_id = _validate_run_id(run_id)
@@ -174,7 +175,7 @@ class JSONLStore:
         if not path.is_file():
             return []
         out: list[dict[str, Any]] = []
-        with path.open("r+", encoding="utf-8") as f:
+        with path.open("r", encoding="utf-8") as f:
             with _lock_file(f, shared=True):
                 f.seek(0)
                 for lineno, line in enumerate(f, start=1):

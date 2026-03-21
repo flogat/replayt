@@ -74,6 +74,25 @@ def test_jsonl_store_raises_for_truncated_line(tmp_path: Path) -> None:
         store.load_events("trunc")
 
 
+def test_jsonl_load_events_opens_read_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = JSONLStore(tmp_path)
+    store.append_event("r1", ts="t1", typ="run_started", payload={})
+    seen_modes: list[str] = []
+    orig_open = Path.open
+
+    def spy_open(self: Path, mode: str = "r", *args, **kwargs):
+        if self == tmp_path / "r1.jsonl":
+            seen_modes.append(mode)
+        return orig_open(self, mode, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", spy_open)
+
+    events = store.load_events("r1")
+
+    assert len(events) == 1
+    assert seen_modes == ["r"]
+
+
 def test_jsonl_delete_run(tmp_path: Path) -> None:
     store = JSONLStore(tmp_path)
     store.append_event("r1", ts="t1", typ="run_started", payload={})

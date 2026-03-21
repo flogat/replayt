@@ -1,8 +1,8 @@
 # Deep Code Review - 2026-03-21
 
-## Assessment
+## Overall assessment
 
-The repository is in good shape for its core workflow, persistence, and CLI execution paths. This pass found one confirmed operator-facing correctness issue in provider configuration and one confirmed documentation mismatch around mirror consistency. Both are now fixed in-repo, and the current workspace passes `python -m pytest -q` with `211 passed, 3 skipped`.
+The codebase is still in solid shape structurally: the runtime, persistence, and CLI layers are separated cleanly enough that targeted fixes stay small. This pass found one confirmed high-severity robustness issue in the SQLite store and one confirmed medium-severity operator-facing issue in the JSONL read path. Both are now fixed with focused regressions, so deeper work is not required before the next patch release.
 
 ## Critical
 
@@ -10,51 +10,63 @@ None.
 
 ## High
 
-None.
+- **Failed SQLite writes left the connection stuck inside an open transaction**
+  - **Why it matters**
+    A single insert failure could wedge the `SQLiteStore` for the rest of the process. After one failed write, later calls could fail with `cannot start a transaction within a transaction`, which breaks direct SQLite runs and SQLite mirror writes until the process exits.
+  - **Evidence from the code**
+    The mitigation now wraps `append_event()` in an explicit rollback path at [`src/replayt/persistence/sqlite.py#L53`](../src/replayt/persistence/sqlite.py#L53) and does the same for `append()` at [`src/replayt/persistence/sqlite.py#L77`](../src/replayt/persistence/sqlite.py#L77). The two regressions that reproduce the pre-fix failure modes are [`tests/test_sqlite_store.py#L31`](../tests/test_sqlite_store.py#L31) and [`tests/test_sqlite_store.py#L54`](../tests/test_sqlite_store.py#L54).
+  - **Concrete recommendation**
+    Keep every transactional write path fail-closed: if a write begins a transaction or can trigger SQLite's implicit transaction handling, rollback on every exception before re-raising. Apply the same rule to future delete or migration helpers if they grow more complex than a single happy-path statement.
 
 ## Medium
 
-- **`REPLAYT_PROVIDER=anthropic` defaulted to an unusable host for the OpenAI-compatible client**
+- **Read-only CLI commands created the JSONL log directory as a side effect**
   - **Why it matters**
-    `OpenAICompatClient` always calls `/chat/completions`. Pointing it at `https://api.anthropic.com/v1` guarantees a bad endpoint unless the operator separately supplies an OpenAI-compatible gateway. That is a configuration trap: the documented preset looked valid but failed only at runtime.
+    Commands such as `runs`, `stats`, `inspect`, `report`, and export-style reads should not mutate the filesystem just to discover that no logs exist. Creating `.replayt/runs` on read is surprising in normal use and can also turn harmless read commands into failures on read-only mounts or stricter CI sandboxes.
   - **Evidence from the code**
-    Before this fix, [`src/replayt/llm.py`](../src/replayt/llm.py) included an `anthropic` preset whose base URL was Anthropic's native host, while the same module's client hard-coded OpenAI-compatible `/chat/completions` requests. The previous review note in this file treated that as an assumption; the code path confirms it.
+    `JSONLStore` now accepts an explicit creation policy at [`src/replayt/persistence/jsonl.py#L88`](../src/replayt/persistence/jsonl.py#L88), while the read-only CLI path opts out via [`src/replayt/cli/stores.py#L44`](../src/replayt/cli/stores.py#L44). The regression that proves `runs` and `stats` no longer create a missing log directory is [`tests/test_cli.py#L595`](../tests/test_cli.py#L595).
   - **Concrete recommendation**
-    Fail fast instead of shipping a broken preset. That mitigation is now implemented in [`src/replayt/llm.py`](../src/replayt/llm.py): `LLMSettings.for_provider("anthropic")` raises with guidance, `LLMSettings.from_env()` requires `OPENAI_BASE_URL` for that provider, and [`src/replayt/cli/commands/doctor.py`](../src/replayt/cli/commands/doctor.py) reports the misconfiguration cleanly. Regression coverage lives in [`tests/test_llm_settings.py`](../tests/test_llm_settings.py) and [`tests/test_cli.py`](../tests/test_cli.py).
+    Keep store construction split by intent: write paths may create directories, read paths should not. If more store helpers are added later, make that distinction part of the helper API instead of relying on individual callers to remember it.
 
 ## Low
 
-- **`strict_mirror` docs overstated the consistency guarantee**
-  - **Why it matters**
-    Operators reading the docs could believe `strict_mirror = true` provides cross-store atomicity. It does not. The primary JSONL write happens before the mirror append, so a mirror failure can still leave JSONL ahead of SQLite even though the run aborts loudly.
-  - **Evidence from the code**
-    [`src/replayt/persistence/multi.py`](../src/replayt/persistence/multi.py) writes to the primary first, then mirrors. [`tests/test_multi_store.py`](../tests/test_multi_store.py) already locks in that behavior with `test_multi_store_strict_mirror_raises_after_primary_write`.
-  - **Concrete recommendation**
-    Document the actual guarantee precisely: strict mode fails loudly but does not make the write atomic across stores. That wording is now corrected in [`src/replayt/persistence/multi.py`](../src/replayt/persistence/multi.py), [`docs/CONFIG.md`](CONFIG.md), and [`docs/PRODUCTION.md`](PRODUCTION.md).
+None.
 
 ## Potential concerns / assumptions
 
-- Assumption: JSONL remains the primary source of truth for local runs. The current implementation and tests strongly imply that, especially in mirror-failure scenarios, but product-level operator guidance should continue to say so plainly.
-- Assumption: teams using Anthropic through gateways will set `OPENAI_BASE_URL` deliberately rather than expecting replayt to infer a compatibility layer. The new fail-fast behavior is safer, but it moves that choice from "surprising runtime 404" to "explicit startup validation."
+- Assumption: read-only commands should prefer "no data found" over eagerly creating the default log root. That matches operator expectations and existing CLI semantics elsewhere, but it is worth preserving deliberately if new commands are added.
+- Assumption: rolling back the SQLite connection on all write failures is always preferable to leaving the caller to decide recovery. For this store API, that is the correct tradeoff because the class owns the connection lifecycle and callers expect the store to remain usable after an exception.
 
-## Strengths
+## What is good
 
-- The run engine still has clear and auditable terminal behavior: `run_failed`, `run_paused`, and `run_completed` emission is explicit and easy to reason about.
-- Persistence behavior is concrete rather than hand-wavy. Sequence allocation, corruption handling, and mirror failure paths are testable and visible.
-- CLI coverage remains strong for a small package. Both issues from this pass were cheap to lock down with targeted regressions because the command layer and settings layer are already testable.
+- The persistence layer is small and well-factored, which made both fixes local instead of cascading through the runtime.
+- Existing tests already covered the main store and CLI surfaces, so the new regressions could be narrow and behavior-focused.
+- The `read_store()` / `open_store()` split in [`src/replayt/cli/stores.py`](../src/replayt/cli/stores.py) was already a good abstraction boundary; the fix only had to make that split stricter.
 
 ## Missing tests
 
-- A live-provider smoke test for documented non-default provider paths would catch compatibility regressions earlier than unit tests alone.
-- A focused integration test around mirror repair or reconciliation guidance would help document the operational story after `strict_mirror` failures.
-- A subprocess integration test where a timeout-wrapped child writes partial run state before the parent appends `run_interrupted`, so final event ordering is validated end to end rather than via monkeypatch.
+- Add one more read-path regression for a command that exits non-zero on missing data, such as `inspect` or `report`, to prove it also avoids creating the log directory.
+- Add a mirror-oriented regression that forces a SQLite mirror write failure through `MultiStore.append_event()` and then verifies a later mirror write succeeds with the same `SQLiteStore` instance.
 
 ## Refactoring opportunities
 
-- Split "provider preset" selection from "transport contract" selection more explicitly in [`src/replayt/llm.py`](../src/replayt/llm.py); today they are still coupled through one settings object.
-- Consider a read-only SQLite open mode or helper so "must already exist" versus "create writable database" is enforced below the CLI layer too.
-- Factor shared operator-facing diagnostics in the CLI so `doctor`, read-only store opening, and similar validation paths reuse one vocabulary for configuration failures.
+- A tiny transactional helper inside `SQLiteStore` would remove repeated `commit` / `rollback` structure from write methods and make future changes harder to get wrong.
+- `JSONLStore` now has an intent flag. If more stores gain similar semantics, a dedicated read-only store protocol or factory would make the contract more explicit than a boolean constructor option.
 
-## Verdict
+## Summary verdict
 
-The codebase is production-ready for its main replay workflow, and the issues from this pass were narrow enough to fix without destabilizing the runtime. After the Anthropic preset hardening and the mirror-consistency doc correction, the main residual risks are integration assumptions and some maintainability cleanup, not blockers in the current repository state.
+The repository remains production-ready, but this pass exposed two real operational footguns: SQLite could get stuck after a write failure, and read-only CLI commands could mutate the log root unexpectedly. Both issues were fixed without architectural churn, and the updated tests cover the exact failure modes that mattered.
+
+## Mitigation summary
+
+1. **What changed**
+   - **High - failed SQLite writes left the connection stuck inside an open transaction:** added rollback-on-exception handling in [`src/replayt/persistence/sqlite.py`](../src/replayt/persistence/sqlite.py) for both `append_event()` and `append()`, with regressions in [`tests/test_sqlite_store.py`](../tests/test_sqlite_store.py).
+   - **Medium - read-only CLI commands created the JSONL log directory as a side effect:** added a `create` toggle to [`src/replayt/persistence/jsonl.py`](../src/replayt/persistence/jsonl.py) and switched [`src/replayt/cli/stores.py`](../src/replayt/cli/stores.py) to open JSONL stores in non-creating mode for read commands; covered by a regression in [`tests/test_cli.py`](../tests/test_cli.py).
+   - Recorded the review pass and patch-release notes in [`CHANGELOG.md`](../CHANGELOG.md).
+
+2. **Tests / checks run**
+   - `python -m pytest tests/test_sqlite_store.py::test_sqlite_append_event_rolls_back_failed_transaction tests/test_sqlite_store.py::test_sqlite_append_rolls_back_failed_transaction tests/test_cli.py::test_cli_read_commands_do_not_create_missing_log_dir -q` -> passed (`3 passed`).
+   - `python -m pytest tests/test_sqlite_store.py tests/test_cli.py -k "read_commands or inspect_and_replay_can_read_from_sqlite or run_with_sqlite_closes_store_after_command or resume_with_sqlite_closes_store_after_command or gc_deletes_sqlite_only_runs or gc_rejects_missing_sqlite_without_creating_database" -q` -> passed (`7 passed, 87 deselected`).
+
+3. **Deferred mitigations**
+   - None.

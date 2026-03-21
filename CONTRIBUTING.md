@@ -38,7 +38,7 @@ Publishing to PyPI is automated via GitHub Actions. To cut a release:
    git tag vX.Y.Z
    git push origin main --tags
    ```
-4. The `publish` workflow runs tests across Python 3.10–3.12, builds the package, and uploads it to PyPI using trusted publishing (OIDC). No API tokens needed.
+4. The `publish` workflow runs tests across Python 3.10 to 3.12, builds the package, and uploads it to PyPI using trusted publishing (OIDC). No API tokens needed.
 
 The workflow lives in `.github/workflows/publish.yml` and triggers on any tag matching `v*`.
 
@@ -65,11 +65,13 @@ python scripts/skill_release_loop.py \
 
 Available placeholders for `--skill-command`: `{skill}`, `{skill_path}`, `{prompt_file}`, `{log_file}`, `{repo}`, `{iteration}`, `{max_iterations}` and quoted `*_q` variants such as `{prompt_file_q}`. The same values are also exported as environment variables (`SKILL_NAME`, `SKILL_PROMPT_FILE`, `REPO_ROOT`, and so on).
 
+For command-heavy docs, prefer ASCII punctuation where practical (`"`, `'`, `...`, `->`) so examples stay readable in stock Windows terminals. See [`docs/STYLE.md`](docs/STYLE.md).
+
 **Prerequisites (one-time repo setup):**
 - A `pypi` environment must exist in the GitHub repo (Settings > Environments).
 - The repo must be registered as a trusted publisher on [pypi.org](https://pypi.org/manage/account/publishing/).
 
-## Good first issues (ideas)
+## Good first issues
 
 - Improve CLI `inspect` / `replay` / `report` formatting (keep dependencies light).
 - Refresh [`docs/replayt-demo.cast`](docs/replayt-demo.cast) or add a published asciinema link in [`docs/DEMO.md`](docs/DEMO.md) / the README.

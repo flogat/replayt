@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime as dt
 import importlib.util
 import json
 import subprocess
@@ -48,13 +49,31 @@ def _git_no_cwd(*args: str) -> str:
     return result.stdout.strip()
 
 
+_ALL_DEFAULT_SKILLS = (
+    "feat_staff_engineer",
+    "feat_junior_onboarding",
+    "feat_security_compliance",
+    "feat_ml_llm_engineer",
+    "feat_devops_sre",
+    "feat_product_engineer",
+    "feat_oss_maintainer",
+    "feat_startup_ic",
+    "feat_enterprise_integrator",
+    "feat_framework_enthusiast",
+    "review_design_fidelity",
+    "improvedoc",
+    "deslopdoc",
+    "reviewcodebase",
+)
+
+
 def _init_repo(tmp_path: Path) -> tuple[Path, Path]:
     repo = tmp_path / "repo"
     repo.mkdir()
     remote = tmp_path / "origin.git"
     _git_no_cwd("init", "--bare", str(remote))
 
-    for skill in ("createfeatures", "improvedoc", "deslopdoc", "reviewcodebase"):
+    for skill in _ALL_DEFAULT_SKILLS:
         _write(repo / ".cursor" / "skills" / skill / "SKILL.md", f"# {skill}\n")
 
     _write(
@@ -149,11 +168,146 @@ def test_bump_patch_and_alias() -> None:
     assert mod.bump_patch("1.2.3") == "1.2.4"
 
 
+def test_codex_usage_limit_detection() -> None:
+    mod = _load_script()
+    assert mod.codex_usage_limit_log_detected("ERROR: You've hit your usage limit.")
+    assert mod.codex_usage_limit_log_detected("usage limit exceeded")
+    assert not mod.codex_usage_limit_log_detected("some other error")
+
+
+def test_parse_try_again_at_local_same_calendar_day() -> None:
+    mod = _load_script()
+    tz = dt.timezone(dt.timedelta(hours=-5))
+    now = dt.datetime(2026, 3, 21, 18, 0, tzinfo=tz)
+    log = "ERROR: usage limit. try again at 7:05 PM."
+    got = mod.parse_try_again_at_local(log, now=now)
+    assert got == dt.datetime(2026, 3, 21, 19, 5, tzinfo=tz)
+
+
+def test_parse_try_again_at_local_rolls_to_next_day() -> None:
+    mod = _load_script()
+    tz = dt.timezone.utc
+    now = dt.datetime(2026, 3, 21, 20, 0, tzinfo=tz)
+    log = "try again at 7:05 PM"
+    got = mod.parse_try_again_at_local(log, now=now)
+    assert got.date() == dt.date(2026, 3, 22)
+    assert got.hour == 19 and got.minute == 5
+
+
+def test_parse_try_again_at_local_24h_clock() -> None:
+    mod = _load_script()
+    tz = dt.timezone.utc
+    now = dt.datetime(2026, 3, 21, 10, 0, tzinfo=tz)
+    log = "try again at 19:05"
+    got = mod.parse_try_again_at_local(log, now=now)
+    assert got == dt.datetime(2026, 3, 21, 19, 5, tzinfo=tz)
+
+
+def test_compute_usage_limit_delay_respects_max_wait() -> None:
+    mod = _load_script()
+    tz = dt.timezone.utc
+    now = dt.datetime(2026, 3, 21, 12, 0, tzinfo=tz)
+    resume = dt.datetime(2026, 3, 23, 12, 0, tzinfo=tz)
+    assert mod.compute_usage_limit_delay(now, resume, buffer_seconds=0, max_wait_seconds=86400) is None
+
+
+def test_compute_usage_limit_delay_includes_buffer() -> None:
+    mod = _load_script()
+    tz = dt.timezone.utc
+    now = dt.datetime(2026, 3, 21, 12, 0, 0, tzinfo=tz)
+    resume = dt.datetime(2026, 3, 21, 13, 0, 0, tzinfo=tz)
+    d = mod.compute_usage_limit_delay(now, resume, buffer_seconds=60, max_wait_seconds=86400)
+    assert d == 3600 + 60
+
+
+def test_wait_on_codex_usage_limit_cli_flags() -> None:
+    mod = _load_script()
+    assert mod.parse_args([]).wait_on_codex_usage_limit is True
+    assert mod.parse_args(["--no-wait-on-codex-usage-limit"]).wait_on_codex_usage_limit is False
+
+
+def test_log_file_last_exit_code() -> None:
+    mod = _load_script()
+    assert mod.log_file_last_exit_code("foo\n### skill_release_loop: exit_code=1\n") == 1
+    assert (
+        mod.log_file_last_exit_code(
+            "### skill_release_loop: exit_code=0\n### skill_release_loop: exit_code=1\n"
+        )
+        == 1
+    )
+    assert mod.log_file_last_exit_code("no footer") is None
+
+
+def test_run_dir_is_resumable(tmp_path: Path) -> None:
+    mod = _load_script()
+    rd = tmp_path / "20260101-120000"
+    rd.mkdir()
+    skills = ["a", "b"]
+    assert not mod.run_dir_is_resumable(rd, skills, 2, 1)
+    (rd / "iter-01-a.log").write_text("x\n### skill_release_loop: exit_code=0\n", encoding="utf-8")
+    assert mod.run_dir_is_resumable(rd, skills, 2, 1)
+    (rd / "iter-01-b.log").write_text("y\n### skill_release_loop: exit_code=0\n", encoding="utf-8")
+    (rd / "iter-01-check-01.log").write_text("z\n### skill_release_loop: exit_code=1\n", encoding="utf-8")
+    assert mod.run_dir_is_resumable(rd, skills, 2, 1)
+    (rd / "iter-01-check-01.log").write_text("z\n### skill_release_loop: exit_code=0\n", encoding="utf-8")
+    assert not mod.run_dir_is_resumable(rd, skills, 2, 1)
+
+
+def test_find_latest_resumable_run_dir(tmp_path: Path) -> None:
+    mod = _load_script()
+    root = tmp_path / "rel"
+    root.mkdir()
+    old = root / "20260101-100000"
+    new = root / "20260102-100000"
+    old.mkdir()
+    new.mkdir()
+    skills = ["s"]
+    (old / "iter-01-s.log").write_text("### skill_release_loop: exit_code=1\n", encoding="utf-8")
+    (new / "iter-01-s.log").write_text("### skill_release_loop: exit_code=1\n", encoding="utf-8")
+    got = mod.find_latest_resumable_run_dir(root, skills, 3, 1)
+    assert got == new
+
+
+def test_resolve_run_directory_explicit(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "r"
+    repo.mkdir()
+    log_root = repo / ".replayt" / "skill-release"
+    log_root.mkdir(parents=True)
+    run_sub = log_root / "20260102-120000"
+    run_sub.mkdir()
+    monkeypatch.chdir(repo)
+    args = mod.parse_args(["--resume", "20260102-120000"])
+    args.checks = ["true"]
+    skill_names = ["a"]
+    got = mod.resolve_run_directory(repo, args, skill_names)
+    assert got == run_sub.resolve()
+
+
+def test_effective_allow_dirty_resume_implies_ok() -> None:
+    mod = _load_script()
+    assert mod.effective_allow_dirty(mod.parse_args([])) is False
+    assert mod.effective_allow_dirty(mod.parse_args(["--allow-dirty"])) is True
+    assert mod.effective_allow_dirty(mod.parse_args(["--resume", "20260101-120000"])) is True
+
+
+def test_resolve_run_directory_auto_empty_raises(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "r"
+    repo.mkdir()
+    (repo / ".replayt" / "skill-release").mkdir(parents=True)
+    monkeypatch.chdir(repo)
+    args = mod.parse_args(["--resume"])
+    args.checks = ["true"]
+    with pytest.raises(mod.LoopError, match="No resumable"):
+        mod.resolve_run_directory(repo, args, ["x"])
+
+
 def test_dry_run_completes_without_worktree_changes(tmp_path: Path, monkeypatch) -> None:
     mod = _load_script()
     repo = tmp_path / "repo"
     repo.mkdir()
-    for skill in ("createfeatures", "improvedoc", "deslopdoc", "reviewcodebase"):
+    for skill in _ALL_DEFAULT_SKILLS:
         _write(repo / ".cursor" / "skills" / skill / "SKILL.md", f"# {skill}\n")
     _write(
         repo / "CHANGELOG.md",
@@ -207,8 +361,8 @@ def test_default_task_and_skill_command(tmp_path: Path, monkeypatch) -> None:
     repo.mkdir()
     monkeypatch.chdir(repo)
     args = mod.parse_args([])
-    assert "createfeatures" in args.task
-    assert args.skills == ["createfeatures", "improvedoc", "deslopdoc", "reviewcodebase"]
+    assert "feat_staff_engineer" in args.task
+    assert args.skills == list(_ALL_DEFAULT_SKILLS)
     assert args.skill_command is None
     assert args.checks is None
 
@@ -242,6 +396,21 @@ def test_preflight_allows_dirty_with_flag(tmp_path: Path) -> None:
     mod.ensure_repo_preflight(repo, allow_dirty=True, dry_run=False)
 
 
+def test_preflight_allows_dirty_when_resume_namespace(tmp_path: Path) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.name", "Test User")
+    _git(repo, "config", "user.email", "test@example.com")
+    _write(repo / "tracked.txt", "base\n")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    _write(repo / "tracked.txt", "dirty\n")
+    args = mod.parse_args(["--resume", "20260101-120000"])
+    mod.ensure_repo_preflight(repo, mod.effective_allow_dirty(args), dry_run=False)
+
+
 def test_release_loop_runs_until_checks_pass_and_tags_release(tmp_path: Path, monkeypatch) -> None:
     mod = _load_script()
     repo, _remote = _init_repo(tmp_path)
@@ -271,16 +440,11 @@ def test_release_loop_runs_until_checks_pass_and_tags_release(tmp_path: Path, mo
     assert "- Automated release loop note." in changelog
 
     order = (repo / ".replayt" / "skill-order.txt").read_text(encoding="utf-8").splitlines()
-    assert order == [
-        "1:createfeatures",
-        "1:improvedoc",
-        "1:deslopdoc",
-        "1:reviewcodebase",
-        "2:createfeatures",
-        "2:improvedoc",
-        "2:deslopdoc",
-        "2:reviewcodebase",
-    ]
+    expected_order = []
+    for iteration in (1, 2):
+        for skill in _ALL_DEFAULT_SKILLS:
+            expected_order.append(f"{iteration}:{skill}")
+    assert order == expected_order
 
     assert _git(repo, "log", "-1", "--pretty=%s") == "release: v0.4.1"
     assert "v0.4.1" in _git(repo, "tag", "--list")
@@ -331,3 +495,55 @@ def test_git_stdout_ignores_mis_set_git_dir(tmp_path: Path, monkeypatch) -> None
     expected_head = mod.git_stdout(repo_a, ["rev-parse", "HEAD"]).strip()
     monkeypatch.setenv("GIT_DIR", str(repo_b / ".git"))
     assert mod.git_stdout(repo_a, ["rev-parse", "HEAD"]).strip() == expected_head
+
+
+def test_run_git_marks_repo_safe_directory(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd: list[str], **kwargs):
+        captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    mod.run_git(repo, ["status"], capture_output=True)
+
+    assert captured["cmd"] == [
+        "git",
+        "-c",
+        f"safe.directory={repo.resolve()}",
+        "-C",
+        str(repo.resolve()),
+        "status",
+    ]
+
+
+def test_ensure_tag_absent_marks_repo_safe_directory(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    captured: dict[str, object] = {}
+
+    def fake_run(cmd: list[str], **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    mod.ensure_tag_absent(repo, "v1.2.3")
+
+    assert captured["cmd"] == [
+        "git",
+        "-c",
+        f"safe.directory={repo.resolve()}",
+        "-C",
+        str(repo.resolve()),
+        "rev-parse",
+        "-q",
+        "--verify",
+        "refs/tags/v1.2.3",
+    ]

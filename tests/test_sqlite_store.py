@@ -28,6 +28,41 @@ def test_sqlite_append_event_allocates_monotonic_sequence(tmp_path: Path) -> Non
     assert second["seq"] == 2
 
 
+def test_sqlite_append_event_rolls_back_failed_transaction(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "db.sqlite3")
+    store._cx.execute(
+        """
+        CREATE TRIGGER fail_boom
+        BEFORE INSERT ON events
+        WHEN NEW.type = 'boom'
+        BEGIN
+          SELECT RAISE(FAIL, 'boom trigger');
+        END
+        """
+    )
+    store._cx.commit()
+
+    with pytest.raises(sqlite3.IntegrityError, match="boom trigger"):
+        store.append_event("r1", ts="t1", typ="boom", payload={})
+
+    event = store.append_event("r1", ts="t2", typ="run_started", payload={})
+
+    assert event["seq"] == 1
+    assert [saved["type"] for saved in store.load_events("r1")] == ["run_started"]
+
+
+def test_sqlite_append_rolls_back_failed_transaction(tmp_path: Path) -> None:
+    store = SQLiteStore(tmp_path / "db.sqlite3")
+    store.append_event("r1", ts="t1", typ="run_started", payload={})
+
+    with pytest.raises(RuntimeError, match="Duplicate event sequence"):
+        store.append("r1", {"ts": "t1", "run_id": "r1", "seq": 1, "type": "dupe", "payload": {}})
+
+    store.append("r1", {"ts": "t2", "run_id": "r1", "seq": 2, "type": "state_entered", "payload": {}})
+
+    assert [saved["seq"] for saved in store.load_events("r1")] == [1, 2]
+
+
 def test_multi_store_writes_both(tmp_path: Path) -> None:
     j = JSONLStore(tmp_path / "j")
     s = SQLiteStore(tmp_path / "db.sqlite3")

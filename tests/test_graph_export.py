@@ -42,3 +42,21 @@ def test_mermaid_ids_do_not_collapse_distinct_state_names() -> None:
     ids = [line.split("[", 1)[0].strip() for line in m.splitlines() if '["a-' in line or '["a_' in line]
     assert len(ids) == 2
     assert ids[0] != ids[1]
+
+
+def test_mermaid_escapes_quoted_state_names() -> None:
+    wf = Workflow("quotes")
+    wf.set_initial('say "hi"')
+    wf.note_transition('say "hi"', "done")
+
+    @wf.step('say "hi"')
+    def quoted(ctx) -> str:
+        return "done"
+
+    @wf.step("done")
+    def done(ctx) -> None:
+        return None
+
+    m = workflow_to_mermaid(wf)
+    assert 'entry: say &quot;hi&quot;' in m
+    assert '["say &quot;hi&quot;"]' in m

@@ -1,16 +1,16 @@
 # How replayt compares
 
-replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this page to map it to tools you already know. It is a migration guide, not a feature parity matrix.
+replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. This page maps it to tools you may already use. It is a migration guide, not a feature parity matrix.
 
 ## Plain Python (`if` / `else` + prints)
 
 **You already have:** Full control and no workflow dependency.
 
-**replayt adds:** One event schema (`run_started`, `state_entered`, `llm_request`, …), `replayt inspect` / `replay` / `report`, first-class approvals (exit code `2`), and graph validation for CI. Handlers stay ordinary Python inside `@wf.step`; the graph and logging stay explicit.
+**replayt adds:** One event schema (`run_started`, `state_entered`, `llm_request`, ...), `replayt inspect` / `replay` / `report`, first-class approvals (exit code `2`), and graph validation for CI. Handlers stay ordinary Python inside `@wf.step`; the graph and logging stay explicit.
 
 **Stay on plain Python for:** One-off scripts where you do not need a shared audit format or replay tooling.
 
-## “Agent” or planner frameworks (e.g. LangGraph-style loops)
+## "Agent" or planner frameworks (e.g. LangGraph-style loops)
 
 ### LangGraph and similar frameworks
 
@@ -20,7 +20,7 @@ replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this 
 
 **If you need another framework:** keep it **inside one `@wf.step`**. Validate one Pydantic outcome, then `return "next_state"`; see **Pattern: framework in a sandbox step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
-**Prefer the other tool when:** You want the framework to own exploration, dynamic graph mutation, or long-lived autonomous sessions.
+**Use the other tool when:** You want the framework to own exploration, dynamic graph mutation, or long-lived autonomous sessions.
 
 ## Temporal / Cadence / distributed workflow engines
 
@@ -30,7 +30,7 @@ replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this 
 
 **Use Temporal when:** You need distributed durability and workflow code that survives worker crashes as a first-class product feature.
 
-## Hosted LLM “platforms” and observability suites
+## Hosted LLM "platforms" and observability suites
 
 **Hosted stacks** usually mean accounts, dashboards, and traces in a vendor service.
 
@@ -38,12 +38,12 @@ replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. Use this 
 
 **Use hosted observability when:** Policy mandates a vendor for telemetry; replayt can still be the engine if JSONL remains the source of truth.
 
-## Quick reference
+## Reference table
 
-| If you need… | replayt | Often paired with… |
+| If you need... | replayt | Often paired with... |
 | --- | --- | --- |
 | Explicit states in repo | Yes | Code review / CI (`replayt validate`) |
-| “What happened?” for one run | Yes | `inspect`, `replay`, `report` |
+| "What happened?" for one run | Yes | `inspect`, `replay`, `report` |
 | Distributed saga across months | No | Temporal, queues, or separate services |
 | Autonomous multi-hour agent | No | A different product shape |
 | One-run audit trail on disk | Yes | `JSONLStore`, optional SQLite |

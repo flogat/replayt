@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from replayt.persistence import JSONLStore
 from replayt.testing import DryRunLLMClient, MockLLMClient, assert_events, run_with_mock
@@ -156,3 +156,31 @@ def test_dry_run_client_handles_nested_ref_schema() -> None:
     assert content["name"] == ""
     assert content["address"]["city"] == ""
     assert content["address"]["zip"] == 0
+
+
+def test_dry_run_client_respects_common_schema_constraints() -> None:
+    class ConstrainedPayload(BaseModel):
+        name: str = Field(min_length=2)
+        count: int = Field(ge=1)
+        ratio: float = Field(gt=0)
+        tags: list[str] = Field(min_length=2)
+
+    client = DryRunLLMClient()
+    response_format = {
+        "type": "json_schema",
+        "json_schema": {
+            "name": "ConstrainedPayload",
+            "schema": ConstrainedPayload.model_json_schema(),
+        },
+    }
+    result = client.chat_completions(
+        messages=[{"role": "user", "content": "test"}],
+        response_format=response_format,
+    )
+
+    content = result["choices"][0]["message"]["content"]
+    parsed = ConstrainedPayload.model_validate_json(content)
+    assert len(parsed.name) >= 2
+    assert parsed.count >= 1
+    assert parsed.ratio > 0
+    assert len(parsed.tags) >= 2

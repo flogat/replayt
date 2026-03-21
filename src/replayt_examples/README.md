@@ -9,7 +9,7 @@ Each section covers four things:
 - **What command to run**
 - **What you should see**
 
-If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTART.md), then read the sections below **in order**. There are **14** runnable workflows here (sections 1–12, plus OpenAI and Anthropic SDK examples). They move from a two-step deterministic run to LLM-backed classification, typed tools, retries, and approval gates. By the end, you should be able to open each source file, read the state handlers, and match that code to what you see in `inspect` and `replay`.
+If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTART.md), then read the sections below **in order**. There are **14** runnable workflows here (sections 1-12, plus OpenAI and Anthropic SDK examples). They move from a two-step deterministic run to LLM-backed classification, typed tools, retries, and approval gates. By the end, you should be able to open each source file, read the state handlers, and match them to what you see in `inspect` and `replay`.
 
 **Patterns and recipes** (approval bridge, batch driver, async apps, dashboards, encryption sketches, and more) are in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** so this page can stay a straight-line tutorial.
 
@@ -25,7 +25,7 @@ If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTA
 4. Inspect the run and compare the resulting context and events with the explanation here.
 5. Change the sample input and run again to see different behavior.
 
-### Install (PyPI — no clone required)
+### Install (PyPI, no clone required)
 
 ```bash
 pip install replayt
@@ -50,7 +50,7 @@ See [`README.md`](../../README.md) for Windows activation lines, `replayt doctor
 
 ## Tests without a live LLM (CI and pytest)
 
-Sections **1–5** of this tutorial need **no API key**. For LLM-backed workflows in **automated tests**, use **`MockLLMClient`** with **`run_with_mock`** (or mock `httpx`) and assert on context or JSONL events; see **Pattern: golden path test (pytest)** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md). For **`replayt validate`** and CI exit codes, see [`docs/RECIPES.md`](../../docs/RECIPES.md).
+Sections **1-5** of this tutorial need **no API key**. For LLM-backed workflows in **automated tests**, use **`MockLLMClient`** with **`run_with_mock`** (or mock `httpx`) and assert on context or JSONL events. See **Pattern: golden path test (pytest)** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md). For **`replayt validate`** and CI exit codes, see [`docs/RECIPES.md`](../../docs/RECIPES.md).
 
 ## Beyond core: streaming, hooks, approvals, and logs
 
@@ -58,10 +58,10 @@ replayt keeps explicit states, append-only **JSONL**, and structured LLM outputs
 
 **Composition patterns** (copy the names into EXAMPLES_PATTERNS search):
 
-- **Pattern: stream inside step, log structured summary** — streaming UX without core token events.
-- **Pattern: approval bridge (local UI)** — web or chat approvals while replayt stays the engine.
-- **Pattern: webhook / lifecycle callbacks** — notifications and policy hooks without turning core into an observability platform.
-- **Pattern: encrypted run logs** and **Pattern: post-hoc PII scrub on JSONL files** — tighter disk handling and redaction.
+- **Pattern: stream inside step, log structured summary**: streaming UX without core token events.
+- **Pattern: approval bridge (local UI)**: web or chat approvals while replayt stays the engine.
+- **Pattern: webhook / lifecycle callbacks**: notifications and policy hooks without turning core into an observability platform.
+- **Pattern: encrypted run logs** and **Pattern: post-hoc PII scrub on JSONL files**: tighter disk handling and redaction.
 
 Share a read-only timeline for review without building a server:
 
@@ -69,7 +69,7 @@ Share a read-only timeline for review without building a server:
 replayt replay <run_id> --format html --out run.html
 ```
 
-Optional **line/file SHA-256 manifest** for a JSONL run (best-effort audit packet; not proof against someone who can edit the log dir):
+Optional **line/file SHA-256 manifest** for a JSONL run (extra audit packet, not proof against someone who can edit the log dir):
 
 ```bash
 replayt seal <run_id>
@@ -81,7 +81,7 @@ For **in-process** trace IDs or policy logging, use **`Runner(..., before_step=.
 
 replayt keeps **explicit** states and append-only JSONL. Per-token log lines and hidden planners are out of scope ([**docs/SCOPE.md**](../../docs/SCOPE.md)). The supported shape is simple: **one step** wraps the other SDK or graph, and **one** validated exit shape picks the next state.
 
-### LangGraph (and similar frameworks) — **composition**, not core
+### LangGraph (and similar frameworks): **composition**, not core
 
 replayt will not ship LangGraph inside the runner because that would hide control flow next to an explicit FSM (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). The supported shape is to run LangGraph **inside one `@wf.step`**, then move replayt forward from **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log the **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, or tools, not every planner tick.
 
@@ -91,7 +91,7 @@ Install graph libraries in **your** project only:
 pip install langgraph langchain-core
 ```
 
-Illustrative pattern (adapt imports and graph build to your codebase):
+Example pattern (adapt imports and graph build to your codebase):
 
 ```python
 from pydantic import BaseModel
@@ -116,16 +116,16 @@ def with_langgraph(ctx):
 
 Human gates stay replayt-native: **`ctx.request_approval`** or the **Pattern: approval bridge** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)**.
 
-## 1. Hello world — `replayt_examples.e01_hello_world`
+## 1. Hello world - `replayt_examples.e01_hello_world`
 
-Start here if you want the absolute minimum replayt workflow.
+Start here for the smallest replayt workflow.
 
 ### What the code does
 
 This example has only two states: `greet` and `done`.
 
 - `greet` reads `customer_name` from context.
-- It writes a friendly `message` plus a `next_action` hint back into context.
+- It writes `message` and `next_action` back into context.
 - It transitions directly to `done`.
 - `done` sets `completed=true` and returns `None`, which ends the workflow.
 
@@ -156,13 +156,13 @@ The run should complete successfully in a very small number of events. The final
 - `next_action="Inspect this run, then replay it from the CLI."`
 - `completed=true`
 
-## 2. Intake normalization — `replayt_examples.e02_intake_normalization`
+## 2. Intake normalization - `replayt_examples.e02_intake_normalization`
 
-This example introduces a very common workflow pattern: validate raw input first, then transform it into a cleaner internal representation.
+This example uses a common workflow pattern: validate raw input first, then transform it into a cleaner internal representation.
 
 ### What the code does
 
-The workflow has three stages in spirit, although only two state handlers do real work:
+The workflow has three stages overall, although only two state handlers do real work:
 
 - `validate` checks that `lead` exists and matches the `RawLead` Pydantic schema.
 - `normalize` trims whitespace, title-cases the name, lowercases the email, compresses message spacing, and derives a `segment`.
@@ -192,7 +192,7 @@ The run should complete successfully and preserve both the validated input and t
 
 The `segment` becomes `enterprise` because the normalization logic checks whether the message mentions `seat` or `demo`. That is deterministic branching from explicit code, not a model guess.
 
-## 3. Support routing — `replayt_examples.e03_support_routing`
+## 3. Support routing - `replayt_examples.e03_support_routing`
 
 This example shows explicit branching for operational workflows.
 
@@ -227,7 +227,7 @@ The sample input contains billing language (`payment`, `invoice`, `declined`) an
 
 Change the subject or body and the route should shift in predictable ways.
 
-## 4. Typed tool calls — `replayt_examples.e04_tool_using_procurement`
+## 4. Typed tool calls - `replayt_examples.e04_tool_using_procurement`
 
 This example introduces replayt's typed tool system.
 
@@ -262,13 +262,13 @@ The run should complete successfully and the event log should show both tool cal
 
 The Design department limit in the example code is `500.0`, so a total of `298.0` stays within policy. The same run covers typed tools and deterministic post-tool branching.
 
-## 5. Retries for flaky integrations — `replayt_examples.e05_retrying_vendor_lookup`
+## 5. Retries for flaky integrations - `replayt_examples.e05_retrying_vendor_lookup`
 
-This example shows explicit retries: no hidden retry loops.
+This example shows explicit retries that stay visible in the run history.
 
 ### What the code does
 
-The `lookup` step is decorated with a retry policy of up to three attempts. The implementation intentionally simulates a flaky dependency:
+The `lookup` step is decorated with a retry policy of up to three attempts. The implementation simulates a flaky dependency:
 
 - it increments `lookup_attempts`
 - it throws a temporary error on the first attempt
@@ -298,7 +298,7 @@ You should see a failed `lookup` attempt followed by an automatic retry and then
 
 Retries are visible and auditable: replayt records the failed attempt in the workflow history instead of hiding it.
 
-## 6. Sales call prep brief — `replayt_examples.e06_sales_call_brief`
+## 6. Sales call prep brief - `replayt_examples.e06_sales_call_brief`
 
 This is the first example where the model produces a structured object.
 
@@ -331,12 +331,12 @@ The exact wording will vary by model, but the outcome should still be predictabl
 - a `customer_stage` consistent with active evaluation or procurement
 - goals related to the pilot and security review
 - risks related to SOC 2 confirmation or rollout timing
-- talking points that help the seller prepare for the next conversation
+- talking points for the next conversation
 - a concise `next_step`
 
 The output stays structured, so you can use it in the next step.
 
-## 7. Customer feedback clustering — `replayt_examples.e07_feedback_clustering`
+## 7. Customer feedback clustering - `replayt_examples.e07_feedback_clustering`
 
 This example scales the same structured-output idea to a list of inputs instead of one note.
 
@@ -369,7 +369,7 @@ Model wording will vary, but the structure should stay stable. `feedback_summary
 
 For this sample input, expect themes around performance or exports and around access or SSO. That is how replayt records structured analysis across several text inputs.
 
-## 8. Travel approval — `replayt_examples.e08_travel_approval`
+## 8. Travel approval - `replayt_examples.e08_travel_approval`
 
 This example introduces a human approval gate.
 
@@ -381,7 +381,7 @@ The workflow has three important phases:
 - `manager_review` either auto-approves, pauses for approval, or routes to rejection based on approval state
 - `book_trip` and `reject_trip` write the final status
 
-The sample input is intentionally chosen to trigger review because it violates two simple policy checks: high estimated cost and short notice.
+The sample input is chosen to trigger review because it violates two simple policy checks: high estimated cost and short notice.
 
 ### What to run
 Evaluate travel policy automatically, then pause for manager approval only when policy flags require it.
@@ -418,7 +418,7 @@ If you approve the run, it should resume through `book_trip` and end with `trave
 
 If you reject the run, it should resume through `reject_trip` and end with `travel_status="rejected"`.
 
-## 9. Incident response — `replayt_examples.e09_incident_response`
+## 9. Incident response - `replayt_examples.e09_incident_response`
 
 This example combines typed tools, deterministic severity logic, and an approval gate.
 
@@ -468,7 +468,7 @@ If approved, the final context should include `communication_plan="external_stat
 
 If rejected, the final context should include `communication_plan="internal_updates_only"`.
 
-## 10. GitHub issue triage — `replayt_examples.issue_triage`
+## 10. GitHub issue triage - `replayt_examples.issue_triage`
 
 <p align="center">
   <img src="../../docs/demo.svg" alt="replayt demo: run, inspect, replay on issue triage" width="820"/>
@@ -488,7 +488,7 @@ The workflow starts with `validate`, which checks that the issue payload exists 
 The `route` step turns that decision into a smaller `routing` object with queue, label, and priority.
 
 ### What to run
-A relatable developer workflow with deterministic validation, LLM classification, and explicit routing.
+A developer workflow with deterministic validation, LLM classification, and explicit routing.
 
 With the sample input, the issue should pass validation, the LLM should return a `TriageDecision`, and the final context should either contain a `response_template` asking for clarification or, more likely here, a `routing` object with a category-backed queue, suggested label, and priority for engineering triage.
 
@@ -499,14 +499,14 @@ replayt run replayt_examples.issue_triage:wf \
 
 ### What to expect
 
-The sample input is long enough to pass validation, so the interesting behavior happens in classification. The final context should contain one of two outcomes:
+The sample input is long enough to pass validation, so classification is the main step to watch. The final context should contain one of two outcomes:
 
 - `response_template` if the model decides more information is needed
 - `routing` if the model is confident enough to classify and route
 
 For this particular issue, a bug-style classification and engineering-oriented routing are the most likely result. Control flow stays explicit even when a model is involved.
 
-## 11. Refund policy workflow — `replayt_examples.refund_policy`
+## 11. Refund policy workflow - `replayt_examples.refund_policy`
 
 <p align="center">
   <img src="../../docs/demo-debug.svg" alt="replayt debugging a failed refund_policy run" width="820"/>
@@ -522,12 +522,12 @@ The workflow:
 - asks the model for a schema-valid `RefundDecision` in `decide`
 - copies the relevant fields into `summary_for_agent` in `summarize`
 
-The prompt intentionally narrows the policy space: refund, reship, store credit, deny, or escalate.
+The prompt narrows the policy space: refund, reship, store credit, deny, or escalate.
 
 ### What to run
 A constrained support decision flow where the output space stays narrow and auditable.
 
-With the sample input, the run should finish successfully and `summary_for_agent` should contain the schema-validated refund action, reason codes, and customer message. For this damaged-order ticket delivered 3 days ago, a refund-oriented outcome is plausible under the stated policy, but the exact action still comes from the model and stays visible in the log.
+With the sample input, the run should finish successfully and `summary_for_agent` should contain the schema-validated refund action, reason codes, and customer message. For this damaged-order ticket delivered 3 days ago, the policy allows a refund-oriented outcome, but the exact action still comes from the model and stays visible in the log.
 
 ```bash
 replayt run replayt_examples.refund_policy:wf \
@@ -542,9 +542,9 @@ The model still has discretion, but it must answer inside a bounded schema. Afte
 - `reason_codes`
 - `customer_message`
 
-Because the order was delivered only 3 days ago and the ticket reports damage, a refund-friendly action is plausible under the stated policy. The output stays structured and reviewable instead of buried in prose.
+Because the order was delivered only 3 days ago and the ticket reports damage, a refund-oriented action is reasonable under the stated policy. The output stays structured and reviewable instead of buried in prose.
 
-## 12. Publishing preflight with approval gate — `replayt_examples.publishing_preflight`
+## 12. Publishing preflight with approval gate - `replayt_examples.publishing_preflight`
 
 <p align="center">
   <img src="../../docs/demo-approval.svg" alt="replayt approval gate: pause, review, resume" width="820"/>
@@ -586,13 +586,13 @@ replayt resume replayt_examples.publishing_preflight:wf <run_id> --approval publ
 
 ### What to expect
 
-The sample draft is intentionally risky, so the checklist should likely report `passes=false` and one or more issues related to unsupported claims or inappropriate guarantees. The first run should then pause for `publish` approval.
+The sample draft is risky, so the checklist should likely report `passes=false` and one or more issues related to unsupported claims or inappropriate guarantees. The first run should then pause for `publish` approval.
 
 If approved, the resumed run should end with `publish_status="approved"`.
 
 If rejected, the resumed run should end with `publish_status="aborted"`.
 
-This fits content review pipelines where an LLM prepares structured guidance and a human still makes the final decision.
+This is useful in content review pipelines where an LLM prepares structured guidance and a human still makes the final decision.
 
 ## Python file target
 
@@ -618,7 +618,7 @@ replayt graph replayt_examples.e04_tool_using_procurement:wf
 
 ---
 
-## 13. OpenAI SDK integration — `replayt_examples.e10_openai_sdk_integration`
+## 13. OpenAI SDK integration - `replayt_examples.e10_openai_sdk_integration`
 
 A full integration example using the official `openai` Python SDK inside replayt steps: function calling with Pydantic validation, the `tools` parameter, and streaming with a structured summary pass. Transitions and approvals stay in replayt; the SDK lives inside individual step handlers. Requires `pip install openai`.
 
@@ -627,7 +627,7 @@ replayt run replayt_examples.e10_openai_sdk_integration:wf \
   --inputs-json '{"issue_title":"Login page crashes on mobile","issue_body":"Steps: open login on iOS Safari, tap submit, white screen."}'
 ```
 
-## 14. Anthropic native SDK — `replayt_examples.e11_anthropic_native`
+## 14. Anthropic native SDK - `replayt_examples.e11_anthropic_native`
 
 A workaround pattern for developers who want `anthropic.Anthropic()` directly instead of an OpenAI-compatible proxy. LLM traffic from native SDKs is **not** auto-logged by replayt; validated `ctx.set` outputs are your audit surface. Requires `pip install anthropic`.
 
@@ -639,4 +639,4 @@ replayt run replayt_examples.e11_anthropic_native:wf \
 
 ---
 
-**Composition patterns** (approval bridge, batch drivers, async/Webhook workarounds, DuckDB, encryption sketches, and more) live in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** so this file stays a linear tutorial.
+**Composition patterns** (approval bridge, batch drivers, async/webhook workarounds, DuckDB, encryption sketches, and more) live in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** so this file stays a linear tutorial.

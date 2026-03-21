@@ -42,3 +42,23 @@ def test_main_fails_closed_when_git_diff_errors(monkeypatch) -> None:
 
     monkeypatch.setattr(gate, "changed_files_vs_base", boom)
     assert gate.main() == 1
+
+
+def test_changed_files_vs_base_marks_repo_as_safe_directory(tmp_path: Path, monkeypatch) -> None:
+    gate = _load_script()
+    monkeypatch.chdir(tmp_path)
+    calls: list[list[str]] = []
+
+    def fake_run(cmd: list[str], **kwargs):
+        calls.append(cmd)
+        stdout = "src/replayt/runner.py\n" if "diff" in cmd else ""
+        return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(gate.subprocess, "run", fake_run)
+
+    files = gate.changed_files_vs_base("main")
+
+    assert files == ["src/replayt/runner.py"]
+    expected_prefix = ["git", "-c", f"safe.directory={tmp_path.resolve()}"]
+    assert calls[0][:3] == expected_prefix
+    assert calls[1][:3] == expected_prefix

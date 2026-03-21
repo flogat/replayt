@@ -12,24 +12,63 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
-# Ralph-style pipeline: ideation → review → remediation → doc tone (docs last, after code settles).
-DEFAULT_SKILLS = ("createfeatures", "improvedoc", "deslopdoc", "reviewcodebase")
-DEFAULT_TASK = (
-    "Run the repository skill loop in this order: createfeatures (new feature ideas), improvedoc "
-    "(docs and repo improvements), deslopdoc (de-AI / humanize documentation), reviewcodebase "
-    "(review plus apply fixes in-repo). Apply changes directly in the working tree, keep CHANGELOG.md "
-    "updated under Unreleased, and leave the workspace ready for the outer release loop to bump "
-    "the patch version, create the tag, and push once all checks pass."
+# Ralph-style pipeline: archetype ideation (×10) → design-fidelity gate → review → remediation → doc tone.
+# Each feat_* skill voices one developer archetype; together they replace the old createfeatures
+# monolith. The shared rejection blocklist (.cursor/skills/REJECTION_BLOCKLIST.md) prevents
+# duplicate/rejected ideas from being re-proposed across runs.
+# review_design_fidelity audits new code against the 7 design principles and SCOPE.md, then fixes
+# violations — acting as a guardrail before general review and doc cleanup.
+DEFAULT_SKILLS = (
+    "feat_staff_engineer",
+    "feat_junior_onboarding",
+    "feat_security_compliance",
+    "feat_ml_llm_engineer",
+    "feat_devops_sre",
+    "feat_product_engineer",
+    "feat_oss_maintainer",
+    "feat_startup_ic",
+    "feat_enterprise_integrator",
+    "feat_framework_enthusiast",
+    "review_design_fidelity",
+    "improvedoc",
+    "deslopdoc",
+    "reviewcodebase",
 )
-SKILL_ALIASES = {"createfeature": "createfeatures"}
+DEFAULT_TASK = (
+    "Run the repository skill loop: ten archetype-specific feature implementation skills "
+    "(feat_staff_engineer, feat_junior_onboarding, feat_security_compliance, feat_ml_llm_engineer, "
+    "feat_devops_sre, feat_product_engineer, feat_oss_maintainer, feat_startup_ic, "
+    "feat_enterprise_integrator, feat_framework_enthusiast), then review_design_fidelity (audit "
+    "new code against the 7 design principles and SCOPE.md, fix violations), then improvedoc "
+    "(docs and repo improvements), deslopdoc (de-AI / humanize documentation), reviewcodebase "
+    "(comprehensive review plus apply fixes in-repo). Each feat_* skill reads "
+    ".cursor/skills/REJECTION_BLOCKLIST.md to avoid re-proposing rejected ideas. Apply changes "
+    "directly in the working tree, keep CHANGELOG.md updated under Unreleased, and leave the "
+    "workspace ready for the outer release loop to bump the patch version, create the tag, and "
+    "push once all checks pass."
+)
+SKILL_ALIASES = {
+    "createfeature": "createfeatures",
+    # Legacy alias: the old monolith skill still exists for manual invocation.
+}
 PYPROJECT_VERSION_RE = re.compile(r'^version\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 INIT_VERSION_RE = re.compile(r'^__version__\s*=\s*"([^"]+)"\s*$', re.MULTILINE)
 UNRELEASED_RE = re.compile(r"(?ms)^## Unreleased\s*$\n(?P<body>.*?)(?=^##\s|\Z)")
 SEMVER_RE = re.compile(r"^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$")
+
+# Codex / ChatGPT CLI usage-limit messages often include a local "try again at" time.
+TRY_AGAIN_AT_RE = re.compile(r"try\s+again\s+at\s+([^\n.]+)", re.IGNORECASE)
+
+# Written to the end of each skill/check log so --resume can skip completed steps.
+RUN_LOG_EXIT_RE = re.compile(r"^### skill_release_loop: exit_code=(\d+)\s*$", re.MULTILINE)
+RUN_DIR_STAMP_RE = re.compile(r"^\d{8}-\d{6}$")
+LOG_BANNER_USAGE_RETRY = "--- skill_release_loop: retry after Codex usage-limit wait ---"
+LOG_BANNER_RESUME = "--- skill_release_loop: resume ---"
 
 
 class LoopError(RuntimeError):
@@ -145,6 +184,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
             "Progress: prints configuration, a decision-tree summary, each command and log path, streamed "
             "child output (unless --quiet), and explicit decision lines after checks. Use --quiet for logs only.\n"
+            "Codex usage limits: by default, if a skill log matches a usage-limit message and includes "
+            "'try again at' with a time within --usage-limit-max-wait-seconds, the loop sleeps (status heartbeats "
+            "continue) and retries the same skill; use --no-wait-on-codex-usage-limit to fail fast.\n"
+            "Resume: use --resume to reuse a run directory and skip skills/checks whose logs already end with "
+            "### skill_release_loop: exit_code=0. --resume with no argument picks the newest resumable folder under "
+            "--log-dir. Resume allows a dirty git worktree (same as --allow-dirty for preflight only). "
+            "Logs from older runs without that footer are not skipped (re-run) unless you append "
+            "`### skill_release_loop: exit_code=0` to finished skill logs manually.\n"
             "External monitor: updates .replayt/skill-release/current.json and <run-dir>/status.json (heartbeat "
             "while subprocesses run; see --status-interval)."
         ),
@@ -229,11 +276,58 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "(default: 15). Set 0 to disable heartbeats."
         ),
     )
+    parser.add_argument(
+        "--wait-on-codex-usage-limit",
+        dest="wait_on_codex_usage_limit",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "If a skill fails with a Codex usage-limit message and a parsable 'try again at' time within "
+            "--usage-limit-max-wait-seconds, sleep and retry the same skill (default: on)."
+        ),
+    )
+    parser.add_argument(
+        "--usage-limit-max-wait-seconds",
+        type=float,
+        default=86400.0,
+        help="Maximum delay to honor for auto-retry (default: 86400 = 24h). Longer resets are not waited out.",
+    )
+    parser.add_argument(
+        "--usage-limit-sleep-buffer-seconds",
+        type=float,
+        default=45.0,
+        help="Extra seconds after the stated 'try again at' time before retrying (default: 45).",
+    )
+    parser.add_argument(
+        "--usage-limit-max-waits-per-skill",
+        type=int,
+        default=100,
+        help="Safety cap on usage-limit sleeps per skill invocation (default: 100).",
+    )
+    parser.add_argument(
+        "--resume",
+        nargs="?",
+        const="",
+        default=None,
+        metavar="RUN_DIR",
+        help=(
+            "Reuse a previous run directory: skip skills/checks whose logs end with exit_code=0. "
+            "With no value, select the newest resumable YYYYMMDD-HHMMSS folder under --log-dir. "
+            "Otherwise RUN_DIR is relative to --log-dir unless it is an absolute path. "
+            "Implies allowing a dirty worktree for git preflight (same as --allow-dirty)."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.max_iterations < 1:
         parser.error("--max-iterations must be >= 1")
     if args.status_interval < 0:
         parser.error("--status-interval must be >= 0")
+    if args.usage_limit_max_wait_seconds <= 0:
+        parser.error("--usage-limit-max-wait-seconds must be > 0")
+    if args.usage_limit_sleep_buffer_seconds < 0:
+        parser.error("--usage-limit-sleep-buffer-seconds must be >= 0")
+    if args.usage_limit_max_waits_per_skill < 1:
+        parser.error("--usage-limit-max-waits-per-skill must be >= 1")
     if args.skills is None:
         args.skills = list(DEFAULT_SKILLS)
     return args
@@ -320,6 +414,11 @@ def build_prompt(skill: SkillSpec, task: str, repo: Path, iteration: int, max_it
     )
 
 
+def effective_allow_dirty(args: argparse.Namespace) -> bool:
+    """Dirty worktree is expected when resuming a partial run; allow it without repeating --allow-dirty."""
+    return bool(args.allow_dirty or args.resume is not None)
+
+
 def ensure_repo_preflight(repo: Path, allow_dirty: bool, dry_run: bool) -> None:
     require_git_repo(repo)
     if dry_run or allow_dirty:
@@ -328,7 +427,7 @@ def ensure_repo_preflight(repo: Path, allow_dirty: bool, dry_run: bool) -> None:
     if status:
         raise LoopError(
             "Working tree is not clean; commit or stash changes before running the release loop, "
-            "or pass --allow-dirty."
+            "or pass --allow-dirty (not needed when using --resume)."
         )
 
 
@@ -371,12 +470,187 @@ def describe_skill_env_snippet(env: dict[str, str], *, task_max: int = 160) -> s
     return "\n".join(lines)
 
 
+def log_file_last_exit_code(text: str) -> int | None:
+    last: int | None = None
+    for match in RUN_LOG_EXIT_RE.finditer(text):
+        last = int(match.group(1))
+    return last
+
+
+def log_path_last_exit_code(path: Path) -> int | None:
+    if not path.is_file():
+        return None
+    return log_file_last_exit_code(path.read_text(encoding="utf-8", errors="replace"))
+
+
+def iteration_fully_passed(
+    run_dir: Path,
+    iteration: int,
+    skill_names: list[str],
+    num_checks: int,
+) -> bool:
+    for name in skill_names:
+        if log_path_last_exit_code(run_dir / f"iter-{iteration:02d}-{name}.log") != 0:
+            return False
+    for j in range(1, num_checks + 1):
+        if log_path_last_exit_code(run_dir / f"iter-{iteration:02d}-check-{j:02d}.log") != 0:
+            return False
+    return True
+
+
+def run_dir_is_resumable(
+    run_dir: Path,
+    skill_names: list[str],
+    max_iterations: int,
+    num_checks: int,
+) -> bool:
+    if not run_dir.is_dir() or not any(run_dir.glob("iter-*.log")):
+        return False
+    for it in range(1, max_iterations + 1):
+        if iteration_fully_passed(run_dir, it, skill_names, num_checks):
+            return False
+    return True
+
+
+def find_latest_resumable_run_dir(
+    log_root: Path,
+    skill_names: list[str],
+    max_iterations: int,
+    num_checks: int,
+) -> Path | None:
+    if not log_root.is_dir():
+        return None
+    candidates = sorted(
+        (p for p in log_root.iterdir() if p.is_dir() and RUN_DIR_STAMP_RE.match(p.name)),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    for run_dir in candidates:
+        if run_dir_is_resumable(run_dir, skill_names, max_iterations, num_checks):
+            return run_dir
+    return None
+
+
+def resolve_run_directory(repo: Path, args: argparse.Namespace, skill_names: list[str]) -> Path:
+    log_dir_resolved = (repo / args.log_dir).resolve()
+    if args.resume is None:
+        return (log_dir_resolved / dt.datetime.now().strftime("%Y%m%d-%H%M%S")).resolve()
+    if args.resume == "":
+        found = find_latest_resumable_run_dir(
+            log_dir_resolved,
+            skill_names,
+            args.max_iterations,
+            len(args.checks),
+        )
+        if found is None:
+            raise LoopError(
+                f"No resumable run directory under {log_dir_resolved} "
+                "(expected YYYYMMDD-HHMMSS folders with iter-* logs where no full iteration passed all skills "
+                "and checks)."
+            )
+        return found
+    run_candidate = Path(args.resume)
+    run_dir = run_candidate.resolve() if run_candidate.is_absolute() else (log_dir_resolved / run_candidate).resolve()
+    if not run_dir.is_dir():
+        raise LoopError(f"Resume path is not a directory: {run_dir}")
+    return run_dir
+
+
+def codex_usage_limit_log_detected(text: str) -> bool:
+    lowered = text.lower()
+    if "usage limit" in lowered:
+        return True
+    if "you've hit your usage" in lowered or "you have hit your usage" in lowered:
+        return True
+    if "hit your usage limit" in lowered:
+        return True
+    return False
+
+
+def parse_try_again_at_local(text: str, *, now: dt.datetime | None = None) -> dt.datetime | None:
+    """Parse 'try again at …' from Codex output (local TZ, today; next day if that time already passed)."""
+    match = TRY_AGAIN_AT_RE.search(text)
+    if not match:
+        return None
+    fragment = match.group(1).strip()
+    if not fragment:
+        return None
+    local_now = now or dt.datetime.now().astimezone()
+    tz = local_now.tzinfo or dt.datetime.now().astimezone().tzinfo
+    if tz is None:
+        tz = dt.timezone.utc
+        local_now = local_now.replace(tzinfo=tz)
+    time_only_formats = ("%I:%M %p", "%I:%M%p", "%H:%M")
+    parsed_time: dt.time | None = None
+    for fmt in time_only_formats:
+        try:
+            parsed_time = dt.datetime.strptime(fragment, fmt).time()
+            break
+        except ValueError:
+            continue
+    if parsed_time is None:
+        return None
+    candidate = dt.datetime.combine(local_now.date(), parsed_time, tzinfo=tz)
+    if candidate <= local_now:
+        candidate += dt.timedelta(days=1)
+    return candidate
+
+
+def compute_usage_limit_delay(
+    now: dt.datetime,
+    resume_at: dt.datetime,
+    *,
+    buffer_seconds: float,
+    max_wait_seconds: float,
+) -> float | None:
+    """Seconds to sleep before retrying, or None if auto-wait is not allowed (too far in the future)."""
+    if max_wait_seconds <= 0:
+        raise LoopError("usage-limit max_wait_seconds must be > 0")
+    if buffer_seconds < 0:
+        raise LoopError("usage-limit buffer_seconds must be >= 0")
+    wake_at = resume_at + dt.timedelta(seconds=buffer_seconds)
+    delta = (wake_at - now).total_seconds()
+    if delta > max_wait_seconds:
+        return None
+    return max(0.0, delta)
+
+
+def sleep_until_with_heartbeat(
+    seconds: float,
+    *,
+    tracker: RunTracker | None,
+    heartbeat_interval: float,
+    waiting_label: str,
+    chunk_seconds: float = 30.0,
+) -> None:
+    """Sleep for ``seconds`` while optionally updating tracker heartbeats."""
+    if seconds <= 0:
+        return
+    end = time.monotonic() + seconds
+    if tracker is not None and heartbeat_interval > 0:
+        tracker.start_heartbeat(interval_sec=heartbeat_interval, waiting_on=waiting_label)
+    try:
+        while True:
+            remaining = end - time.monotonic()
+            if remaining <= 0:
+                break
+            if tracker is not None:
+                tracker.update(usage_limit_sleep_remaining_sec=max(0.0, round(remaining, 1)))
+            time.sleep(min(chunk_seconds, remaining))
+    finally:
+        if tracker is not None and heartbeat_interval > 0:
+            tracker.stop_heartbeat()
+            tracker.update(usage_limit_sleep_remaining_sec=None)
+
+
 def run_shell_command(
     command: str,
     repo: Path,
     env: dict[str, str],
     *,
     log_path: Path | None = None,
+    log_append: bool = False,
+    log_section_banner: str | None = None,
     dry_run: bool = False,
     stream_to_terminal: bool = True,
     progress_label: str = "",
@@ -401,8 +675,13 @@ def run_shell_command(
         if tracker is not None:
             tracker.start_heartbeat(interval_sec=heartbeat_interval, waiting_on=f"{progress_label}: {command}")
         try:
-            with log_path.open("w", encoding="utf-8") as handle:
-                handle.write(f"$ {command}\n\n")
+            mode = "a" if log_append else "w"
+            banner = log_section_banner or LOG_BANNER_USAGE_RETRY
+            with log_path.open(mode, encoding="utf-8") as handle:
+                if log_append:
+                    handle.write(f"\n\n{banner}\n$ {command}\n\n")
+                else:
+                    handle.write(f"$ {command}\n\n")
                 proc = subprocess.Popen(
                     command,
                     cwd=repo,
@@ -420,6 +699,7 @@ def run_shell_command(
                     if stream_to_terminal:
                         progress_line(f"{prefix}{line}", end="")
                 return_code = proc.wait()
+                handle.write(f"\n### skill_release_loop: exit_code={return_code}\n")
         finally:
             if tracker is not None:
                 tracker.stop_heartbeat()
@@ -449,19 +729,30 @@ def run_skill_iteration(
     iteration: int,
     tracker: RunTracker | None,
 ) -> None:
+    resume = args.resume is not None
     progress_banner(f"Iteration {iteration}/{args.max_iterations}: skills")
     progress_line(
         "Decision: run each skill in sequence; each step invokes --skill-command with a fresh prompt file."
+        + ("; resume skips steps whose logs end with exit_code=0." if resume else ".")
     )
     for skill in skills:
         stem = f"iter-{iteration:02d}-{skill.name}"
         prompt_path = run_dir / f"{stem}.prompt.md"
         log_path = run_dir / f"{stem}.log"
+        if resume and log_path_last_exit_code(log_path) == 0:
+            progress_line(f"Decision: resume — skip {skill.name} (prior exit_code=0): {log_path}")
+            continue
         prompt_path.write_text(build_prompt(skill, args.task, repo, iteration, args.max_iterations), encoding="utf-8")
         env = os.environ.copy()
+        repo_resolved = str(repo.resolve())
+        # Inject safe.directory so child processes (e.g. Codex sandbox running as a
+        # different OS user) can run git commands against the repo without
+        # "dubious ownership" errors.  GIT_CONFIG_COUNT + KEY/VALUE is the
+        # environment-based equivalent of `git -c safe.directory=...`.
+        _inject_git_safe_directory(env, repo_resolved)
         env.update(
             {
-                "REPO_ROOT": str(repo),
+                "REPO_ROOT": repo_resolved,
                 "SKILL_NAME": skill.name,
                 "SKILL_REQUESTED_NAME": skill.requested_name,
                 "SKILL_PATH": str(skill.path),
@@ -498,17 +789,98 @@ def run_skill_iteration(
                 log_file=log_path,
                 command_preview=command[:500],
             )
-        run_shell_command(
-            command,
-            repo,
-            env,
-            log_path=log_path,
-            dry_run=args.dry_run,
-            stream_to_terminal=not args.quiet,
-            progress_label=f"skill:{skill.name}",
-            tracker=tracker,
-            heartbeat_interval=args.status_interval,
-        )
+        usage_waits = 0
+        log_append = bool(resume and log_path.exists() and log_path.stat().st_size > 0)
+        log_banner: str | None = LOG_BANNER_RESUME if log_append else None
+        while True:
+            completed = run_shell_command(
+                command,
+                repo,
+                env,
+                log_path=log_path,
+                log_append=log_append,
+                log_section_banner=log_banner,
+                dry_run=args.dry_run,
+                stream_to_terminal=not args.quiet,
+                progress_label=f"skill:{skill.name}",
+                expect_success=False,
+                tracker=tracker,
+                heartbeat_interval=args.status_interval,
+            )
+            if completed.returncode == 0:
+                break
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            if (
+                args.dry_run
+                or not args.wait_on_codex_usage_limit
+                or not codex_usage_limit_log_detected(log_text)
+            ):
+                raise LoopError(
+                    f"Command failed with exit code {completed.returncode}: {command}\nSee {log_path}"
+                )
+            resume_at = parse_try_again_at_local(log_text)
+            if resume_at is None:
+                raise LoopError(
+                    "Codex usage limit detected but no parsable 'try again at' time; "
+                    f"fix quota or retry manually.\nSee {log_path}"
+                )
+            now = dt.datetime.now(resume_at.tzinfo)
+            delay = compute_usage_limit_delay(
+                now,
+                resume_at,
+                buffer_seconds=args.usage_limit_sleep_buffer_seconds,
+                max_wait_seconds=args.usage_limit_max_wait_seconds,
+            )
+            if delay is None:
+                raise LoopError(
+                    f"Codex usage limit: retry time {resume_at.isoformat()} is more than "
+                    f"{args.usage_limit_max_wait_seconds:.0f}s away; not auto-waiting.\nSee {log_path}"
+                )
+            usage_waits += 1
+            if usage_waits > args.usage_limit_max_waits_per_skill:
+                raise LoopError(
+                    f"Exceeded --usage-limit-max-waits-per-skill ({args.usage_limit_max_waits_per_skill}) "
+                    f"for {skill.name}; see {log_path}"
+                )
+            progress_banner(f"Skill: {skill.name} (Codex usage limit)")
+            progress_line(
+                f"Decision: usage limit detected; auto-continue after ~{delay:.0f}s "
+                f"(stated resume ~{resume_at.isoformat()}, wait #{usage_waits})."
+            )
+            if tracker is not None:
+                tracker.update(
+                    phase="waiting_codex_usage_limit",
+                    iteration=iteration,
+                    max_iterations=args.max_iterations,
+                    skill=skill.name,
+                    prompt_file=prompt_path,
+                    log_file=log_path,
+                    usage_limit_resume_at=resume_at.isoformat(),
+                    usage_limit_wait_number=usage_waits,
+                    command_preview=command[:500],
+                )
+            wait_label = (
+                f"skill:{skill.name}:codex_usage_limit wait #{usage_waits} "
+                f"~{int(delay)}s -> {resume_at.isoformat()}"
+            )
+            sleep_until_with_heartbeat(
+                delay,
+                tracker=tracker,
+                heartbeat_interval=args.status_interval,
+                waiting_label=wait_label[:500],
+            )
+            log_append = True
+            log_banner = None
+            if tracker is not None:
+                tracker.update(
+                    phase="skill",
+                    iteration=iteration,
+                    max_iterations=args.max_iterations,
+                    skill=skill.name,
+                    prompt_file=prompt_path,
+                    log_file=log_path,
+                    command_preview=command[:500],
+                )
 
 
 def run_checks(
@@ -518,13 +890,18 @@ def run_checks(
     iteration: int,
     tracker: RunTracker | None,
 ) -> bool:
+    resume = args.resume is not None
     progress_banner(f"Iteration {iteration}/{args.max_iterations}: checks")
     progress_line(
         f"Decision: run {len(args.checks)} check command(s) in order; all must exit 0 to finish the loop "
         "successfully."
+        + ("; resume skips checks whose logs end with exit_code=0." if resume else ".")
     )
     for index, template in enumerate(args.checks, start=1):
         log_path = run_dir / f"iter-{iteration:02d}-check-{index:02d}.log"
+        if resume and log_path_last_exit_code(log_path) == 0:
+            progress_line(f"Decision: resume — skip check {index} (prior exit_code=0): {log_path}")
+            continue
         env = os.environ.copy()
         env["REPO_ROOT"] = str(repo)
         command = render_command(template, {"repo": str(repo), "iteration": str(iteration)})
@@ -552,11 +929,15 @@ def run_checks(
             )
             progress_line("Decision: dry-run assumes this check would pass.")
             continue
+        chk_append = bool(resume and log_path.exists() and log_path.stat().st_size > 0)
+        chk_banner: str | None = LOG_BANNER_RESUME if chk_append else None
         completed = run_shell_command(
             command,
             repo,
             env,
             log_path=log_path,
+            log_append=chk_append,
+            log_section_banner=chk_banner,
             stream_to_terminal=not args.quiet,
             progress_label=f"check:{iteration:02d}-{index:02d}",
             expect_success=False,
@@ -582,6 +963,22 @@ def run_checks(
     return True
 
 
+def _inject_git_safe_directory(env: dict[str, str], repo_path: str) -> None:
+    """Set ``safe.directory`` for *repo_path* via ``GIT_CONFIG_*`` environment variables.
+
+    This is the environment-based equivalent of ``git -c safe.directory=<path>`` and ensures that
+    **child processes** (e.g. a Codex sandbox running as a different OS user) can invoke git
+    commands against *repo_path* without the "dubious ownership" error.
+
+    If ``GIT_CONFIG_COUNT`` already exists in *env* the new entry is appended (the index is the
+    current count value) so pre-existing config overrides are preserved.
+    """
+    idx = int(env.get("GIT_CONFIG_COUNT", "0"))
+    env[f"GIT_CONFIG_KEY_{idx}"] = "safe.directory"
+    env[f"GIT_CONFIG_VALUE_{idx}"] = repo_path
+    env["GIT_CONFIG_COUNT"] = str(idx + 1)
+
+
 def git_stdout(repo: Path, args: list[str]) -> str:
     completed = run_git(repo, args, capture_output=True)
     return completed.stdout
@@ -600,8 +997,9 @@ def _git_env() -> dict[str, str]:
 
 
 def run_git(repo: Path, args: list[str], *, capture_output: bool = False) -> subprocess.CompletedProcess[str]:
+    repo_resolved = repo.resolve()
     completed = subprocess.run(
-        ["git", "-C", str(repo), *args],
+        ["git", "-c", f"safe.directory={repo_resolved}", "-C", str(repo_resolved), *args],
         cwd=repo,
         env=_git_env(),
         text=True,
@@ -697,8 +1095,19 @@ def ensure_remote(repo: Path, remote: str) -> None:
 
 
 def ensure_tag_absent(repo: Path, tag_name: str) -> None:
+    repo_resolved = repo.resolve()
     result = subprocess.run(
-        ["git", "-C", str(repo), "rev-parse", "-q", "--verify", f"refs/tags/{tag_name}"],
+        [
+            "git",
+            "-c",
+            f"safe.directory={repo_resolved}",
+            "-C",
+            str(repo_resolved),
+            "rev-parse",
+            "-q",
+            "--verify",
+            f"refs/tags/{tag_name}",
+        ],
         cwd=repo,
         env=_git_env(),
         text=True,
@@ -727,12 +1136,17 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     repo = Path.cwd().resolve()
     skill_root = (repo / args.skill_root).resolve()
-    run_dir = (repo / args.log_dir / dt.datetime.now().strftime("%Y%m%d-%H%M%S")).resolve()
     if args.skill_command is None:
         args.skill_command = default_skill_command(repo)
     if args.checks is None:
         args.checks = default_check_commands(repo)
     skills = [load_skill(skill_root, name) for name in args.skills]
+    skill_names = [s.name for s in skills]
+    try:
+        run_dir = resolve_run_directory(repo, args, skill_names)
+    except LoopError as exc:
+        print(f"skill_release_loop: {exc}", file=sys.stderr)
+        return 1
 
     tracker = RunTracker(repo, run_dir, Path(args.log_dir))
 
@@ -770,15 +1184,33 @@ def _main_run(
     progress_line(f"Max iterations: {args.max_iterations}")
     progress_line(f"Dry run: {args.dry_run}")
     progress_line(f"Skip push: {args.skip_push}")
-    progress_line(f"Allow dirty worktree: {args.allow_dirty}")
+    dirty_ok = effective_allow_dirty(args)
+    progress_line(
+        f"Allow dirty worktree: {dirty_ok}"
+        + (
+            " (implicit: --resume)"
+            if dirty_ok and not args.allow_dirty and args.resume is not None
+            else ""
+        )
+    )
     progress_line(f"Quiet (no streamed child output): {args.quiet}")
+    if args.resume is not None:
+        progress_line(f"Resume: reusing run directory {run_dir}")
+    progress_line(f"Wait on Codex usage limit (auto-retry): {args.wait_on_codex_usage_limit}")
+    progress_line(
+        f"Usage-limit max wait: {args.usage_limit_max_wait_seconds:.0f}s; "
+        f"buffer after stated time: {args.usage_limit_sleep_buffer_seconds:.0f}s; "
+        f"max waits per skill: {args.usage_limit_max_waits_per_skill}"
+    )
     progress_line(f"Skill command template:\n  {args.skill_command}")
     for i, check_cmd in enumerate(args.checks, start=1):
         progress_line(f"Check {i} template:\n  {check_cmd}")
 
     progress_banner("Preflight")
-    progress_line("Decision: verify git repo (and clean worktree unless --allow-dirty or --dry-run).")
-    ensure_repo_preflight(repo, args.allow_dirty, args.dry_run)
+    progress_line(
+        "Decision: verify git repo (clean worktree unless --dry-run, --allow-dirty, or --resume)."
+    )
+    ensure_repo_preflight(repo, dirty_ok, args.dry_run)
     progress_line("Preflight: OK")
     if not args.skip_push:
         progress_line(f"Decision: verify remote {args.remote!r} exists (push requested).")
@@ -793,12 +1225,17 @@ def _main_run(
         run_dir=str(run_dir),
         dry_run=args.dry_run,
         skip_push=args.skip_push,
-        allow_dirty=args.allow_dirty,
+        allow_dirty=dirty_ok,
         max_iterations=args.max_iterations,
         skill_pipeline=[s.name for s in skills],
         skill_command=args.skill_command,
         checks=list(args.checks),
         status_interval_sec=args.status_interval,
+        wait_on_codex_usage_limit=args.wait_on_codex_usage_limit,
+        usage_limit_max_wait_seconds=args.usage_limit_max_wait_seconds,
+        usage_limit_sleep_buffer_seconds=args.usage_limit_sleep_buffer_seconds,
+        usage_limit_max_waits_per_skill=args.usage_limit_max_waits_per_skill,
+        resume=args.resume is not None,
     )
 
     progress_banner("Skill/check loop")

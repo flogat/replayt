@@ -1,6 +1,6 @@
 # Installation and environment
 
-Create a venv, `pip install replayt`, then run `replayt doctor`. This page covers shells, Windows, optional extras, `.env` loading, and common errors.
+Create a venv, `pip install replayt`, then run `replayt doctor`. This page shows shell setup, Windows notes, optional extras, `.env` loading, and common errors.
 
 ## Virtual environment (by shell)
 
