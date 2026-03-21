@@ -4,9 +4,9 @@ Overview, diagrams, and the main narrative are in the [**README**](../README.md)
 
 ## The three-step loop (reminder)
 
-1. **`replayt run`** — run a workflow, get a run ID.
-2. **`replayt inspect`** — summary and events.
-3. **`replayt replay`** or **`replayt report`** — shareable HTML without calling the model again.
+1. **`replayt run`**: run a workflow and get a run ID.
+2. **`replayt inspect`**: review the summary and events.
+3. **`replayt replay`** or **`replayt report`**: generate a shareable view without calling the model again.
 
 See also [Five-minute quickstart](QUICKSTART.md).
 
@@ -19,7 +19,7 @@ The repo includes a **short illustrative cast** (synthetic output): [`replayt-de
 asciinema play docs/replayt-demo.cast
 ```
 
-To produce a **real** cast from your machine (recommended for sharing):
+To produce a **real** cast from your machine, which is usually better for sharing:
 
 1. `replayt graph replayt_examples.issue_triage:wf`
 2. `replayt run replayt_examples.issue_triage:wf --inputs-json '{"issue":{"title":"Crash on save","body":"Steps: open, save, crash."}}'`

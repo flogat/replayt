@@ -2,7 +2,7 @@
 
 **replayt** is a small Python library for **deterministic LLM workflows with local logs and offline replay**.
 
-*PyPI status: **Beta** — pin versions in production; minor API or CLI details may still change between releases.*
+*PyPI status: **Beta**. Pin versions in production. Minor API or CLI details may still change between releases.*
 
 <p align="center">
   <img src="docs/demo.svg" alt="replayt demo: run a workflow, inspect JSONL, replay the recorded timeline step by step without calling the provider" width="820"/>
@@ -51,7 +51,7 @@ For plain Python, Temporal, hosted stacks, and migration notes, see [docs/COMPAR
 | **Control flow** | Fully explicit, but you reinvent structure each time | Often implicit or planner-driven | **Explicit** states and transitions in code |
 | **Audit trail** | Whatever you print | Often uneven | **Append-only JSONL** (and optional SQLite) with a stable event schema |
 | **Human gates** | Custom | Often bolted on | **First-class** pause / resume with exit code `2` |
-| **Tradeoff** | No conventions | Harder to answer “what happened?” | You model a **finite run**—not a distributed workflow engine |
+| **Tradeoff** | No conventions | Harder to answer “what happened?” | You model a **finite run**. Handle distributed orchestration outside replayt. |
 
 replayt fits best when you want explicit states, validated outputs, and a recorded timeline you can inspect later.
 
@@ -61,7 +61,7 @@ Transitions and branching are **your code**; the model does not silently rewrite
 
 **After quickstart:** in the tutorial, try **§10 GitHub issue triage** (validation + LLM) and **§12 Publishing preflight** (structured review + approval) in [`src/replayt_examples/README.md`](src/replayt_examples/README.md).
 
-**Terminal demo:** Short illustrative cast [`docs/replayt-demo.cast`](docs/replayt-demo.cast) (`asciinema play docs/replayt-demo.cast`). To share in a browser, upload the cast to [asciinema.org](https://asciinema.org/) and link the player URL here or in your fork—steps in [docs/DEMO.md](docs/DEMO.md).
+**Terminal demo:** Short illustrative cast [`docs/replayt-demo.cast`](docs/replayt-demo.cast) (`asciinema play docs/replayt-demo.cast`). To share it in a browser, upload the cast to [asciinema.org](https://asciinema.org/) and link the player URL here or in your fork. The steps are in [docs/DEMO.md](docs/DEMO.md).
 
 **Core loop** once installed:
 
@@ -191,7 +191,7 @@ The goal is a small tool you can understand quickly.
 
 replayt targets **trusted local or CI environments**: running a workflow **runs Python** from your file or import path (`replayt run workflow.py` / `module:wf`), with the privileges of your user.
 
-- **Logs and approvals** are stored on disk without authentication. Anyone who can write your log directory can append events or influence resume behavior—treat the log path like credential storage.
+- **Logs and approvals** are stored on disk without authentication. Anyone who can write your log directory can append events or influence resume behavior. Treat the log path like credential storage.
 - **`replayt doctor`** performs an HTTP `GET` to ``OPENAI_BASE_URL``/``models`` and may send ``OPENAI_API_KEY``. Point the base URL only at providers you trust, or run ``replayt doctor --skip-connectivity`` to skip network I/O entirely.
 
 ---
@@ -211,7 +211,7 @@ Every meaningful model output should validate against a clear schema. Structured
 Tool use should be constrained, validated, and logged as part of the run history.
 
 ### 5. Replay is part of the product
-If you cannot **`replayt replay`** a run from disk, the audit story is incomplete. Logging exists so you can **inspect and replay** the exact recorded path—not as an implementation detail.
+If you cannot **`replayt replay`** a run from disk, the audit story is incomplete. Logging exists so you can **inspect and replay** the exact recorded path.
 
 ### 6. Local-first by default
 No account. No hosted dependency. No cloud requirement in v1.
@@ -235,7 +235,7 @@ A new user should be able to understand the architecture quickly.
 
 - OpenAI-compatible chat provider support
 - Strict Pydantic schema parsing for structured outputs
-- Redacted, structured-only (minimal LLM log fields—no message text or previews), or full logging modes
+- Redacted, structured-only, or full logging modes
 - Per-call LLM overrides via `ctx.llm.with_settings(...)` (logged as `effective` on each `llm_request` / `llm_response`, including optional `experiment={...}` for tags you want in the audit trail)
 
 ### Tooling
@@ -287,7 +287,7 @@ replayt doctor
 
 Optional dependencies (see [`pyproject.toml`](pyproject.toml)): **`[yaml]`** adds PyYAML for `.yaml` / `.yml` workflow targets; **`[dev]`** adds pytest, ruff, and YAML support for working on the repo.
 
-**Logs and PII:** runs write append-only JSONL under `.replayt/runs/` by default. Use **`--log-mode`** or Python **`LogMode.redacted` / `structured_only`** when prompts may contain sensitive text—see [`docs/RUN_LOG_SCHEMA.md`](docs/RUN_LOG_SCHEMA.md) and [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
+**Logs and PII:** runs write append-only JSONL under `.replayt/runs/` by default. Use **`--log-mode`** or Python **`LogMode.redacted` / `structured_only`** when prompts may contain sensitive text. See [`docs/RUN_LOG_SCHEMA.md`](docs/RUN_LOG_SCHEMA.md) and [`docs/PRODUCTION.md`](docs/PRODUCTION.md).
 
 Shell-specific venv activation, `.env` loading recipes, and troubleshooting: **[docs/INSTALL.md](docs/INSTALL.md)**.
 
@@ -395,19 +395,19 @@ replayt logs the request, response metadata, and validated structured output as 
 
 ## Documentation map
 
-- [Five-minute quickstart](docs/QUICKSTART.md) — install, first run, replay semantics, failed-run inspect, minimal LLM step
-- [Install & troubleshooting](docs/INSTALL.md) — shells, `.env`, common errors
-- [Production checklist](docs/PRODUCTION.md) — logs, approvals, CI, process model
-- [Recipes](docs/RECIPES.md) — LLM client config, CI exit codes, mocks
-- [CLI reference](docs/CLI.md) — all commands
-- [Project config](docs/CONFIG.md) — `.replaytrc.toml`, `[tool.replayt]`
-- [Comparison / migration](docs/COMPARISON.md) — vs plain Python, agent frameworks, Temporal, hosted stacks
-- [Composition patterns](docs/EXAMPLES_PATTERNS.md) — queues, bridges, tests, SDK-in-one-step, …
-- [Scope / non-goals](docs/SCOPE.md) — maintainer contract for core boundaries
-- [Run log schema](docs/RUN_LOG_SCHEMA.md) — JSONL event types
-- [Docs index](docs/README.md) — full list including demos and architecture
+- [Five-minute quickstart](docs/QUICKSTART.md): install, first run, replay semantics, failed-run inspect, and a minimal LLM step
+- [Install & troubleshooting](docs/INSTALL.md): shells, `.env`, and common errors
+- [Production checklist](docs/PRODUCTION.md): logs, approvals, CI, and the process model
+- [Recipes](docs/RECIPES.md): LLM client config, CI exit codes, and mocks
+- [CLI reference](docs/CLI.md): all commands
+- [Project config](docs/CONFIG.md): `.replaytrc.toml` and `[tool.replayt]`
+- [Comparison / migration](docs/COMPARISON.md): plain Python, agent frameworks, Temporal, and hosted stacks
+- [Composition patterns](docs/EXAMPLES_PATTERNS.md): queues, bridges, tests, and SDK-in-one-step patterns
+- [Scope / non-goals](docs/SCOPE.md): maintainer contract for core boundaries
+- [Run log schema](docs/RUN_LOG_SCHEMA.md): JSONL event types
+- [Docs index](docs/README.md): full list including demos and architecture
 - [Architecture (Mermaid source)](docs/architecture.mmd)
-- [Tutorial](src/replayt_examples/README.md) — 14 runnable workflows in order (`replayt_examples.*` on PyPI)
+- [Tutorial](src/replayt_examples/README.md): 14 runnable workflows in order (`replayt_examples.*` on PyPI)
 
 ---
 
@@ -499,13 +499,13 @@ steps:
 
 ## Example workflows included
 
-The repo ships a **linear tutorial** of **14 runnable workflows** (deterministic steps, LLM-backed classification, tools, retries, approvals, YAML, OpenAI/Anthropic SDK patterns)—see [`src/replayt_examples/README.md`](src/replayt_examples/README.md). **Composition patterns** (queues, approval UIs, pytest, …) live in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
+The repo ships a **linear tutorial** of **14 runnable workflows** covering deterministic steps, LLM-backed classification, tools, retries, approvals, YAML, and OpenAI/Anthropic SDK patterns. See [`src/replayt_examples/README.md`](src/replayt_examples/README.md). **Composition patterns** such as queues, approval UIs, and pytest live in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
 
 **Tutorial highlights:**
 
-- **GitHub issue triage** — validate issue shape, classify it, route or request more information
-- **Refund policy** — constrained support decisions with structured model output
-- **Publishing preflight** — checklist + pause for approval, then finalize or abort
+- **GitHub issue triage:** validate issue shape, classify it, then route or request more information
+- **Refund policy:** constrained support decisions with structured model output
+- **Publishing preflight:** checklist plus a pause for approval, then finalize or abort
 
 ---
 
@@ -539,7 +539,7 @@ The scope boundaries are in [docs/SCOPE.md](docs/SCOPE.md).
 
 Treat **JSONL and SQLite files you own** as the source of truth for dashboards and approval UIs. replayt is the **engine**; your app owns auth, routing, and UX.
 
-**Operations:** one finite run per process (or per queue message), retries at the scheduler—see **[docs/PRODUCTION.md](docs/PRODUCTION.md)** and **Pattern: queue worker** in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
+**Operations:** run one finite workflow per process or queue message. Let the scheduler handle retries. See **[docs/PRODUCTION.md](docs/PRODUCTION.md)** and **Pattern: queue worker** in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
 
 ---
 
@@ -551,9 +551,9 @@ The full table of common asks, rationale, and **composition patterns** (approval
 
 Teams often want SSO-gated approvals, org policy checks before `resume`, pytest-driven regression loops, or planner-style frameworks inside “the workflow.” Those belong in **your** process wrapper or app layer. replayt stays a **Runner** with explicit states and local JSONL, not a hosted control plane, RBAC product, or bundled eval suite ([docs/SCOPE.md](docs/SCOPE.md)).
 
-- **Approvals + identity:** read paused runs from JSONL/SQLite and resolve gates from a UI or chatbot—**Pattern: approval bridge (local UI)** in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md). For notifications and policy logging without a second engine, use **Pattern: webhook / lifecycle callbacks** or `Runner(..., before_step=..., after_step=...)`.
-- **Harness-style runs:** call `Runner.run` from pytest with frozen inputs and assert on final context or events—**Pattern: golden path test (pytest)**. For many jobs, use an outer loop—**Pattern: batch driver (Airflow / Celery / plain loop)**.
-- **Streaming or LangChain-style graphs:** keep provider SDKs and planners **inside one step**, then transition on one Pydantic-shaped outcome—**Pattern: stream inside step, log structured summary** and **Pattern: framework in a sandbox step**.
+- **Approvals + identity:** read paused runs from JSONL/SQLite and resolve gates from a UI or chatbot. See **Pattern: approval bridge (local UI)** in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md). For notifications and policy logging without a second engine, use **Pattern: webhook / lifecycle callbacks** or `Runner(..., before_step=..., after_step=...)`.
+- **Harness-style runs:** call `Runner.run` from pytest with frozen inputs and assert on final context or events. See **Pattern: golden path test (pytest)**. For many jobs, use an outer loop such as **Pattern: batch driver (Airflow / Celery / plain loop)**.
+- **Streaming or LangChain-style graphs:** keep provider SDKs and planners **inside one step**, then transition on one Pydantic-shaped outcome. See **Pattern: stream inside step, log structured summary** and **Pattern: framework in a sandbox step**.
 
 Human-readable timeline export without building a server:
 
@@ -563,7 +563,7 @@ replayt replay <run_id> --format html --out run.html
 
 #### Streaming, planner loops, and “agents” (composition, not core)
 
-Core does **not** emit per-token events or embed LangGraph-style planners in the `Runner`; that would flood JSONL and hide control flow. Put streaming, tool loops, and third-party graphs **inside a single `@wf.step`**, then return one explicit next state after a Pydantic-validated result (or log a summary yourself). For a worked example, see **LangGraph (and similar frameworks) — composition, not core** in [`src/replayt_examples/README.md`](src/replayt_examples/README.md). Related patterns live in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
+Core does **not** emit per-token events or embed LangGraph-style planners in the `Runner`. That would flood JSONL and hide control flow. Put streaming, tool loops, and third-party graphs **inside a single `@wf.step`**, then return one explicit next state after a Pydantic-validated result (or log a summary yourself). For a worked example, see **LangGraph (and similar frameworks) - composition, not core** in [`src/replayt_examples/README.md`](src/replayt_examples/README.md). Related patterns live in [`docs/EXAMPLES_PATTERNS.md`](docs/EXAMPLES_PATTERNS.md).
 
 ---
 

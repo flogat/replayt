@@ -5,14 +5,16 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import os
 import re
 import shlex
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TextIO
+from typing import Any, TextIO
 
 # Ralph-style pipeline: ideation → review → remediation → doc tone (docs last, after code settles).
 DEFAULT_SKILLS = ("createfeatures", "improvedoc", "deslopdoc", "reviewcodebase")
@@ -42,6 +44,93 @@ class SkillSpec:
     instructions: str
 
 
+def _utc_iso() -> str:
+    return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def _json_safe(obj: Any) -> Any:
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_safe(v) for v in obj]
+    return obj
+
+
+class RunTracker:
+    """Writes run_dir/status.json and log_dir/current.json so another shell can watch progress."""
+
+    def __init__(self, repo: Path, run_dir: Path, log_dir_relative: Path) -> None:
+        self.repo = repo
+        self.run_dir = run_dir.resolve()
+        self.current_path = (repo / log_dir_relative).resolve() / "current.json"
+        self._lock = threading.Lock()
+        self._hb_stop = threading.Event()
+        self._hb_thread: threading.Thread | None = None
+        self.state: dict[str, Any] = {
+            "schema": "skill_release_loop/v1",
+            "active": True,
+            "pid": os.getpid(),
+            "started_at": _utc_iso(),
+        }
+
+    def update(self, **kwargs: Any) -> None:
+        with self._lock:
+            for key, value in kwargs.items():
+                self.state[key] = _json_safe(value)
+            self.state["updated_at"] = _utc_iso()
+            self._write_unlocked()
+
+    def _write_unlocked(self) -> None:
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        status_path = self.run_dir / "status.json"
+        tmp = status_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(self.state, indent=2) + "\n", encoding="utf-8")
+        tmp.replace(status_path)
+        current_payload = {"run_dir": str(self.run_dir), **self.state}
+        ctmp = self.current_path.with_suffix(".tmp")
+        self.current_path.parent.mkdir(parents=True, exist_ok=True)
+        ctmp.write_text(json.dumps(current_payload, indent=2) + "\n", encoding="utf-8")
+        ctmp.replace(self.current_path)
+
+    def start_heartbeat(self, *, interval_sec: float, waiting_on: str) -> None:
+        self.stop_heartbeat()
+        if interval_sec <= 0:
+            return
+        self._hb_stop.clear()
+
+        def loop() -> None:
+            while not self._hb_stop.wait(timeout=interval_sec):
+                with self._lock:
+                    self.state["heartbeat_at"] = _utc_iso()
+                    self.state["waiting_on"] = waiting_on[:500]
+                    self._write_unlocked()
+
+        self._hb_thread = threading.Thread(target=loop, name="skill-release-heartbeat", daemon=True)
+        self._hb_thread.start()
+
+    def stop_heartbeat(self) -> None:
+        self._hb_stop.set()
+        if self._hb_thread is not None:
+            self._hb_thread.join(timeout=2.0)
+        self._hb_thread = None
+        with self._lock:
+            self.state.pop("waiting_on", None)
+
+    def finalize(self, *, outcome: str, error: str | None = None) -> None:
+        self.stop_heartbeat()
+        with self._lock:
+            if "outcome" in self.state:
+                return
+            self.state["active"] = False
+            self.state["outcome"] = outcome
+            if error is not None:
+                self.state["error"] = error
+            self.state["finished_at"] = _utc_iso()
+            self._write_unlocked()
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
@@ -55,7 +144,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
             "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
             "Progress: prints configuration, a decision-tree summary, each command and log path, streamed "
-            "child output (unless --quiet), and explicit decision lines after checks. Use --quiet for logs only."
+            "child output (unless --quiet), and explicit decision lines after checks. Use --quiet for logs only.\n"
+            "External monitor: updates .replayt/skill-release/current.json and <run-dir>/status.json (heartbeat "
+            "while subprocesses run; see --status-interval)."
         ),
     )
     parser.add_argument(
@@ -129,9 +220,20 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Do not stream child-process output to the terminal (logs are still written).",
     )
+    parser.add_argument(
+        "--status-interval",
+        type=float,
+        default=15.0,
+        help=(
+            "Seconds between heartbeat writes to status.json while a skill or check subprocess runs "
+            "(default: 15). Set 0 to disable heartbeats."
+        ),
+    )
     args = parser.parse_args(argv)
     if args.max_iterations < 1:
         parser.error("--max-iterations must be >= 1")
+    if args.status_interval < 0:
+        parser.error("--status-interval must be >= 0")
     if args.skills is None:
         args.skills = list(DEFAULT_SKILLS)
     return args
@@ -279,6 +381,8 @@ def run_shell_command(
     stream_to_terminal: bool = True,
     progress_label: str = "",
     expect_success: bool = True,
+    tracker: RunTracker | None = None,
+    heartbeat_interval: float = 0.0,
 ) -> subprocess.CompletedProcess[str]:
     if dry_run:
         label = f"{progress_label} " if progress_label else ""
@@ -294,25 +398,31 @@ def run_shell_command(
             for line in describe_skill_env_snippet(env).splitlines():
                 progress_line(f"{prefix}{line}")
 
-        with log_path.open("w", encoding="utf-8") as handle:
-            handle.write(f"$ {command}\n\n")
-            proc = subprocess.Popen(
-                command,
-                cwd=repo,
-                env=env,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-            )
-            assert proc.stdout is not None
-            for line in proc.stdout:
-                handle.write(line)
-                if stream_to_terminal:
-                    progress_line(f"{prefix}{line}", end="")
-            return_code = proc.wait()
+        if tracker is not None:
+            tracker.start_heartbeat(interval_sec=heartbeat_interval, waiting_on=f"{progress_label}: {command}")
+        try:
+            with log_path.open("w", encoding="utf-8") as handle:
+                handle.write(f"$ {command}\n\n")
+                proc = subprocess.Popen(
+                    command,
+                    cwd=repo,
+                    env=env,
+                    shell=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                )
+                assert proc.stdout is not None
+                for line in proc.stdout:
+                    handle.write(line)
+                    if stream_to_terminal:
+                        progress_line(f"{prefix}{line}", end="")
+                return_code = proc.wait()
+        finally:
+            if tracker is not None:
+                tracker.stop_heartbeat()
 
         if return_code != 0:
             progress_line(f"{prefix}Exit code: {return_code} (failure)")
@@ -337,6 +447,7 @@ def run_skill_iteration(
     args: argparse.Namespace,
     run_dir: Path,
     iteration: int,
+    tracker: RunTracker | None,
 ) -> None:
     progress_banner(f"Iteration {iteration}/{args.max_iterations}: skills")
     progress_line(
@@ -377,6 +488,16 @@ def run_skill_iteration(
         progress_banner(f"Skill: {skill.name}")
         progress_line(f"Prompt written: {prompt_path}")
         progress_line(f"Skill definition: {skill.path}")
+        if tracker is not None:
+            tracker.update(
+                phase="skill",
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                skill=skill.name,
+                prompt_file=prompt_path,
+                log_file=log_path,
+                command_preview=command[:500],
+            )
         run_shell_command(
             command,
             repo,
@@ -385,10 +506,18 @@ def run_skill_iteration(
             dry_run=args.dry_run,
             stream_to_terminal=not args.quiet,
             progress_label=f"skill:{skill.name}",
+            tracker=tracker,
+            heartbeat_interval=args.status_interval,
         )
 
 
-def run_checks(repo: Path, args: argparse.Namespace, run_dir: Path, iteration: int) -> bool:
+def run_checks(
+    repo: Path,
+    args: argparse.Namespace,
+    run_dir: Path,
+    iteration: int,
+    tracker: RunTracker | None,
+) -> bool:
     progress_banner(f"Iteration {iteration}/{args.max_iterations}: checks")
     progress_line(
         f"Decision: run {len(args.checks)} check command(s) in order; all must exit 0 to finish the loop "
@@ -400,6 +529,16 @@ def run_checks(repo: Path, args: argparse.Namespace, run_dir: Path, iteration: i
         env["REPO_ROOT"] = str(repo)
         command = render_command(template, {"repo": str(repo), "iteration": str(iteration)})
         progress_banner(f"Check {index}/{len(args.checks)}")
+        if tracker is not None:
+            tracker.update(
+                phase="check",
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                check_index=index,
+                checks_total=len(args.checks),
+                log_file=log_path,
+                command_preview=command[:500],
+            )
         if args.dry_run:
             run_shell_command(
                 command,
@@ -408,6 +547,8 @@ def run_checks(repo: Path, args: argparse.Namespace, run_dir: Path, iteration: i
                 log_path=log_path,
                 dry_run=True,
                 progress_label=f"check:{iteration:02d}-{index:02d}",
+                tracker=tracker,
+                heartbeat_interval=0.0,
             )
             progress_line("Decision: dry-run assumes this check would pass.")
             continue
@@ -419,6 +560,8 @@ def run_checks(repo: Path, args: argparse.Namespace, run_dir: Path, iteration: i
             stream_to_terminal=not args.quiet,
             progress_label=f"check:{iteration:02d}-{index:02d}",
             expect_success=False,
+            tracker=tracker,
+            heartbeat_interval=args.status_interval,
         )
         if completed.returncode != 0:
             progress_line(
@@ -577,9 +720,37 @@ def main(argv: list[str] | None = None) -> int:
         args.checks = default_check_commands(repo)
     skills = [load_skill(skill_root, name) for name in args.skills]
 
+    tracker = RunTracker(repo, run_dir, Path(args.log_dir))
+
+    try:
+        _main_run(repo, skill_root, run_dir, skills, args, tracker)
+    except LoopError as exc:
+        tracker.finalize(outcome="failed", error=str(exc))
+        raise
+    except KeyboardInterrupt:
+        if tracker.state.get("active", False):
+            tracker.finalize(outcome="interrupted", error="keyboard interrupt")
+        raise
+    except Exception as exc:
+        if tracker.state.get("active", False):
+            tracker.finalize(outcome="interrupted", error=f"{type(exc).__name__}: {exc}")
+        raise
+    return 0
+
+
+def _main_run(
+    repo: Path,
+    skill_root: Path,
+    run_dir: Path,
+    skills: list[SkillSpec],
+    args: argparse.Namespace,
+    tracker: RunTracker,
+) -> None:
     progress_banner("skill_release_loop: configuration")
     progress_line(f"Repository: {repo}")
     progress_line(f"Run directory: {run_dir}")
+    progress_line(f"External monitor (stable path): {tracker.current_path}")
+    progress_line(f"Run status (this run only): {run_dir / 'status.json'}")
     progress_line(f"Skill root: {skill_root}")
     progress_line(f"Skill pipeline: {' -> '.join(s.name for s in skills)}")
     progress_line(f"Max iterations: {args.max_iterations}")
@@ -602,6 +773,20 @@ def main(argv: list[str] | None = None) -> int:
     else:
         progress_line("Decision: skip remote check (--skip-push).")
 
+    tracker.update(
+        phase="configured",
+        repo=str(repo),
+        run_dir=str(run_dir),
+        dry_run=args.dry_run,
+        skip_push=args.skip_push,
+        allow_dirty=args.allow_dirty,
+        max_iterations=args.max_iterations,
+        skill_pipeline=[s.name for s in skills],
+        skill_command=args.skill_command,
+        checks=list(args.checks),
+        status_interval_sec=args.status_interval,
+    )
+
     progress_banner("Skill/check loop")
     progress_line(
         "Decision tree: FOR iteration = 1 .. max_iterations: "
@@ -614,8 +799,10 @@ def main(argv: list[str] | None = None) -> int:
     passed_iteration: int | None = None
     for iteration in range(1, args.max_iterations + 1):
         run_dir.mkdir(parents=True, exist_ok=True)
-        run_skill_iteration(repo, skills, args, run_dir, iteration)
-        if run_checks(repo, args, run_dir, iteration):
+        tracker.update(phase="iteration_skills", iteration=iteration, step="skills")
+        run_skill_iteration(repo, skills, args, run_dir, iteration, tracker)
+        tracker.update(phase="iteration_checks", iteration=iteration, step="checks")
+        if run_checks(repo, args, run_dir, iteration, tracker):
             passed_iteration = iteration
             break
 
@@ -633,13 +820,15 @@ def main(argv: list[str] | None = None) -> int:
             f"Decision: iteration {passed_iteration} succeeded under dry-run rules -> "
             "skip change detection, version bump, commit, tag, and push."
         )
-        return 0
+        tracker.finalize(outcome="dry_run_complete")
+        return
 
     progress_banner("Release gates (post-loop)")
     progress_line(
         f"Decision: iteration {passed_iteration} cleared checks -> validate release prerequisites, "
         "then bump patch version and create commit/tag."
     )
+    tracker.update(phase="release_gates", passed_iteration=passed_iteration)
 
     changed_files = git_changed_files(repo)
     progress_line(f"Gate 1: working tree differs from HEAD in {len(changed_files)} path(s).")
@@ -665,12 +854,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.skip_push:
         branch = args.branch or current_branch(repo)
         progress_line(f"Decision: push branch {branch!r} and tag {tag_name!r} to {args.remote!r}.")
+        tracker.update(phase="push", branch=branch, tag=tag_name, remote=args.remote)
         push_release(repo, args.remote, branch, tag_name)
         progress_line(f"Done: pushed {branch} and {tag_name} to {args.remote}.")
+        tracker.finalize(outcome="released")
     else:
         progress_line("Decision: --skip-push -> leave commit and tag local only.")
         progress_line(f"Done: created local commit and tag {tag_name}.")
-    return 0
+        tracker.finalize(outcome="released_local")
 
 
 if __name__ == "__main__":

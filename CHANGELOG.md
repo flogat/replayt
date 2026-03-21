@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.4.2 - 2026-03-21
+
+- **CLI hardening:** read-only `--sqlite` commands now fail fast instead of creating empty SQLite files when the requested database is missing, and `replayt gc --sqlite` applies the same guard; covered by new CLI regressions for missing-database reads and GC.
+- **Docs:** de-slop [`README.md`](README.md), [`CONTRIBUTING.md`](CONTRIBUTING.md), [`docs/README.md`](docs/README.md), [`docs/INSTALL.md`](docs/INSTALL.md), and [`docs/DEMO.md`](docs/DEMO.md) by replacing contrast-heavy lines, hedgey phrasing, and em-dash-heavy summaries with plainer wording.
+- **CLI hardening:** timeout-wrapped runs now assign a `run_id` before spawning the child process so parent-side timeouts still append `run_interrupted` even when `--run-id` was omitted, and the timeout child import helper now detects `src/` layout checkouts when preparing `PYTHONPATH`; covered by new CLI regressions for timeout interruption logging and `subprocess_env_child()`.
+- **Roadmap docs:** refresh [`docs/ARCHETYPE_FEATURE_BRAINSTORM.md`](docs/ARCHETYPE_FEATURE_BRAINSTORM.md) with a new `createfeatures` pass: ten updated archetype-driven backlog ideas, current in-core versus composition classifications, and explicit pointers to the existing README/tutorial headings that already cover eval harnesses, enterprise approval wrappers, and framework composition outside core.
+- **Docs:** refresh [`docs/CODE_REVIEW_2026-03-21.md`](docs/CODE_REVIEW_2026-03-21.md) with the current standalone review verdict after fixing timeout subprocess observability and local `src/` checkout import handling, plus updated targeted pytest status.
+
 ## 0.4.1 - 2026-03-21
 
 - **Review fixes:** `replayt report` / `report-diff` now preserve repeated approval occurrences and repeated structured outputs with the same schema name, `replayt gc --sqlite` also removes SQLite-only runs, Mermaid graph exports avoid node-ID collisions for distinct state names, the PR changelog gate fails closed when `git diff` cannot determine changed files, and `scripts/skill_release_loop.py` now matches the documented default skill order; covered by expanded CLI, graph-export, changelog-gate, and release-loop tests.

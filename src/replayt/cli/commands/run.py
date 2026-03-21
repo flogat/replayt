@@ -6,6 +6,7 @@ import json
 import os
 import subprocess
 import sys
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal
@@ -271,6 +272,8 @@ def cmd_run(
     github_summary_for_ci = should_write_github_step_summary(replayt_internal_github_summary)
 
     if not in_child and timeout is not None and timeout > 0:
+        if run_id is None:
+            run_id = str(uuid.uuid4())
         argv = build_internal_run_argv(
             target=target,
             run_id=run_id,

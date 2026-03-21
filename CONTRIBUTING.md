@@ -19,9 +19,9 @@ replayt keeps a narrow core scope. PRs that push it toward a general agent platf
 
 ## Versioning (semver)
 
-- **MAJOR** — breaking Python API, CLI behavior users rely on, or **documented** JSONL event payload shapes that consumers parse.
-- **MINOR** — backward-compatible additions (new optional CLI flags, new optional `Workflow` / `Runner` kwargs such as `Workflow(..., llm_defaults=...)`, new optional event fields).
-- **PATCH** — bug fixes and docs that do not change runtime contracts.
+- **MAJOR:** breaking Python API, CLI behavior users rely on, or **documented** JSONL event payload shapes that consumers parse.
+- **MINOR:** backward-compatible additions such as new optional CLI flags, new optional `Workflow` / `Runner` kwargs like `Workflow(..., llm_defaults=...)`, or new optional event fields.
+- **PATCH:** bug fixes and docs that do not change runtime contracts.
 
 Tutorial imports under `replayt_examples` should keep working across **minor** releases when pinned to a compatible **major**.
 
@@ -50,7 +50,7 @@ If you want the repo's Cursor skills to drive a patch release, use `scripts/skil
 - With the repo-local Codex install under `.replayt/tools/codex-cli`, `python scripts/skill_release_loop.py` uses the default task plus `scripts/run_codex_skill.py` automatically.
 - The script repeats that full cycle until every `--check` command passes or `--max-iterations` is hit.
 - `CHANGELOG.md` must be edited during the loop; once checks pass, the script rolls `## Unreleased` into the new version, bumps the patch version in `pyproject.toml` and `src/replayt/__init__.py`, creates an annotated `vX.Y.Z` tag, and pushes the branch plus tag.
-- The repo stores the skill prompts, not the backend. Pass `--skill-command` with the command that can execute one prompt file.
+- This repo stores the skill prompts only. Pass `--skill-command` with the command that can execute one prompt file.
 
 Example:
 

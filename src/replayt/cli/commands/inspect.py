@@ -522,7 +522,12 @@ def cmd_gc(
     cutoff = datetime.now(timezone.utc) - timedelta(seconds=seconds)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     jsonl_store = JSONLStore(log_dir)
-    sqlite_store = SQLiteStore(sqlite) if sqlite is not None else None
+    sqlite_store = None
+    if sqlite is not None:
+        if not sqlite.is_file():
+            typer.echo(f"SQLite store not found: {sqlite}", err=True)
+            raise typer.Exit(code=2)
+        sqlite_store = SQLiteStore(sqlite)
     run_ids = set(jsonl_store.list_run_ids())
     if sqlite_store is not None:
         run_ids.update(sqlite_store.list_run_ids())

@@ -30,7 +30,7 @@ pip install replayt
 # pip install -e ".[dev]"      # from a clone: pytest, ruff, PyYAML
 ```
 
-Optional extras are defined in [`pyproject.toml`](../pyproject.toml): **`[yaml]`** adds PyYAML for YAML workflow targets; **`[dev]`** is for contributors.
+Optional extras are defined in [`pyproject.toml`](../pyproject.toml): **`[yaml]`** adds PyYAML for YAML workflow targets. **`[dev]`** is for contributors.
 
 ## API keys and providers
 
@@ -39,7 +39,7 @@ export OPENAI_API_KEY=...   # required for workflows that call a model
 replayt doctor
 ```
 
-If you keep secrets in a `.env` file, load them your own way before running replayt (for example `export $(grep -v '^#' .env | xargs)`, [direnv](https://direnv.net/) with `.envrc`, or `python-dotenv` in a wrapper script). replayt does not read `.env` on its own—environment order stays explicit and auditable.
+If you keep secrets in a `.env` file, load them your own way before running replayt. For example, use `export $(grep -v '^#' .env | xargs)`, [direnv](https://direnv.net/) with `.envrc`, or `python-dotenv` in a wrapper script. replayt does not read `.env` on its own, so environment order stays explicit and auditable.
 
 ### Loading `.env` files
 

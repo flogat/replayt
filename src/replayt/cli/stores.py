@@ -6,6 +6,8 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+import typer
+
 from replayt.persistence import JSONLStore, MultiStore, SQLiteStore
 
 
@@ -21,6 +23,9 @@ def make_store(log_dir: Path, sqlite: Path | None, *, strict_mirror: bool = Fals
 @contextmanager
 def read_store(log_dir: Path, sqlite: Path | None) -> Iterator[JSONLStore | SQLiteStore]:
     if sqlite is not None:
+        if not sqlite.is_file():
+            typer.echo(f"SQLite store not found: {sqlite}", err=True)
+            raise typer.Exit(code=2)
         store = SQLiteStore(sqlite)
         try:
             yield store

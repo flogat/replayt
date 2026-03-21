@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import subprocess
 import sys
 import textwrap
@@ -190,6 +191,14 @@ def test_dry_run_completes_without_worktree_changes(tmp_path: Path, monkeypatch)
         ]
     )
     assert rc == 0
+    current = repo / ".replayt" / "skill-release" / "current.json"
+    assert current.is_file()
+    data = json.loads(current.read_text(encoding="utf-8"))
+    assert data.get("outcome") == "dry_run_complete"
+    assert data.get("active") is False
+    assert data.get("max_iterations") == 1
+    status_path = Path(data["run_dir"]) / "status.json"
+    assert status_path.is_file()
 
 
 def test_default_task_and_skill_command(tmp_path: Path, monkeypatch) -> None:
@@ -275,6 +284,11 @@ def test_release_loop_runs_until_checks_pass_and_tags_release(tmp_path: Path, mo
 
     assert _git(repo, "log", "-1", "--pretty=%s") == "release: v0.4.1"
     assert "v0.4.1" in _git(repo, "tag", "--list")
+
+    cur = json.loads((repo / ".replayt" / "skill-release" / "current.json").read_text(encoding="utf-8"))
+    assert cur["outcome"] == "released_local"
+    assert cur["active"] is False
+    assert cur["max_iterations"] == 3
 
 
 def test_push_release_uses_explicit_branch_and_tag(monkeypatch) -> None:

@@ -1,72 +1,74 @@
 ## Archetype feature brainstorm (10)
 
-These ten asks stay inside replayt's current design principles: explicit states, strict schemas, local JSONL/SQLite history, and composition instead of platform sprawl. Deferred items cite the existing README or tutorial heading that already covers the supported "do this in your stack" path, so the documentation follow-up is satisfied without duplicating those sections.
+These ideas stay grounded in replayt's current contract: explicit states, typed tools, strict schemas, local JSONL or SQLite history, and composition instead of product sprawl. Deferred items cite existing user-facing headings that already explain the supported "do this in your stack" path, so the documentation follow-up is satisfied without adding another README section in this pass.
 
-### 1. Staff engineer / platform - Strict workflow contract profile
-- **Request:** Add a stricter `replayt validate --profile contract` mode that enforces declared transitions, workflow metadata version fields, retry-policy coverage for selected states, and stable deprecation warnings for renamed workflow entrypoints.
+### 1. Staff engineer / platform - Workflow compatibility profile
+- **Request:** Add `replayt validate --profile stable` so teams can enforce declared transitions, workflow version metadata, import-target deprecation warnings, and a small compatibility manifest for published `module:wf` entrypoints.
 - **Aligns with principles:** yes
 - **Scope:** in-core candidate
 
-### 2. Junior dev onboarding - Copy-paste starter workflows
-- **Request:** Extend `replayt init` with a few tiny starter templates such as `hello`, `approval`, and `review`, each wired to `replayt_examples`-style comments, `.env` hints, `replayt doctor`, and a known-good `replayt try`, `replayt run ...`, or `--dry-check` command.
+### 2. Junior dev onboarding - First-run scaffold with replay path
+- **Request:** Extend `replayt init` to emit one tiny starter workflow, sample `inputs.json`, `.env` notes, and the exact next commands for `replayt doctor`, `replayt run --dry-check`, `replayt inspect`, and `replayt replay`.
 - **Aligns with principles:** yes
 - **Scope:** in-core candidate
 
-### 3. Security / compliance - Event-level redaction policy labels
-- **Request:** Let operators tag runs with a named redaction policy and record which fields were masked, skipped, exported, or sealed so audit reviewers can tell whether a run used `LogMode.redacted`, `structured_only`, a stricter PII profile, or a `replayt seal` / `replayt bundle-export` handoff.
+### 3. Security / compliance - Auditable log-policy manifest
+- **Request:** Let operators attach a named log policy to each run and emit a manifest that records `LogMode`, masked field paths, seal status, export provenance, and whether structured-only or redacted storage was used.
 - **Aligns with principles:** yes
 - **Scope:** in-core candidate
 
-### 4. ML / LLM engineer - Logged provider preset diffs
-- **Request:** Add reusable provider presets on `LLMBridge` that still stay explicit by logging the full `effective` settings delta per step, including provider slug, response format mode, timeout, schema fingerprint, `Workflow(..., llm_defaults=...)` merges, and `ctx.llm.with_settings(experiment=...)` tags.
-- **Aligns with principles:** yes
-- **Scope:** in-core candidate
-
-### 5. DevOps / SRE - CI readiness doctor
-- **Request:** Add a `replayt doctor --ci` mode that checks writable log paths, expected env vars, SQLite mirror availability, configured `resume_hook` commands, `replayt ci` prerequisites, and safe `--format json` failure messages for containerized or queue-worker deployments.
-- **Aligns with principles:** yes
-- **Scope:** in-core candidate
-
-### 6. Product engineer - Stakeholder handoff report bundle
-- **Request:** Expand `replayt report --style stakeholder` / `replayt bundle-export` output with a compact handoff packet that highlights approvals, final decision, structured outputs, replay timeline links, and failure points without exposing raw prompt text by default.
-- **Aligns with principles:** yes
-- **Scope:** in-core candidate
-
-### 7. Open-source maintainer - Public workflow package contract
-- **Request:** Add a small manifest convention for reusable workflow packages so maintainers can publish stable import targets, declared examples, minimum replayt version, and deprecation notes without introducing runtime plugin loading or dynamic step discovery.
-- **Aligns with principles:** yes
-- **Scope:** in-core candidate
-
-### 8. "Just ship it" startup IC - Batteries-included local stack
-- **Request:** Ship a one-command local happy path for the common case: JSONL logs, optional SQLite mirror, one approval checkpoint, one `replayt bundle-export` artifact, and a `replayt ci` example that fails clearly instead of requiring a long setup pass.
-- **Aligns with principles:** yes
-- **Scope:** in-core candidate
-
-### 9. Enterprise integrator - Policy-gated resume broker
-- **Request:** Add first-class pre-`resume` policy hooks for SSO-backed approval forms, resolver allowlists, change-ticket checks, and audit attestations so enterprise teams can gate human approvals through existing controls.
+### 4. ML / LLM engineer - Eval matrix runner
+- **Request:** Add a built-in `replayt eval` command that sweeps prompts, providers, temperatures, and sample datasets, then ranks outcomes and writes benchmark summaries as a first-class replayt product surface.
 - **Aligns with principles:** partial
 - **Scope:** compose outside core
-- **Principle / scope tension:** This pushes replayt toward a hosted approval or RBAC surface, which conflicts with **Local-first by default**, **Tiny mental model**, and the **Hosted approval UI, multi-user queues, team RBAC** row in [`docs/SCOPE.md`](./SCOPE.md).
-- **Suggested overcome:** Keep replayt as the local `Runner` and put identity, policy, and ticket checks in your wrapper: use [`README.md`](../README.md) under **Policy hooks, eval-style harnesses, and agent frameworks**, wire your broker to `replayt resume` or a guarded `resume_hook`, and use **Pattern: approval bridge (local UI)** plus **Pattern: webhook / lifecycle callbacks** in [`docs/EXAMPLES_PATTERNS.md`](./EXAMPLES_PATTERNS.md).
+- **Principle / scope tension:** This drifts into the **Built-in eval suite (`replayt eval`), leaderboards, golden datasets** row in [`docs/SCOPE.md`](./SCOPE.md) and stretches **Tiny mental model** beyond a workflow runner.
+- **Suggested overcome:** Keep the harness outside core: drive `Runner.run` from pytest or a plain loop, tag per-call settings with `ctx.llm.with_settings(experiment={...})`, and assert on final context or `structured_output` events. The existing subsection [`README.md`](../README.md) under **Policy hooks, eval-style harnesses, and agent frameworks** plus **Pattern: golden path test (pytest)** in [`docs/EXAMPLES_PATTERNS.md`](./EXAMPLES_PATTERNS.md) already documents the supported shape.
 
-### 10. Framework enthusiast - Built-in LangGraph-style agent runtime
-- **Request:** Embed planner graphs, token streaming, multi-agent loops, and framework-native checkpoints directly into `Runner` so replayt becomes the main orchestration surface for agent frameworks.
+### 5. DevOps / SRE - Container readiness doctor
+- **Request:** Add `replayt doctor --ci` checks for writable log directories, SQLite mirror availability, `resume_hook` executability, expected env vars, and machine-readable failure output that works in containers and queue workers.
+- **Aligns with principles:** yes
+- **Scope:** in-core candidate
+
+### 6. Product engineer - Local approval inbox snapshot
+- **Request:** Add a local `replayt approvals` summary that scans JSONL or SQLite for paused runs and prints a compact queue of approval ids, summaries, current state, timestamps, and resume commands that can be pasted into tickets or Slack threads.
+- **Aligns with principles:** yes
+- **Scope:** in-core candidate
+
+### 7. Open-source maintainer - Workflow package manifest
+- **Request:** Define a lightweight manifest for reusable workflow packages so maintainers can publish stable import targets, minimum replayt version, example commands, and deprecation notices without inventing dynamic plugin loading.
+- **Aligns with principles:** yes
+- **Scope:** in-core candidate
+
+### 8. "Just ship it" startup IC - Bootstrap happy path
+- **Request:** Ship a `replayt bootstrap` or equivalent shortcut that creates a common starter project with one approval step, one typed tool, JSONL logs, optional SQLite mirroring, and a known-good `replayt ci` example so a single engineer can get to a credible local demo quickly.
+- **Aligns with principles:** yes
+- **Scope:** in-core candidate
+
+### 9. Enterprise integrator - Policy-backed approval broker
+- **Request:** Add first-class resume-time policy hooks for SSO identity claims, ticket references, resolver allowlists, and attestation payloads so approvals can be mediated by existing enterprise controls.
+- **Aligns with principles:** partial
+- **Scope:** compose outside core
+- **Principle / scope tension:** This edges into a hosted approval or RBAC layer, which conflicts with **Local-first by default**, **Tiny mental model**, and the **Hosted approval UI, multi-user queues, team RBAC** row in [`docs/SCOPE.md`](./SCOPE.md).
+- **Suggested overcome:** Keep replayt as the local engine and put identity plus policy in your wrapper or broker. The existing subsection [`README.md`](../README.md) under **Policy hooks, eval-style harnesses, and agent frameworks** plus **Pattern: approval bridge (local UI)** and **Pattern: webhook / lifecycle callbacks** in [`docs/EXAMPLES_PATTERNS.md`](./EXAMPLES_PATTERNS.md) already shows the supported approach.
+
+### 10. Framework enthusiast - Built-in agent runtime
+- **Request:** Embed LangGraph-style planners, token streaming, tool loops, and dynamic sub-agents directly in `Runner` so replayt becomes the framework runtime instead of a narrow replayable FSM.
 - **Aligns with principles:** no
 - **Scope:** compose outside core
-- **Principle / scope tension:** This conflicts with **Explicit states over hidden loops**, **Replay is part of the product**, and the **LangChain / LangGraph / "agent framework" integration** row in [`docs/SCOPE.md`](./SCOPE.md); per-token and planner-internal events would bury the explicit replay log.
-- **Suggested overcome:** Keep external frameworks inside one replayt step and emit one validated exit shape. The existing tutorial subsection [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) under **LangGraph (and similar frameworks) - composition, not core** and **Pattern: framework in a sandbox step** plus **Pattern: stream inside step, log structured summary** in [`docs/EXAMPLES_PATTERNS.md`](./EXAMPLES_PATTERNS.md) already document the supported shape, including where to keep streaming and planner loops.
+- **Principle / scope tension:** This conflicts with **Determinism over autonomy**, **Explicit states over hidden loops**, and the **LangChain / LangGraph / "agent framework" integration** row in [`docs/SCOPE.md`](./SCOPE.md); planner-internal events and dynamic states would bury the replay log.
+- **Suggested overcome:** Keep the framework inside one replayt step, validate one exit shape, and return an explicit next state. The existing subsections [`README.md`](../README.md) under **Streaming, planner loops, and "agents" (composition, not core)** and [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) under **LangGraph (and similar frameworks) - composition, not core**, plus **Pattern: framework in a sandbox step** and **Pattern: stream inside step, log structured summary** in [`docs/EXAMPLES_PATTERNS.md`](./EXAMPLES_PATTERNS.md), already cover the recommended composition pattern.
 
 ## Summary table
 
 | # | Archetype | Feature | Aligns | Scope |
 |---|-----------|---------|--------|-------|
-| 1 | Staff engineer / platform | Strict workflow contract profile | yes | in-core candidate |
-| 2 | Junior dev onboarding | Copy-paste starter workflows | yes | in-core candidate |
-| 3 | Security / compliance | Event-level redaction policy labels | yes | in-core candidate |
-| 4 | ML / LLM engineer | Logged provider preset diffs | yes | in-core candidate |
-| 5 | DevOps / SRE | CI readiness doctor | yes | in-core candidate |
-| 6 | Product engineer | Stakeholder handoff report bundle | yes | in-core candidate |
-| 7 | Open-source maintainer | Public workflow package contract | yes | in-core candidate |
-| 8 | "Just ship it" startup IC | Batteries-included local stack | yes | in-core candidate |
-| 9 | Enterprise integrator | Policy-gated resume broker | partial | compose outside core |
-| 10 | Framework enthusiast | Built-in LangGraph-style agent runtime | no | compose outside core |
+| 1 | Staff engineer / platform | Workflow compatibility profile | yes | in-core candidate |
+| 2 | Junior dev onboarding | First-run scaffold with replay path | yes | in-core candidate |
+| 3 | Security / compliance | Auditable log-policy manifest | yes | in-core candidate |
+| 4 | ML / LLM engineer | Eval matrix runner | partial | compose outside core |
+| 5 | DevOps / SRE | Container readiness doctor | yes | in-core candidate |
+| 6 | Product engineer | Local approval inbox snapshot | yes | in-core candidate |
+| 7 | Open-source maintainer | Workflow package manifest | yes | in-core candidate |
+| 8 | "Just ship it" startup IC | Bootstrap happy path | yes | in-core candidate |
+| 9 | Enterprise integrator | Policy-backed approval broker | partial | compose outside core |
+| 10 | Framework enthusiast | Built-in agent runtime | no | compose outside core |

@@ -470,6 +470,17 @@ def start(ctx):
     assert run_id in runs.stdout
 
 
+def test_cli_read_commands_reject_missing_sqlite_without_creating_database(tmp_path: Path) -> None:
+    missing_db = tmp_path / "missing.sqlite3"
+    runner = CliRunner()
+
+    result = runner.invoke(app, ["runs", "--sqlite", str(missing_db)])
+
+    assert result.exit_code == 2
+    assert "sqlite store not found" in (result.stdout + result.stderr).lower()
+    assert not missing_db.exists()
+
+
 def test_replay_html_embeds_valid_css() -> None:
     html = _replay_html(
         "run-123",
@@ -1810,6 +1821,21 @@ def test_cli_gc_deletes_sqlite_only_runs(tmp_path: Path) -> None:
         store.close()
 
 
+def test_cli_gc_rejects_missing_sqlite_without_creating_database(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    missing_db = tmp_path / "missing.sqlite3"
+    runner = CliRunner()
+
+    out = runner.invoke(
+        app,
+        ["gc", "--log-dir", str(log_dir), "--sqlite", str(missing_db), "--older-than", "1d"],
+    )
+
+    assert out.exit_code == 2
+    assert "sqlite store not found" in (out.stdout + out.stderr).lower()
+    assert not missing_db.exists()
+
+
 def test_cli_run_timeout_appends_run_interrupted_to_sqlite_mirror(tmp_path: Path, monkeypatch) -> None:
     from replayt.cli.commands import run as run_cmd
     from replayt.persistence import JSONLStore, SQLiteStore
@@ -1848,3 +1874,46 @@ def test_cli_run_timeout_appends_run_interrupted_to_sqlite_mirror(tmp_path: Path
 
     ev_j = JSONLStore(tmp_path).load_events("tout1")
     assert any(e["type"] == "run_interrupted" for e in ev_j)
+
+
+def test_cli_run_timeout_without_run_id_still_records_run_interrupted(tmp_path: Path, monkeypatch) -> None:
+    from replayt.cli.commands import run as run_cmd
+    from replayt.persistence import JSONLStore
+
+    def boom(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout", 1))
+
+    monkeypatch.setattr(run_cmd.subprocess, "run", boom)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--timeout",
+            "1",
+            "--dry-run",
+        ],
+    )
+    assert r.exit_code == 1
+    run_ids = JSONLStore(tmp_path).list_run_ids()
+    assert len(run_ids) == 1
+    events = JSONLStore(tmp_path).load_events(run_ids[0])
+    assert any(e["type"] == "run_interrupted" for e in events)
+
+
+def test_subprocess_env_child_adds_src_layout_to_pythonpath(tmp_path: Path, monkeypatch) -> None:
+    from replayt.cli.run_support import subprocess_env_child
+
+    pkg_dir = tmp_path / "src" / "replayt"
+    pkg_dir.mkdir(parents=True)
+    (pkg_dir / "__init__.py").write_text("__version__ = 'test'\n", encoding="utf-8")
+
+    monkeypatch.setattr(sys, "path", [str(tmp_path)])
+    monkeypatch.delenv("PYTHONPATH", raising=False)
+
+    env = subprocess_env_child()
+
+    assert env["PYTHONPATH"] == str(tmp_path / "src")

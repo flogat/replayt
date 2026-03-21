@@ -132,10 +132,13 @@ def subprocess_env_child() -> dict[str, str]:
         if not p:
             continue
         try:
-            if Path(p, "replayt", "__init__.py").is_file():
-                prev = env.get("PYTHONPATH", "")
-                env["PYTHONPATH"] = f"{p}{os.pathsep}{prev}" if prev else p
-                break
+            root = Path(p)
+            for candidate in (root, root / "src"):
+                if Path(candidate, "replayt", "__init__.py").is_file():
+                    prev = env.get("PYTHONPATH", "")
+                    cand = str(candidate)
+                    env["PYTHONPATH"] = f"{cand}{os.pathsep}{prev}" if prev else cand
+                    return env
         except OSError:
             continue
     return env
