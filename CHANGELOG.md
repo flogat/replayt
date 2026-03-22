@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.12 - 2026-03-22
+
 - **Maintainer hygiene:** restore a non-empty `## Unreleased` section so `scripts/maintainer_checks.py --changelog-nonempty` and the pre-tag GitHub Actions verification can pass on the live repository again.
 
 ## 0.4.11 - 2026-03-22

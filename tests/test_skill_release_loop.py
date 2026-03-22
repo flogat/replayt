@@ -582,7 +582,8 @@ def test_push_release_uses_explicit_branch_and_tag(monkeypatch) -> None:
     monkeypatch.setattr(mod, "run_git", fake_run_git)
     mod.push_release(Path("."), "origin", "main", "v1.2.3")
     assert calls == [
-        ["push", "origin", "HEAD:refs/heads/main", "refs/tags/v1.2.3"],
+        ["push", "origin", "HEAD:refs/heads/main"],
+        ["push", "origin", "refs/tags/v1.2.3"],
     ]
 
 

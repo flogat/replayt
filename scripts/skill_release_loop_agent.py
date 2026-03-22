@@ -275,6 +275,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Create the release commit and tag locally but do not push them.",
     )
     parser.add_argument(
+        "--pull-rebase-before-push",
+        action="store_true",
+        help=(
+            "After the release commit, run `git fetch <remote>` and `git pull --rebase <remote> <branch>` "
+            "before pre-tag CI and tagging, so local history matches the remote when it has moved ahead. "
+            "Ignored with --skip-push."
+        ),
+    )
+    parser.add_argument(
         "--no-pre-tag-github-ci",
         action="store_true",
         help="Skip verify_github_action after the release commit (before tag). For tests/offline.",
@@ -1351,9 +1360,30 @@ def create_tag(repo: Path, tag_name: str) -> None:
     run_git(repo, ["tag", "-a", tag_name, "-m", tag_name])
 
 
+def pull_rebase_before_push(repo: Path, remote: str, branch: str) -> None:
+    progress_line(
+        f"Decision: --pull-rebase-before-push -> git fetch {remote!r}, then git pull --rebase "
+        f"{remote!r} {branch!r}."
+    )
+    run_git(repo, ["fetch", remote], capture_output=True)
+    run_git(repo, ["pull", "--rebase", remote, branch], capture_output=True)
+
+
 def push_release(repo: Path, remote: str, branch: str, tag_name: str) -> None:
-    # One push with both refspecs so the release tag cannot be left behind if a second push is skipped.
-    run_git(repo, ["push", remote, f"HEAD:refs/heads/{branch}", f"refs/tags/{tag_name}"])
+    # Push branch first: if the remote rejects it (e.g. non-fast-forward), avoid leaving only the tag there.
+    try:
+        run_git(repo, ["push", remote, f"HEAD:refs/heads/{branch}"], capture_output=True)
+    except LoopError as exc:
+        raise LoopError(
+            f"{exc}\n"
+            f"hint: integrate remote commits (e.g. `git fetch {remote}` then "
+            f"`git pull --rebase {remote} {branch}`), then push the branch (and tag if needed). "
+            f"On a future full release, pass `--pull-rebase-before-push` so the script rebases onto "
+            f"{remote!r} after the release commit and before pre-tag CI and push. "
+            f"If tag {tag_name!r} already exists on the remote from a partial push, delete or move it before "
+            f"retrying."
+        ) from exc
+    run_git(repo, ["push", remote, f"refs/tags/{tag_name}"], capture_output=True)
 
 
 def run_pre_tag_github_ci_with_fixes(
@@ -1550,6 +1580,7 @@ def _main_run(
     progress_line(f"Max iterations: {args.max_iterations}")
     progress_line(f"Dry run: {args.dry_run}")
     progress_line(f"Skip push: {args.skip_push}")
+    progress_line(f"Pull rebase before push: {args.pull_rebase_before_push}")
     dirty_ok = effective_allow_dirty(args)
     progress_line(
         f"Allow dirty worktree: {dirty_ok}"
@@ -1691,6 +1722,13 @@ def _main_run(
     finalize_changelog(repo, new_version, dt.date.today())
     replace_version(repo, new_version)
     create_release_commit(repo, new_version, args.commit_message)
+
+    if args.pull_rebase_before_push:
+        if args.skip_push:
+            progress_line("Decision: --pull-rebase-before-push ignored (--skip-push).")
+        else:
+            branch_for_sync = args.branch or current_branch(repo)
+            pull_rebase_before_push(repo, args.remote, branch_for_sync)
 
     if not args.no_pre_tag_github_ci:
         progress_banner("Pre-tag GitHub Actions CI")
