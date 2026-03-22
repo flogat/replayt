@@ -229,6 +229,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Maximum number of full skill cycles before failing (default: 3).",
     )
     parser.add_argument(
+        "--release-count",
+        type=int,
+        default=1,
+        help="Number of consecutive successful releases to create before exiting (default: 1).",
+    )
+    parser.add_argument(
         "--remote",
         default="origin",
         help="Remote used for the final push (default: origin).",
@@ -320,6 +326,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.max_iterations < 1:
         parser.error("--max-iterations must be >= 1")
+    if args.release_count < 1:
+        parser.error("--release-count must be >= 1")
     if args.status_interval < 0:
         parser.error("--status-interval must be >= 0")
     if args.usage_limit_max_wait_seconds <= 0:
@@ -1160,27 +1168,38 @@ def main(argv: list[str] | None = None) -> int:
         args.checks = default_check_commands(repo)
     skills = [load_skill(skill_root, name) for name in args.skills]
     skill_names = [s.name for s in skills]
-    try:
-        run_dir = resolve_run_directory(repo, args, skill_names)
-    except LoopError as exc:
-        print(f"skill_release_loop: {exc}", file=sys.stderr)
-        return 1
 
-    tracker = RunTracker(repo, run_dir, Path(args.log_dir))
+    for release_index in range(1, args.release_count + 1):
+        if args.release_count > 1:
+            progress_banner(f"Release loop {release_index}/{args.release_count}")
 
-    try:
-        _main_run(repo, skill_root, run_dir, skills, args, tracker)
-    except LoopError as exc:
-        tracker.finalize(outcome="failed", error=str(exc))
-        raise
-    except KeyboardInterrupt:
-        if tracker.state.get("active", False):
-            tracker.finalize(outcome="interrupted", error="keyboard interrupt")
-        raise
-    except Exception as exc:
-        if tracker.state.get("active", False):
-            tracker.finalize(outcome="interrupted", error=f"{type(exc).__name__}: {exc}")
-        raise
+        try:
+            run_dir = resolve_run_directory(repo, args, skill_names)
+        except LoopError as exc:
+            print(f"skill_release_loop: {exc}", file=sys.stderr)
+            return 1
+
+        tracker = RunTracker(repo, run_dir, Path(args.log_dir))
+
+        try:
+            _main_run(repo, skill_root, run_dir, skills, args, tracker)
+        except LoopError as exc:
+            tracker.finalize(outcome="failed", error=str(exc))
+            raise
+        except KeyboardInterrupt:
+            if tracker.state.get("active", False):
+                tracker.finalize(outcome="interrupted", error="keyboard interrupt")
+            raise
+        except Exception as exc:
+            if tracker.state.get("active", False):
+                tracker.finalize(outcome="interrupted", error=f"{type(exc).__name__}: {exc}")
+            raise
+
+        if release_index < args.release_count:
+            if args.resume is not None:
+                args.resume = None
+            time.sleep(1.2)
+
     return 0
 
 
