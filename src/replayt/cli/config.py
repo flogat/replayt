@@ -31,7 +31,11 @@ SUPPORTED_CONFIG_KEYS = frozenset(
         "export_hook_timeout",
         "seal_hook",
         "seal_hook_timeout",
+        "verify_seal_hook",
+        "verify_seal_hook_timeout",
         "approval_actor_required_keys",
+        "min_replayt_version",
+        "inputs_file",
     }
 )
 
@@ -43,6 +47,7 @@ _PROJECT_CONFIG_CWD: str | None = None
 DEFAULT_LOG_DIR = Path(".replayt/runs")
 
 REPLAYT_TARGET_ENV = "REPLAYT_TARGET"
+REPLAYT_INPUTS_FILE_ENV = "REPLAYT_INPUTS_FILE"
 
 
 def resolve_cli_target(explicit: str | None, *, cfg: dict[str, Any]) -> str:
@@ -72,6 +77,63 @@ def preview_default_cli_target(cfg: dict[str, Any]) -> tuple[str | None, str]:
     raw = cfg.get("target")
     if isinstance(raw, str) and raw.strip():
         return raw.strip(), "project_config:target"
+    return None, "unset"
+
+
+def preview_default_inputs_file(cfg: dict[str, Any], *, config_path: str | None) -> tuple[str | None, str]:
+    """Default inputs JSON file for ``run`` / ``ci`` / ``validate`` / ``doctor --target`` when CLI omits inputs."""
+
+    env_raw = os.environ.get(REPLAYT_INPUTS_FILE_ENV, "").strip()
+    if env_raw:
+        return str(Path(env_raw).expanduser().resolve()), f"env:{REPLAYT_INPUTS_FILE_ENV}"
+    cfg_raw = cfg.get("inputs_file")
+    if isinstance(cfg_raw, str) and cfg_raw.strip():
+        p = resolve_project_path(cfg_raw.strip(), config_path=config_path)
+        return str(p.resolve()), "project_config:inputs_file"
+    return None, "unset"
+
+
+def resolve_run_inputs_json(
+    inputs_json: str | None,
+    inputs_file: Path | None,
+    *,
+    cfg: dict[str, Any],
+    config_path: str | None,
+) -> tuple[str | None, str]:
+    """Resolve inputs for ``run`` / ``ci`` / ``validate`` / ``doctor --target``.
+
+    Precedence: ``--inputs-json`` / ``--inputs-file``, then ``REPLAYT_INPUTS_FILE``, then
+    ``[tool.replayt] inputs_file`` / ``.replaytrc.toml`` (relative paths from the config file).
+    """
+
+    from replayt.cli.validation import inputs_json_from_options
+
+    if inputs_json is not None or inputs_file is not None:
+        resolved = inputs_json_from_options(inputs_json, inputs_file)
+        if inputs_file is not None:
+            src = "cli:--inputs-file"
+        elif inputs_json is not None:
+            sj = inputs_json.strip()
+            if sj.startswith("@"):
+                src = "cli:--inputs-json @path"
+            else:
+                src = "cli:--inputs-json"
+        else:
+            src = "cli"
+        return resolved, src
+
+    env_raw = os.environ.get(REPLAYT_INPUTS_FILE_ENV, "").strip()
+    if env_raw:
+        p = Path(env_raw).expanduser()
+        resolved = inputs_json_from_options(None, p)
+        return resolved, f"env:{REPLAYT_INPUTS_FILE_ENV}"
+
+    cfg_raw = cfg.get("inputs_file")
+    if isinstance(cfg_raw, str) and cfg_raw.strip():
+        p = resolve_project_path(cfg_raw.strip(), config_path=config_path)
+        resolved = inputs_json_from_options(None, p)
+        return resolved, "project_config:inputs_file"
+
     return None, "unset"
 
 
@@ -339,6 +401,75 @@ def seal_hook_timeout_seconds(cfg: dict[str, Any]) -> float | None:
     """
 
     return _hook_timeout_seconds(cfg, env_var="REPLAYT_SEAL_HOOK_TIMEOUT", config_key="seal_hook_timeout")
+
+
+def verify_seal_hook_timeout_seconds(cfg: dict[str, Any]) -> float | None:
+    """Wall-clock limit for the ``verify_seal_hook`` subprocess (seconds).
+
+    ``None`` means no limit. Env ``REPLAYT_VERIFY_SEAL_HOOK_TIMEOUT`` overrides config; value ``<= 0``
+    means unlimited. Default when unset: 120 seconds.
+    """
+
+    return _hook_timeout_seconds(
+        cfg, env_var="REPLAYT_VERIFY_SEAL_HOOK_TIMEOUT", config_key="verify_seal_hook_timeout"
+    )
+
+
+def min_replayt_version_report(cfg: dict[str, Any], *, installed: str) -> dict[str, Any]:
+    """Summarize optional ``min_replayt_version`` from project config for doctor / ``replayt config``."""
+
+    raw = cfg.get("min_replayt_version")
+    if raw is None:
+        s = ""
+    else:
+        s = str(raw).strip()
+    if not s:
+        return {
+            "constraint": None,
+            "constraint_source": "unset",
+            "satisfied": True,
+            "parse_error": None,
+            "installed": installed,
+        }
+    from replayt.version_compare import replayt_release_tuple
+
+    try:
+        inst_t = replayt_release_tuple(installed)
+        min_t = replayt_release_tuple(s)
+    except ValueError as exc:
+        return {
+            "constraint": s,
+            "constraint_source": "project_config:min_replayt_version",
+            "satisfied": False,
+            "parse_error": str(exc),
+            "installed": installed,
+        }
+    return {
+        "constraint": s,
+        "constraint_source": "project_config:min_replayt_version",
+        "satisfied": inst_t >= min_t,
+        "parse_error": None,
+        "installed": installed,
+    }
+
+
+def enforce_min_replayt_version_cli(cfg: dict[str, Any], *, installed: str) -> None:
+    """Fail fast when project config requires a newer replayt than ``installed``."""
+
+    report = min_replayt_version_report(cfg, installed=installed)
+    if report["constraint"] is None:
+        return
+    if report["parse_error"]:
+        raise typer.BadParameter(
+            f"Invalid min_replayt_version {report['constraint']!r} in project config "
+            f"({report['parse_error']}); fix [tool.replayt] / .replaytrc.toml (see docs/CONFIG.md)."
+        )
+    if not report["satisfied"]:
+        raise typer.BadParameter(
+            f"This project requires replayt>={report['constraint']} "
+            f"(see [tool.replayt] min_replayt_version); installed {report['installed']}. "
+            "Upgrade with pip install -U replayt or align your checkout."
+        )
 
 
 def parse_log_mode(log_mode: str) -> LogMode:

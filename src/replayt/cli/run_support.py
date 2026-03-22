@@ -84,11 +84,23 @@ def seal_hook_argv(cfg: dict[str, Any]) -> list[str] | None:
     return _hook_argv(cfg, env_var="REPLAYT_SEAL_HOOK", config_key="seal_hook")
 
 
+def verify_seal_hook_argv(cfg: dict[str, Any]) -> list[str] | None:
+    """Argv for the optional post-verify policy subprocess (trusted project config / env only)."""
+
+    return _hook_argv(cfg, env_var="REPLAYT_VERIFY_SEAL_HOOK", config_key="verify_seal_hook")
+
+
 def invoke_hook(argv: list[str], *, extra_env: dict[str, str], timeout_seconds: float | None) -> None:
     """Run *argv* with extra env vars; *argv* must come from trusted config."""
 
     env = {**os.environ, **extra_env}
-    subprocess.run(argv, env=env, check=True, timeout=timeout_seconds)
+    subprocess.run(
+        argv,
+        env=env,
+        check=True,
+        timeout=timeout_seconds,
+        stdin=subprocess.DEVNULL,
+    )
 
 
 def invoke_run_hook(
@@ -193,6 +205,35 @@ def invoke_seal_hook(
             "REPLAYT_SEAL_JSONL": str(jsonl_path.resolve()),
             "REPLAYT_SEAL_OUT": str(seal_out.resolve()),
             "REPLAYT_SEAL_LINE_COUNT": str(line_count),
+        },
+        timeout_seconds=timeout_seconds,
+    )
+
+
+def invoke_verify_seal_hook(
+    argv: list[str],
+    *,
+    run_id: str,
+    log_dir: Path,
+    manifest_path: Path,
+    jsonl_path: Path,
+    manifest_schema: str,
+    line_count: int,
+    file_sha256: str,
+    timeout_seconds: float | None,
+) -> None:
+    """Run *argv* after ``replayt verify-seal`` digests match; *argv* is trusted config only."""
+
+    invoke_hook(
+        argv,
+        extra_env={
+            "REPLAYT_RUN_ID": run_id,
+            "REPLAYT_LOG_DIR": str(log_dir.resolve()),
+            "REPLAYT_VERIFY_SEAL_MANIFEST": str(manifest_path.resolve()),
+            "REPLAYT_VERIFY_SEAL_JSONL": str(jsonl_path.resolve()),
+            "REPLAYT_VERIFY_SEAL_SCHEMA": manifest_schema,
+            "REPLAYT_VERIFY_SEAL_LINE_COUNT": str(line_count),
+            "REPLAYT_VERIFY_SEAL_FILE_SHA256": file_sha256,
         },
         timeout_seconds=timeout_seconds,
     )

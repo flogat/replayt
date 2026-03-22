@@ -241,6 +241,22 @@ def _read_response_body_capped(response: httpx.Response, max_bytes: int) -> byte
     return bytes(buf)
 
 
+def _raise_chat_completions_401_hint(settings: LLMSettings) -> None:
+    """Turn bare HTTP 401 into an onboarding-friendly error (missing vs wrong key)."""
+
+    if not (settings.api_key or "").strip():
+        raise RuntimeError(
+            "LLM HTTP 401 Unauthorized while OPENAI_API_KEY is unset. "
+            "Export OPENAI_API_KEY for live calls (see `.env.example` from `replayt init` and docs/QUICKSTART.md), "
+            "run `replayt doctor`, or use offline placeholder responses: `replayt run --dry-run` or "
+            "`replayt try` without `--live`."
+        )
+    raise RuntimeError(
+        "LLM HTTP 401 Unauthorized. Check OPENAI_API_KEY for this OPENAI_BASE_URL / provider "
+        "(run `replayt doctor` for connectivity when you trust the host)."
+    )
+
+
 class OpenAICompatClient:
     """Minimal chat.completions client for OpenAI-compatible servers."""
 
@@ -330,6 +346,8 @@ class OpenAICompatClient:
                         delay = min(delay * (2**attempt), _RETRY_MAX_DELAY)
                         time.sleep(delay)
                         continue
+                    if r.status_code == 401:
+                        _raise_chat_completions_401_hint(self.settings)
                     r.raise_for_status()
                     cl = r.headers.get("content-length")
                     if cl is not None:
@@ -631,13 +649,21 @@ class LLMBridge:
         msg = choice.get("message") or {}
         content = msg.get("content") or ""
         usage = data.get("usage")
+        finish_reason = choice.get("finish_reason")
         resp_payload: dict[str, Any] = {
             "state": state,
             "model": eff_model,
             "latency_ms": dt_ms,
             "usage": usage,
             "effective": effective,
+            "finish_reason": finish_reason,
         }
+        cid = data.get("id")
+        if isinstance(cid, str) and cid.strip():
+            resp_payload["chat_completion_id"] = cid.strip()
+        fp = data.get("system_fingerprint")
+        if isinstance(fp, str) and fp.strip():
+            resp_payload["system_fingerprint"] = fp.strip()
         if self._log_mode == LogMode.full:
             resp_payload["content"] = content
         elif self._log_mode == LogMode.redacted:

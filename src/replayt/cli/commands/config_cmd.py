@@ -9,11 +9,14 @@ from typing import Literal
 
 import typer
 
+import replayt
 from replayt.cli.config import (
     DEFAULT_LOG_DIR,
     export_hook_timeout_seconds,
     get_project_config,
+    min_replayt_version_report,
     preview_default_cli_target,
+    preview_default_inputs_file,
     resolve_approval_actor_required_keys,
     resolve_llm_settings,
     resolve_log_dir,
@@ -25,10 +28,19 @@ from replayt.cli.config import (
     resume_hook_timeout_seconds,
     run_hook_timeout_seconds,
     seal_hook_timeout_seconds,
+    verify_seal_hook_timeout_seconds,
 )
 from replayt.cli.path_readiness import readiness_checks
-from replayt.cli.run_support import export_hook_argv, resume_hook_argv, run_hook_argv, seal_hook_argv
+from replayt.cli.run_support import (
+    export_hook_argv,
+    resume_hook_argv,
+    run_hook_argv,
+    seal_hook_argv,
+    verify_seal_hook_argv,
+)
 from replayt.security import (
+    dotenv_permission_trust_checks,
+    dotenv_trust_candidate_paths,
     extraneous_llm_credential_env_names,
     log_directory_permission_trust_checks,
     trust_boundary_checks,
@@ -59,6 +71,7 @@ def _config_report(
         strict_mirror_source = "derived:no-sqlite"
     llm_settings, llm_report = resolve_llm_settings(cfg)
     default_target, default_target_source = preview_default_cli_target(cfg)
+    default_inputs_file, default_inputs_file_source = preview_default_inputs_file(cfg, config_path=cfg_path)
 
     env_run_hook = os.environ.get("REPLAYT_RUN_HOOK", "").strip()
     run_hook = run_hook_argv(cfg)
@@ -127,11 +140,35 @@ def _config_report(
         seal_hook_timeout_source = "project_config:seal_hook_timeout"
     else:
         seal_hook_timeout_source = "default:120"
-    trust_checks = trust_boundary_checks(
-        base_url=llm_report.get("base_url"),
-        log_mode=resolved_log_mode,
-    ) + log_directory_permission_trust_checks(resolved_log_dir)
+
+    env_verify_seal_hook = os.environ.get("REPLAYT_VERIFY_SEAL_HOOK", "").strip()
+    verify_seal_hook = verify_seal_hook_argv(cfg)
+    if env_verify_seal_hook:
+        verify_seal_hook_source = "env:REPLAYT_VERIFY_SEAL_HOOK"
+    elif cfg.get("verify_seal_hook"):
+        verify_seal_hook_source = "project_config:verify_seal_hook"
+    else:
+        verify_seal_hook_source = "unset"
+
+    env_verify_seal_hook_timeout = os.environ.get("REPLAYT_VERIFY_SEAL_HOOK_TIMEOUT", "").strip()
+    if env_verify_seal_hook_timeout:
+        verify_seal_hook_timeout_source = "env:REPLAYT_VERIFY_SEAL_HOOK_TIMEOUT"
+    elif cfg.get("verify_seal_hook_timeout") is not None:
+        verify_seal_hook_timeout_source = "project_config:verify_seal_hook_timeout"
+    else:
+        verify_seal_hook_timeout_source = "default:120"
+    trust_checks = (
+        trust_boundary_checks(
+            base_url=llm_report.get("base_url"),
+            log_mode=resolved_log_mode,
+        )
+        + log_directory_permission_trust_checks(resolved_log_dir)
+        + dotenv_permission_trust_checks(
+            dotenv_trust_candidate_paths(project_config_path=cfg_path)
+        )
+    )
     filesystem_checks = readiness_checks(log_dir=resolved_log_dir, sqlite=sqlite_path)
+    min_ver = min_replayt_version_report(cfg, installed=replayt.__version__)
 
     return {
         "schema": "replayt.config_report.v1",
@@ -139,6 +176,11 @@ def _config_report(
             "path": cfg_path,
             "keys": sorted(cfg.keys()),
             "unknown_keys": sorted(unknown_keys),
+            "min_replayt_version": min_ver["constraint"],
+            "min_replayt_version_source": min_ver["constraint_source"],
+            "min_replayt_version_satisfied": min_ver["satisfied"],
+            "min_replayt_version_parse_error": min_ver["parse_error"],
+            "replayt_version_installed": min_ver["installed"],
         },
         "paths": {
             "log_dir": str(resolved_log_dir),
@@ -160,6 +202,8 @@ def _config_report(
         "run": {
             "default_target": default_target,
             "default_target_source": default_target_source,
+            "default_inputs_file": default_inputs_file,
+            "default_inputs_file_source": default_inputs_file_source,
             "hook_argv": run_hook,
             "hook_source": run_hook_source,
             "hook_timeout_seconds": run_hook_timeout_seconds(cfg),
@@ -184,6 +228,12 @@ def _config_report(
             "hook_source": seal_hook_source,
             "hook_timeout_seconds": seal_hook_timeout_seconds(cfg),
             "hook_timeout_source": seal_hook_timeout_source,
+        },
+        "verify_seal": {
+            "hook_argv": verify_seal_hook,
+            "hook_source": verify_seal_hook_source,
+            "hook_timeout_seconds": verify_seal_hook_timeout_seconds(cfg),
+            "hook_timeout_source": verify_seal_hook_timeout_source,
         },
         "llm": {
             **llm_report,
@@ -246,11 +296,22 @@ def cmd_config(
     resume = report["resume"]
     export = report["export"]
     seal = report["seal"]
+    verify_seal = report["verify_seal"]
     llm = report["llm"]
     typer.echo(f"project_config={project['path'] or '(none)'}")
     uk = project.get("unknown_keys") or []
     if uk:
         typer.echo(f"project_config_unknown_keys={uk} (ignored; see docs/CONFIG.md#unknown-keys)")
+    mv = project.get("min_replayt_version")
+    if mv:
+        typer.echo(
+            f"min_replayt_version={mv} (satisfied={project['min_replayt_version_satisfied']}, "
+            f"installed={project['replayt_version_installed']}; "
+            f"{project['min_replayt_version_source']})"
+        )
+        pe = project.get("min_replayt_version_parse_error")
+        if pe:
+            typer.echo(f"min_replayt_version_parse_error={pe}")
     typer.echo(f"log_dir={paths['log_dir']} ({paths['log_dir_source']})")
     typer.echo(f"log_subdir={paths['log_subdir'] or '(none)'}")
     typer.echo(f"sqlite={paths['sqlite'] or '(none)'} ({paths['sqlite_source']})")
@@ -260,6 +321,8 @@ def cmd_config(
     typer.echo(f"strict_mirror={runtime['strict_mirror']} ({runtime['strict_mirror_source']})")
     dt = run["default_target"]
     typer.echo(f"default_target={dt or '(none)'} ({run['default_target_source']})")
+    dif = run["default_inputs_file"]
+    typer.echo(f"default_inputs_file={dif or '(none)'} ({run['default_inputs_file_source']})")
     typer.echo(f"run_hook={run['hook_argv'] or '(none)'} ({run['hook_source']})")
     typer.echo(f"run_hook_timeout_seconds={run['hook_timeout_seconds']} ({run['hook_timeout_source']})")
     typer.echo(f"resume_hook={resume['hook_argv'] or '(none)'} ({resume['hook_source']})")
@@ -278,6 +341,11 @@ def cmd_config(
     typer.echo(f"seal_hook={seal['hook_argv'] or '(none)'} ({seal['hook_source']})")
     typer.echo(
         f"seal_hook_timeout_seconds={seal['hook_timeout_seconds']} ({seal['hook_timeout_source']})"
+    )
+    typer.echo(f"verify_seal_hook={verify_seal['hook_argv'] or '(none)'} ({verify_seal['hook_source']})")
+    typer.echo(
+        f"verify_seal_hook_timeout_seconds={verify_seal['hook_timeout_seconds']} "
+        f"({verify_seal['hook_timeout_source']})"
     )
     typer.echo(f"provider={llm['provider']} ({llm['provider_source']})")
     typer.echo(f"base_url={llm.get('base_url') or '(invalid)'} ({llm['base_url_source']})")

@@ -52,6 +52,17 @@ replayt run --dry-run --inputs-json @inputs.example.json
 
 An explicit **`TARGET` positional argument always overrides** the default. Check what applies in your shell with **`replayt config --format json`** (`run.default_target`, `run.default_target_source`). **`replayt resume`**, **`replayt validate`**, **`replayt graph`**, and **`replayt contract`** still require a target on the command line (or **`doctor --target`** for preflight only).
 
+### Default inputs file for `replayt run` / `replayt ci` / `validate`
+
+When you always pass the same **`inputs.example.json`**, set **`REPLAYT_INPUTS_FILE=inputs.example.json`** (or an absolute path) in your environment, or add **`inputs_file = "inputs.example.json"`** under **`[tool.replayt]`**. Then you can shorten:
+
+```bash
+replayt run --dry-run
+replayt validate my_pkg.workflow:wf
+```
+
+CLI **`--inputs-json`** / **`--inputs-file`** still override. Inspect effective paths with **`replayt config --format json`** (`run.default_inputs_file`, `run.default_inputs_file_source`). **`replayt try`** ignores this default so packaged samples keep their built-in payloads unless you pass **`--inputs-json`** or **`--inputs-file`** explicitly.
+
 ### Install (from this repository)
 
 ```bash
@@ -78,18 +89,74 @@ WORKDIR /app
 COPY . .
 RUN pip install --no-cache-dir -e ".[dev]"
 ENV REPLAYT_GITHUB_SUMMARY=1
+ENV REPLAYT_STEP_SUMMARY=/tmp/replayt-step-summary.md
 CMD ["replayt", "ci", "your_pkg.workflow:wf", "--strict-graph", "--summary-json", ".replayt/ci-summary.json"]
 ```
 
-For GitHub Actions, keep **`--github-summary`** or **`REPLAYT_GITHUB_SUMMARY=1`** explicit in the workflow file so local runs and other CI vendors do not pick up surprising markdown behavior.
+GitHub Actions sets **`GITHUB_STEP_SUMMARY`** for you; in other runners set **`REPLAYT_STEP_SUMMARY`** to a path under your artifacts directory so the same markdown block is not a silent no-op. When both **`GITHUB_STEP_SUMMARY`** and **`REPLAYT_STEP_SUMMARY`** exist, replayt appends to the GitHub file only.
+
+For GitHub Actions, keep **`--github-summary`** or **`REPLAYT_GITHUB_SUMMARY=1`** explicit in the workflow file so local shells do not pick up surprising markdown behavior.
+
+### Beyond core: auto-filled `ci_metadata` from vendor env vars
+
+Some pipelines want **`replayt.ci_run_summary.v1`** enriched with **`GITHUB_SHA`**, **`CI_COMMIT_SHA`**, or similar **without** a shell mapping step. replayt does **not** read those variables implicitly: which names matter and how they are normalized varies by vendor, and silent coupling would surprise self-hosted or air-gapped jobs. Export **`REPLAYT_CI_METADATA_JSON`** yourself (for example `jq -n --arg sha "$CI_COMMIT_SHA" '{commit_sha:$sha}'`) so correlation fields stay explicit. See [`docs/CONFIG.md`](../../docs/CONFIG.md).
+
+### Beyond core: strict project-config checks in CI (unknown keys, min version)
+
+Some teams ask for **`replayt config --strict`** that exits non-zero when **`[tool.replayt]`** contains unsupported keys. replayt treats unknown keys as **ignored** at runtime so a hyphen typo does not brick every local shell, and there is no bundled strict subcommand. Use the **CI: fail on unknown keys** snippet in [`docs/CONFIG.md`](../../docs/CONFIG.md). When you pin **`min_replayt_version`**, also assert **`project_config.min_replayt_version_satisfied`** from **`replayt config --format json`** so upgrade drift fails in CI before **`replayt run`**:
+
+```bash
+replayt config --format json | python -c "import json,sys; d=json.load(sys.stdin)['project_config']; u=d.get('unknown_keys') or []; m=d.get('min_replayt_version'); sat=d.get('min_replayt_version_satisfied', True); bad=bool(u) or (m is not None and not sat); sys.exit(1 if bad else 0)"
+```
+
+### Beyond core: enforce `.env` permissions in CI
+
+replayt inspects **`.env`** mode bits (never file contents) for **`trust_dotenv_other_readable`** / **`trust_dotenv_other_writable`** in **`replayt doctor`** and **`replayt config --format json`** on POSIX. Core does **not** refuse to run when a file is too permissive; teams with shared checkouts or loose umask values would churn. Treat weak modes as a **release gate** instead: fail CI when those doctor checks are not ok, or assert mode bits with `stat` / `ls -l` in your pipeline. Loading **`.env`** stays **your** responsibility. Do not expect **`Runner.run`** to call **python-dotenv** implicitly.
+
+```bash
+replayt doctor --skip-connectivity --format json | python -c "import json,sys; d=json.load(sys.stdin); bad=[c for c in d['checks'] if c['name'].startswith('trust_dotenv_') and not c['ok']]; sys.exit(1 if bad else 0)"
+```
 
 ### Beyond core: SARIF, vendor CI YAML, and Kubernetes Job specs
 
-Some teams want **SARIF** uploads, checked-in **GitLab**/**Circle** job definitions, or **Kubernetes Job** manifests co-located with replayt. Those formats are policy- and cluster-specific; replayt stays a workflow runner and emits **JUnit**, **GitHub step summaries** (when asked), and **`replayt.ci_run_summary.v1`** JSON instead of owning a security-scanner interchange or a blessed platform template repo. Generate SARIF or wrap Job YAML in **your** infra repository: drive **`replayt ci`** the same way as in any container, then post-process **`--summary-json`** with **`jq`** or a small script. For Kubernetes, mount your code image and run the same argv you use in GitHub Actions—no replayt-side operator is required.
+Some teams want **SARIF** uploads, checked-in **GitLab**/**Circle** job definitions, or **Kubernetes Job** manifests co-located with replayt. Those formats are policy- and cluster-specific; replayt stays a workflow runner and emits **JUnit**, **GitHub step summaries** (when asked), and **`replayt.ci_run_summary.v1`** JSON instead of owning a security-scanner interchange or a blessed platform template repo. Generate SARIF or wrap Job YAML in **your** infra repository: drive **`replayt ci`** the same way as in any container, then post-process **`--summary-json`** with **`jq`** or a small script. For Kubernetes, mount your code image and run the same argv you use in GitHub Actions. No replayt-side operator is required.
+
+### Beyond core: dependency scanners and Dependabot
+
+Some maintainers want **`replayt doctor`** to run **`pip-audit`**, **`safety`**, or similar dependency scanners, or want replayt to ship a **Dependabot** configuration. Tooling choice, lockfiles, and registry mirrors differ by team; bundling scanners would pin databases and slow every doctor run. Add **Dependabot** or **Renovate** YAML under **`.github/`** in **your** repository, and run **`pip-audit -r requirements.txt`** (or your lockfile workflow) as its own CI job beside **`python scripts/maintainer_checks.py`**. For release-note text without an interactive wizard, extract **`## Unreleased`** with **`python scripts/changelog_unreleased.py --format json`** and edit **`CHANGELOG.md`** in git diffs like any other source file.
+
+```bash
+python scripts/changelog_unreleased.py --check-nonempty
+pip-audit -r requirements.txt  # example; use your org's scanner and inputs
+```
 
 ## Beyond core: streaming, hooks, approvals, and logs
 
 replayt keeps explicit states, append-only **JSONL**, and structured LLM outputs. Use **`ctx.llm.with_settings(...)`** for per-call overrides; they show up under **`effective`** on **`llm_request`** events. Core does **not** log per-token streams because that is too noisy for replay. Stream inside a step, then store a **Pydantic-validated** result or a short summary. **`replayt resume`** covers many approval flows; richer UIs can read the same JSONL and resolve gates in **your** app. Notifications, trace IDs, and policy hooks belong in wrappers or callbacks. If you need stronger audit handoff, hash, encrypt, or archive **your** logs; the runtime cannot prove integrity if an attacker can write the log directory (see **Security and trust boundaries** in [`README.md`](../../README.md)).
+
+### Beyond core: logprobs and vendor-only chat fields
+
+Some ML workflows need **token logprobs**, OpenAI **`user`** / **`service_tier`**, or other **vendor-specific JSON** keys on **`/chat/completions`**. replayt keeps **`LLMBridge`** on a small shared schema so logs stay replay-friendly; stuffing full **`logprobs`** blobs into **`llm_response`** would dwarf the rest of the timeline. Call the **official client inside one step**, inspect likelihoods or headers there, and only persist what you need: either **`ctx.set`** / **`structured_output`** for structured summaries or **`ctx.note`** for a short scalar breadcrumb. The same pattern covers **`user`** strings for abuse tracking: the OpenAI Python SDK accepts them on the create call while replayt still owns transitions and approvals.
+
+```python
+from openai import OpenAI
+
+@wf.step("sdk_extras")
+def sdk_extras(ctx):
+    client = OpenAI()
+    r = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "ping"}],
+        user="replayt-run-" + ctx.run_id,
+        logprobs=True,
+        top_logprobs=2,
+    )
+    ctx.note("llm_calibration", summary="top_logprobs captured in-process", data={"finish": r.choices[0].finish_reason})
+    ctx.set("answer", r.choices[0].message.content or "")
+    return "done"
+```
+
+See **Pattern: OpenAI Python SDK inside a step** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md) for the full shape.
 
 **Composition patterns** (copy the names into EXAMPLES_PATTERNS search):
 
@@ -104,10 +171,17 @@ Share a read-only timeline for review without building a server:
 replayt replay <run_id> --format html --out run.html
 ```
 
-**Markdown run summary** (paste into tickets or chat; same **`--style`** rules as HTML). Paused runs include a copy-paste **`replayt resume TARGET …`** line—replace **`TARGET`** with your **`module:wf`** or workflow path.
+**Markdown run summary** (paste into tickets or chat; same **`--style`** rules as HTML). Paused runs include a copy-paste **`replayt resume TARGET …`** line; replace **`TARGET`** with your **`module:wf`** or workflow path.
 
 ```bash
 replayt report <run_id> --format markdown --style support --out handoff.md
+```
+
+**Two-run comparison:** **`replayt report-diff RUN_A RUN_B`** defaults to HTML; add **`--format markdown`** when you need the same stakeholder sections (metadata, failures, structured outputs, approvals) as pasteable text. For automation, use **`replayt diff RUN_A RUN_B --output json`** instead of a parallel JSON report-diff schema.
+
+```bash
+replayt report-diff <run_a> <run_b> --format markdown --out compare.md
+replayt diff <run_a> <run_b> --output json
 ```
 
 **`bundle-export`** still ships **`report.html`** only; generate **`.md`** in CI with **`--format markdown`** when your process wants both.
@@ -124,6 +198,8 @@ After **`bundle-export --seal`**, extract **`events.jsonl`** and **`events.seal.
 ```bash
 replayt verify-seal <run_id> --manifest path/to/events.seal.json --jsonl path/to/events.jsonl
 ```
+
+Org policy can attach a **`verify_seal_hook`** (or **`REPLAYT_VERIFY_SEAL_HOOK`**) so CI logs to an internal audit index or checks a ticket only after digests match; see **`verify_seal_hook`** in [`docs/CONFIG.md`](../../docs/CONFIG.md).
 
 For **cryptographic signing** (GPG, minisign, Sigstore), keep that in **your** release or compliance pipeline: sign the manifest bytes (or the tarball) after **`replayt seal`** / export; replayt stays a local runner, not a key-management product.
 
@@ -179,9 +255,20 @@ replayt runs --tool search_repo --tool fetch_url --limit 50
 
 Pair with **`replayt inspect RUN_ID --event-type tool_call`** when you only want those events from one run.
 
+### Finding runs that logged a structured output schema
+
+**`ctx.llm.parse(...)`** and similar paths emit **`structured_output`** (or **`structured_output_failed`**) with a payload **`schema_name`** that matches your Pydantic model class name. Filter recent runs the same way as **`--tool`**:
+
+```bash
+replayt runs --structured-schema Decision --structured-schema Plan --limit 50
+replayt stats --structured-schema Decision --output json
+```
+
+Use **`replayt inspect RUN_ID --event-type structured_output`** (and repeat **`--event-type structured_output_failed`** if you need both) when you want only those lines from one run.
+
 ### Beyond core: graph checkpoints and model-driven multi-tool turns
 
-replayt does not import LangGraph **checkpoints** or thread blobs into the parent JSONL timeline; keep checkpoints inside the graph library and persist **one** validated exit shape to replayt context (see **Pattern: workflow composition via explicit sub-run** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** when you need a separate child **`run_id`**). The runtime also does not fan out a single model **`tool_calls` array** into parallel replayt states—that would hide scheduling order. Execute tool calls in a deterministic order inside the handler, then transition explicitly:
+replayt does not import LangGraph **checkpoints** or thread blobs into the parent JSONL timeline; keep checkpoints inside the graph library and persist **one** validated exit shape to replayt context (see **Pattern: workflow composition via explicit sub-run** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** when you need a separate child **`run_id`**). The runtime also does not fan out a single model **`tool_calls` array** into parallel replayt states. That would hide scheduling order. Execute tool calls in a deterministic order inside the handler, then transition explicitly:
 
 ```python
 for spec in tool_calls_from_model:

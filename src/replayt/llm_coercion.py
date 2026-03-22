@@ -41,18 +41,28 @@ def coerce_llm_stop_sequences(value: Any) -> list[str] | None:
 
 
 def coerce_temperature(value: Any, *, default: float = 0.0) -> float:
-    """Parse temperature; rejects bool (Python bool is a subclass of int)."""
+    """Parse temperature; rejects bool (Python bool is a subclass of int).
+
+    Values must be finite and within ``[0, 2]``, matching OpenAI-style chat ``temperature`` bounds.
+    """
 
     if value is None:
-        return float(default)
-    if isinstance(value, bool):
+        out = float(default)
+    elif isinstance(value, bool):
         raise TypeError("temperature cannot be a boolean")
-    if isinstance(value, str):
+    elif isinstance(value, str):
         s = value.strip()
         if not s:
-            return float(default)
-        return float(s)
-    return float(value)
+            out = float(default)
+        else:
+            out = float(s)
+    else:
+        out = float(value)
+    if not math.isfinite(out):
+        raise ValueError("temperature must be a finite number")
+    if out < 0.0 or out > 2.0:
+        raise ValueError(f"temperature must be between 0 and 2 inclusive (OpenAI-style chat API), got {out}")
+    return out
 
 
 def coerce_timeout_seconds(value: Any) -> float:
@@ -62,8 +72,12 @@ def coerce_timeout_seconds(value: Any) -> float:
         s = value.strip()
         if not s:
             raise ValueError("timeout_seconds cannot be empty")
-        return float(s)
-    return float(value)
+        out = float(s)
+    else:
+        out = float(value)
+    if not math.isfinite(out) or out <= 0.0:
+        raise ValueError("timeout_seconds must be a finite number greater than zero")
+    return out
 
 
 def coerce_top_p(value: Any) -> float | None:

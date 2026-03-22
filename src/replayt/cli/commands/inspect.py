@@ -12,18 +12,20 @@ from typing import Any, Literal
 
 import typer
 
-from replayt.cli.config import DEFAULT_LOG_DIR, resolve_log_dir
+from replayt.cli.config import DEFAULT_LOG_DIR, get_project_config, resolve_log_dir, resolve_run_inputs_json
 from replayt.cli.display import (
     event_summary,
     experiment_filters_match,
     parse_duration,
     parse_iso_ts,
     parse_meta_filters,
+    parse_structured_schema_name_filters,
     parse_tag_filters,
     parse_tool_name_filters,
     replay_html,
     replay_timeline_lines,
     run_diff_data,
+    run_matches_structured_schema_name_filter,
     run_matches_tool_name_filter,
     run_meta_filters_match,
     tags_match,
@@ -31,7 +33,7 @@ from replayt.cli.display import (
 from replayt.cli.run_id_hints import echo_missing_run_hints
 from replayt.cli.stores import read_store
 from replayt.cli.targets import load_target
-from replayt.cli.validation import inputs_json_from_options, validate_workflow_graph, validation_report
+from replayt.cli.validation import validate_workflow_graph, validation_report
 from replayt.graph_export import workflow_to_mermaid
 from replayt.persistence import JSONLStore, SQLiteStore
 
@@ -281,7 +283,10 @@ def cmd_validate(
 
     wf = load_target(target)
     errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
-    inputs_resolved = inputs_json_from_options(inputs_json, inputs_file)
+    cfg, cfg_path, _unknown = get_project_config()
+    inputs_resolved, _inputs_src = resolve_run_inputs_json(
+        inputs_json, inputs_file, cfg=cfg, config_path=cfg_path
+    )
     report = validation_report(
         target=target,
         wf=wf,
@@ -333,6 +338,14 @@ def cmd_runs(
         "--tool",
         help="Only runs that recorded a `tool_call` with this `name` (exact match; repeatable; OR).",
     ),
+    structured_schema: list[str] | None = typer.Option(
+        None,
+        "--structured-schema",
+        help=(
+            "Only runs that logged `structured_output` or `structured_output_failed` with this "
+            "`schema_name` (exact match; repeatable; OR)."
+        ),
+    ),
 ) -> None:
     """List recent local runs from JSONL logs."""
 
@@ -341,6 +354,7 @@ def cmd_runs(
     meta_filters = parse_meta_filters(run_meta)
     exp_filters = parse_tag_filters(experiment)
     tool_filters = parse_tool_name_filters(tool)
+    schema_filters = parse_structured_schema_name_filters(structured_schema)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     with read_store(log_dir, sqlite) as store:
         runs_data: list[tuple[str, dict[str, Any]]] = []
@@ -356,6 +370,8 @@ def cmd_runs(
             if status_filters is not None and summary.get("status") not in status_filters:
                 continue
             if not run_matches_tool_name_filter(events, tool_filters):
+                continue
+            if not run_matches_structured_schema_name_filter(events, schema_filters):
                 continue
             runs_data.append((rid, summary))
 
@@ -404,6 +420,14 @@ def cmd_stats(
         "--tool",
         help="Only runs that recorded a `tool_call` with this `name` (exact match; repeatable; OR).",
     ),
+    structured_schema: list[str] | None = typer.Option(
+        None,
+        "--structured-schema",
+        help=(
+            "Only runs that logged `structured_output` or `structured_output_failed` with this "
+            "`schema_name` (exact match; repeatable; OR)."
+        ),
+    ),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """Summarize local run logs: counts, LLM latency averages, token usage, common failure states."""
@@ -412,6 +436,7 @@ def cmd_stats(
     meta_filters = parse_meta_filters(run_meta)
     exp_filters = parse_tag_filters(experiment)
     tool_filters = parse_tool_name_filters(tool)
+    schema_filters = parse_structured_schema_name_filters(structured_schema)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     now = datetime.now(timezone.utc)
     cutoff = None
@@ -451,6 +476,8 @@ def cmd_stats(
         if exp_filters and not experiment_filters_match(summ.get("experiment") or {}, exp_filters):
             continue
         if not run_matches_tool_name_filter(events, tool_filters):
+            continue
+        if not run_matches_structured_schema_name_filter(events, schema_filters):
             continue
         total += 1
         st = str(summ.get("status", "unknown"))

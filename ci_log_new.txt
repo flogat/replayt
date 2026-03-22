@@ -1,0 +1,62 @@
+﻿test (3.11)	Pytest	´╗┐2026-03-22T07:46:47.8556085Z ##[group]Run pytest
+test (3.11)	Pytest	2026-03-22T07:46:47.8556314Z [36;1mpytest[0m
+test (3.11)	Pytest	2026-03-22T07:46:47.8606273Z shell: /usr/bin/bash -e {0}
+test (3.11)	Pytest	2026-03-22T07:46:47.8606503Z env:
+test (3.11)	Pytest	2026-03-22T07:46:47.8606737Z   pythonLocation: /opt/hostedtoolcache/Python/3.11.15/x64
+test (3.11)	Pytest	2026-03-22T07:46:47.8607155Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib/pkgconfig
+test (3.11)	Pytest	2026-03-22T07:46:47.8607568Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+test (3.11)	Pytest	2026-03-22T07:46:47.8607925Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+test (3.11)	Pytest	2026-03-22T07:46:47.8608280Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.11.15/x64
+test (3.11)	Pytest	2026-03-22T07:46:47.8608630Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.11.15/x64/lib
+test (3.11)	Pytest	2026-03-22T07:46:47.8608928Z ##[endgroup]
+test (3.11)	Pytest	2026-03-22T07:46:49.4798617Z ============================= test session starts ==============================
+test (3.11)	Pytest	2026-03-22T07:46:49.4799452Z platform linux -- Python 3.11.15, pytest-9.0.2, pluggy-1.6.0
+test (3.11)	Pytest	2026-03-22T07:46:49.4800126Z rootdir: /home/runner/work/replayt/replayt
+test (3.11)	Pytest	2026-03-22T07:46:49.4800702Z configfile: pyproject.toml
+test (3.11)	Pytest	2026-03-22T07:46:49.4801353Z testpaths: tests
+test (3.11)	Pytest	2026-03-22T07:46:49.4801685Z plugins: anyio-4.12.1
+test (3.11)	Pytest	2026-03-22T07:46:49.4802031Z collected 394 items
+test (3.11)	Pytest	2026-03-22T07:46:49.4802235Z 
+test (3.11)	Pytest	2026-03-22T07:46:49.4855244Z tests/test_changelog_gate.py ....                                        [  1%]
+test (3.11)	Pytest	2026-03-22T07:46:53.5426282Z tests/test_cli.py ...................................................... [ 14%]
+test (3.11)	Pytest	2026-03-22T07:46:56.1151786Z ........................................................................ [ 32%]
+test (3.11)	Pytest	2026-03-22T07:46:56.6243007Z ................                                                         [ 37%]
+test (3.11)	Pytest	2026-03-22T07:46:56.6271739Z tests/test_export_run.py .....                                           [ 38%]
+test (3.11)	Pytest	2026-03-22T07:46:56.6290315Z tests/test_graph_export.py ...                                           [ 39%]
+test (3.11)	Pytest	2026-03-22T07:46:56.6654282Z tests/test_jsonl_store.py ............                                   [ 42%]
+test (3.11)	Pytest	2026-03-22T07:46:56.8588886Z tests/test_llm_bridge.py .........................                       [ 48%]
+test (3.11)	Pytest	2026-03-22T07:46:56.8659653Z tests/test_llm_coercion.py ............                                  [ 51%]
+test (3.11)	Pytest	2026-03-22T07:46:56.8721104Z tests/test_llm_settings.py ..........                                    [ 54%]
+test (3.11)	Pytest	2026-03-22T07:46:56.9582224Z tests/test_maintainer_scripts.py ..............F.                        [ 58%]
+test (3.11)	Pytest	2026-03-22T07:46:56.9633755Z tests/test_multi_store.py ..                                             [ 58%]
+test (3.11)	Pytest	2026-03-22T07:46:56.9736139Z tests/test_notebook.py ..............                                    [ 62%]
+test (3.11)	Pytest	2026-03-22T07:46:56.9755195Z tests/test_run_id_hints.py ..                                            [ 62%]
+test (3.11)	Pytest	2026-03-22T07:46:57.1528716Z tests/test_runner.py ............................................        [ 73%]
+test (3.11)	Pytest	2026-03-22T07:46:57.1687273Z tests/test_security.py .................                                 [ 78%]
+test (3.11)	Pytest	2026-03-22T07:46:58.1859224Z tests/test_skill_release_loop.py ........................                [ 84%]
+test (3.11)	Pytest	2026-03-22T07:46:59.1624452Z tests/test_skill_release_loop_agent.py ........................          [ 90%]
+test (3.11)	Pytest	2026-03-22T07:46:59.2340534Z tests/test_sqlite_store.py .............                                 [ 93%]
+test (3.11)	Pytest	2026-03-22T07:46:59.2498287Z tests/test_testing.py .......                                            [ 95%]
+test (3.11)	Pytest	2026-03-22T07:46:59.2629938Z tests/test_tools.py ..                                                   [ 95%]
+test (3.11)	Pytest	2026-03-22T07:46:59.2843465Z tests/test_tutorial_targets_importable.py .                              [ 96%]
+test (3.11)	Pytest	2026-03-22T07:46:59.2867589Z tests/test_validation_warnings.py ....                                   [ 97%]
+test (3.11)	Pytest	2026-03-22T07:46:59.4293778Z tests/test_yaml_workflow.py ...........                                  [100%]
+test (3.11)	Pytest	2026-03-22T07:46:59.4294385Z 
+test (3.11)	Pytest	2026-03-22T07:46:59.4294599Z =================================== FAILURES ===================================
+test (3.11)	Pytest	2026-03-22T07:46:59.4295128Z ____________________ test_maintainer_checks_real_repo_full _____________________
+test (3.11)	Pytest	2026-03-22T07:46:59.4295860Z 
+test (3.11)	Pytest	2026-03-22T07:46:59.4296032Z     def test_maintainer_checks_real_repo_full() -> None:
+test (3.11)	Pytest	2026-03-22T07:46:59.4296483Z         mod = _load_script("maintainer_checks_replayt", "maintainer_checks.py")
+test (3.11)	Pytest	2026-03-22T07:46:59.4296912Z         root = Path(__file__).resolve().parents[1]
+test (3.11)	Pytest	2026-03-22T07:46:59.4297318Z         report = mod.maintainer_checks_report(root, changelog_nonempty=True)
+test (3.11)	Pytest	2026-03-22T07:46:59.4297695Z     
+test (3.11)	Pytest	2026-03-22T07:46:59.4297879Z >       assert report["ok"] is True, report
+test (3.11)	Pytest	2026-03-22T07:46:59.4298962Z E       AssertionError: {'changelog_nonempty_required': True, 'checks': {'changelog_unreleased': {'item_count': 0, 'ok': False, 'schema': 'rep...consistency.v1'}}, 'errors': ['changelog_unreleased failed (--changelog-nonempty: no bullet items)'], 'ok': False, ...}
+test (3.11)	Pytest	2026-03-22T07:46:59.4300081Z E       assert False is True
+test (3.11)	Pytest	2026-03-22T07:46:59.4300238Z 
+test (3.11)	Pytest	2026-03-22T07:46:59.4300373Z tests/test_maintainer_scripts.py:392: AssertionError
+test (3.11)	Pytest	2026-03-22T07:46:59.4300761Z =========================== short test summary info ============================
+test (3.11)	Pytest	2026-03-22T07:46:59.4302598Z FAILED tests/test_maintainer_scripts.py::test_maintainer_checks_real_repo_full - AssertionError: {'changelog_nonempty_required': True, 'checks': {'changelog_unreleased': {'item_count': 0, 'ok': False, 'schema': 'rep...consistency.v1'}}, 'errors': ['changelog_unreleased failed (--changelog-nonempty: no bullet items)'], 'ok': False, ...}
+test (3.11)	Pytest	2026-03-22T07:46:59.4303965Z assert False is True
+test (3.11)	Pytest	2026-03-22T07:46:59.4304248Z ======================== 1 failed, 393 passed in 10.91s ========================
+test (3.11)	Pytest	2026-03-22T07:46:59.4998704Z ##[error]Process completed with exit code 1.

@@ -12,19 +12,19 @@ import typer
 from replayt.cli.config import (
     DEFAULT_LOG_DIR,
     get_project_config,
+    min_replayt_version_report,
     resolve_llm_settings,
     resolve_log_dir,
     resolve_log_mode_setting,
+    resolve_run_inputs_json,
     resolve_sqlite_path,
 )
 from replayt.cli.path_readiness import readiness_checks
 from replayt.cli.targets import load_target
-from replayt.cli.validation import (
-    inputs_json_from_options,
-    validate_workflow_graph,
-    validation_report,
-)
+from replayt.cli.validation import validate_workflow_graph, validation_report
 from replayt.security import (
+    dotenv_permission_trust_checks,
+    dotenv_trust_candidate_paths,
     extraneous_llm_credential_env_names,
     llm_credential_env_presence,
     log_directory_permission_trust_checks,
@@ -102,6 +102,35 @@ def cmd_doctor(
         )
     else:
         checks.append(("project_config_unknown_keys", True, "none"))
+
+    mv = min_replayt_version_report(cfg, installed=pkg_ver)
+    if mv["constraint"] is None:
+        checks.append(("project_config_min_replayt_version", True, "unset"))
+    elif mv["parse_error"]:
+        checks.append(
+            (
+                "project_config_min_replayt_version",
+                False,
+                f"invalid constraint {mv['constraint']!r}: {mv['parse_error']}",
+            )
+        )
+    elif not mv["satisfied"]:
+        checks.append(
+            (
+                "project_config_min_replayt_version",
+                False,
+                f"need>={mv['constraint']}, installed {mv['installed']}",
+            )
+        )
+    else:
+        checks.append(
+            (
+                "project_config_min_replayt_version",
+                True,
+                f">={mv['constraint']} (installed {mv['installed']})",
+            )
+        )
+
     pyver = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     checks.append(("python", True, pyver))
     checks.append(
@@ -181,13 +210,19 @@ def cmd_doctor(
         checks.append((check.name, check.ok, check.detail))
     for check in log_directory_permission_trust_checks(resolved_log_dir):
         checks.append((check.name, check.ok, check.detail))
+    for check in dotenv_permission_trust_checks(
+        dotenv_trust_candidate_paths(cwd=Path.cwd(), project_config_path=cfg_path)
+    ):
+        checks.append((check.name, check.ok, check.detail))
     for check in readiness_checks(log_dir=resolved_log_dir, sqlite=resolved_sqlite):
         checks.append((check.name, check.ok, check.detail))
 
     target_payload: dict[str, object] | None = None
     if target is not None:
         try:
-            inputs_resolved = inputs_json_from_options(inputs_json, inputs_file)
+            inputs_resolved, _inputs_src = resolve_run_inputs_json(
+                inputs_json, inputs_file, cfg=cfg, config_path=cfg_path
+            )
             wf = load_target(target)
             errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
             report = validation_report(
@@ -223,6 +258,10 @@ def cmd_doctor(
             "Remove or rename keys to match docs/CONFIG.md; run `replayt config --format json` "
             "and inspect project_config.unknown_keys."
         ),
+        "project_config_min_replayt_version": (
+            "Set min_replayt_version to a replayt-style release (e.g. 0.4.7), upgrade the installed "
+            "package, or remove the key; run `replayt config --format json` for details."
+        ),
         "provider_config": "set OPENAI_BASE_URL to an OpenAI-compatible gateway or use a supported preset",
         "provider_connectivity": "try replayt doctor --skip-connectivity; check OPENAI_BASE_URL",
         "trust_log_mode": "Prefer redacted or structured_only for logs that may contain sensitive text.",
@@ -237,6 +276,12 @@ def cmd_doctor(
         ),
         "trust_log_dir_other_writable": (
             "Tighten log_dir permissions so other OS accounts cannot append or replace run logs."
+        ),
+        "trust_dotenv_other_readable": (
+            "Restrict .env permissions (for example chmod 600) so API keys are not readable by other OS accounts."
+        ),
+        "trust_dotenv_other_writable": (
+            "Remove world-writable bits from .env so other accounts cannot swap in attacker-controlled secrets."
         ),
         "log_dir_ready": "Fix the resolved log_dir path or its parent-directory permissions before running replayt.",
         "sqlite_ready": "Fix the resolved sqlite path or its parent-directory permissions before enabling the mirror.",
@@ -256,6 +301,8 @@ def cmd_doctor(
             "trust_base_url_credentials",
             "trust_log_dir_other_readable",
             "trust_log_dir_other_writable",
+            "trust_dotenv_other_readable",
+            "trust_dotenv_other_writable",
             "credential_env_extra_providers",
         }
         healthy = all(ok for n, ok, _ in checks if n not in soft)

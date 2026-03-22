@@ -68,6 +68,9 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `model` (string)
 - `usage` (object, optional)
 - `effective` (object): same shape as on `llm_request`
+- `finish_reason` (string or null): first choice `finish_reason` from the provider when present (for example `stop`, `length`, `content_filter`); null when the gateway omits it
+- `chat_completion_id` (string, optional): provider response `id` when the gateway returns one (useful to correlate with vendor dashboards)
+- `system_fingerprint` (string, optional): provider fingerprint when returned (OpenAI-style reproducibility hint)
 - `content_preview` (string, optional): truncated in `redacted` mode only
 - `content` (string): only when logging mode is `full`
 

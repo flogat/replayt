@@ -74,14 +74,28 @@ def write_junit_xml(path: Path, *, wf: Workflow, result: RunResult) -> None:
     path.write_text(doc, encoding="utf-8")
 
 
+def _resolve_step_summary_path() -> Path | None:
+    """Where to append markdown when ``--github-summary`` / ``REPLAYT_GITHUB_SUMMARY`` is on.
+
+    GitHub Actions sets ``GITHUB_STEP_SUMMARY``; for other CI systems set ``REPLAYT_STEP_SUMMARY``
+    to a writable file path. When both are set, ``GITHUB_STEP_SUMMARY`` wins.
+    """
+
+    gh = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
+    if gh:
+        return Path(gh)
+    rt = os.environ.get("REPLAYT_STEP_SUMMARY", "").strip()
+    return Path(rt) if rt else None
+
+
 def append_github_step_summary(
     wf: Workflow,
     result: RunResult,
     *,
     duration_ms: int | None = None,
 ) -> None:
-    summary_path = os.environ.get("GITHUB_STEP_SUMMARY")
-    if not summary_path:
+    summary_path = _resolve_step_summary_path()
+    if summary_path is None:
         return
     lines = [
         "## replayt ci",
@@ -95,7 +109,8 @@ def append_github_step_summary(
     if result.error:
         lines.append(f"- **error:** `{result.error}`")
     lines.append("")
-    with Path(summary_path).open("a", encoding="utf-8") as f:
+    summary_path.parent.mkdir(parents=True, exist_ok=True)
+    with summary_path.open("a", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
 
 

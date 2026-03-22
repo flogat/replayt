@@ -32,6 +32,7 @@ from replayt.cli.config import (
     resolve_log_mode_setting,
     resolve_project_path,
     resolve_redact_keys,
+    resolve_run_inputs_json,
     resolve_sqlite_path,
     resolve_strict_mirror,
     resolve_timeout_setting,
@@ -159,12 +160,18 @@ def cmd_run(
     inputs_json: str | None = typer.Option(
         None,
         "--inputs-json",
-        help="Optional JSON object merged into the run context. Use @path/to/inputs.json to read from a file.",
+        help=(
+            "Optional JSON object merged into the run context. Use @path/to/inputs.json to read from a file. "
+            "When omitted, inputs may come from REPLAYT_INPUTS_FILE or [tool.replayt] inputs_file (see CONFIG.md)."
+        ),
     ),
     inputs_file: Path | None = typer.Option(
         None,
         "--inputs-file",
-        help="Read inputs JSON object from this file (mutually exclusive with --inputs-json).",
+        help=(
+            "Read inputs JSON object from this file (mutually exclusive with --inputs-json). "
+            "When omitted, inputs may come from REPLAYT_INPUTS_FILE or [tool.replayt] inputs_file."
+        ),
     ),
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR, help="Directory for JSONL run logs."),
     log_subdir: str | None = typer.Option(
@@ -244,10 +251,11 @@ def cmd_run(
         typer.echo("When using --resume, you must pass --run-id", err=True)
         raise typer.Exit(code=1)
 
-    inputs_resolved = inputs_json_from_options(inputs_json, inputs_file)
-
     in_child = os.environ.get("REPLAYT_SUBPROCESS_RUN") == "1"
     cfg, cfg_path, _ = get_project_config()
+    inputs_resolved, _inputs_source = resolve_run_inputs_json(
+        inputs_json, inputs_file, cfg=cfg, config_path=cfg_path
+    )
     target = resolve_cli_target(target, cfg=cfg)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     sqlite, _sqlite_source = resolve_sqlite_path(sqlite, cfg, config_path=cfg_path)
@@ -350,6 +358,7 @@ def cmd_run(
                 [sys.executable, "-m", "replayt.cli.main", *argv],
                 env=env,
                 timeout=timeout,
+                stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:
             typer.echo(f"Run timed out after {timeout}s", err=True)
@@ -660,12 +669,18 @@ def cmd_ci(
     inputs_json: str | None = typer.Option(
         None,
         "--inputs-json",
-        help="Optional JSON object merged into the run context. Use @path/to/inputs.json to read from a file.",
+        help=(
+            "Optional JSON object merged into the run context. Use @path/to/inputs.json to read from a file. "
+            "When omitted, inputs may come from REPLAYT_INPUTS_FILE or [tool.replayt] inputs_file."
+        ),
     ),
     inputs_file: Path | None = typer.Option(
         None,
         "--inputs-file",
-        help="Read inputs JSON object from this file (mutually exclusive with --inputs-json).",
+        help=(
+            "Read inputs JSON object from this file (mutually exclusive with --inputs-json). "
+            "When omitted, inputs may come from REPLAYT_INPUTS_FILE or [tool.replayt] inputs_file."
+        ),
     ),
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR, help="Directory for JSONL run logs."),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file mirrored alongside JSONL."),
@@ -719,7 +734,10 @@ def cmd_ci(
     github_summary: bool = typer.Option(
         False,
         "--github-summary",
-        help="Append a markdown summary to GITHUB_STEP_SUMMARY when that env var is set.",
+        help=(
+            "Append a markdown summary to GITHUB_STEP_SUMMARY (GitHub Actions) or REPLAYT_STEP_SUMMARY "
+            "when set."
+        ),
     ),
     summary_json: Path | None = typer.Option(
         None,

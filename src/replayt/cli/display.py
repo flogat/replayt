@@ -203,6 +203,37 @@ def run_matches_tool_name_filter(events: list[dict[str, Any]], wanted: frozenset
     return False
 
 
+def parse_structured_schema_name_filters(raw: list[str] | None) -> frozenset[str] | None:
+    """Normalize repeatable `--structured-schema` values (exact `schema_name`; OR across values)."""
+    if not raw:
+        return None
+    normalized: list[str] = []
+    for item in raw:
+        name = str(item).strip()
+        if not name:
+            raise typer.BadParameter(
+                "Empty --structured-schema is not allowed; omit the flag or pass a `schema_name` "
+                "(exact match on `structured_output` / `structured_output_failed` events; repeat for OR)."
+            )
+        normalized.append(name)
+    return frozenset(normalized)
+
+
+def run_matches_structured_schema_name_filter(
+    events: list[dict[str, Any]], wanted: frozenset[str] | None
+) -> bool:
+    if wanted is None:
+        return True
+    for e in events:
+        if e.get("type") not in {"structured_output", "structured_output_failed"}:
+            continue
+        payload = e.get("payload") or {}
+        sn = payload.get("schema_name")
+        if isinstance(sn, str) and sn in wanted:
+            return True
+    return False
+
+
 def parse_iso_ts(ts: str | None) -> datetime | None:
     if not ts:
         return None

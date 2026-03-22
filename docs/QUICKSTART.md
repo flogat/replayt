@@ -123,6 +123,8 @@ You should see `status=failed` and structured error payload on the failing state
 
 After hello-world, this is the smallest pattern where model output is written into context (inside an existing `Workflow` with `OPENAI_API_KEY` set):
 
+If a live run fails with **HTTP 401**, replayt raises a short error that tells you whether the key was **unset** (set `OPENAI_API_KEY`, see **`.env.example`** from `replayt init`, run `replayt doctor`, or use `replayt run --dry-run` / `replayt try` without `--live`) versus **set but rejected** (wrong key, wrong gateway, or expired credential).
+
 ```python
 from pydantic import BaseModel
 
@@ -139,7 +141,7 @@ def classify(ctx):
     return None
 ```
 
-> **How it works:** When you call `ctx.llm.parse(...)`, replayt turns your Pydantic model into a JSON Schema and adds a `system` prompt that asks for JSON matching that schema (and uses native structured outputs when the provider supports them). You **do not** need to tell the model to "return JSON" or spell out schema fields in your own prompts. Keep `messages` focused on the task.
+> When you call `ctx.llm.parse(...)`, replayt turns your Pydantic model into a JSON Schema and adds a `system` prompt that asks for JSON matching that schema (and uses native structured outputs when the provider supports them). You **do not** need to tell the model to "return JSON" or spell out schema fields in your own prompts. Keep `messages` focused on the task.
 
 Run a full tutorial workflow with the same idea: **section 6** in [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) (`replayt_examples.e06_sales_call_brief`).
 

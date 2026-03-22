@@ -20,6 +20,7 @@ from replayt.cli.config import (
     parse_log_mode,
     resolve_log_dir,
     seal_hook_timeout_seconds,
+    verify_seal_hook_timeout_seconds,
 )
 from replayt.cli.display import replay_html
 from replayt.cli.run_id_hints import echo_missing_run_hints
@@ -27,7 +28,9 @@ from replayt.cli.run_support import (
     export_hook_argv,
     invoke_export_hook,
     invoke_seal_hook,
+    invoke_verify_seal_hook,
     seal_hook_argv,
+    verify_seal_hook_argv,
 )
 from replayt.cli.stores import read_store
 from replayt.cli.targets import load_target
@@ -113,6 +116,46 @@ def _maybe_invoke_seal_hook(
         raise typer.Exit(code=1) from exc
     except subprocess.CalledProcessError as exc:
         typer.echo(f"seal_hook exited with code {exc.returncode}", err=True)
+        raise typer.Exit(code=1) from exc
+
+
+def _maybe_invoke_verify_seal_hook(
+    *,
+    run_id: str,
+    log_dir: Path,
+    manifest_path: Path,
+    jsonl_path: Path,
+    manifest_schema: str,
+    line_count: int,
+    file_sha256: str,
+) -> None:
+    cfg, _, _ = get_project_config()
+    hook = verify_seal_hook_argv(cfg)
+    if not hook:
+        return
+    hook_timeout = verify_seal_hook_timeout_seconds(cfg)
+    try:
+        invoke_verify_seal_hook(
+            hook,
+            run_id=run_id,
+            log_dir=log_dir,
+            manifest_path=manifest_path,
+            jsonl_path=jsonl_path,
+            manifest_schema=manifest_schema,
+            line_count=line_count,
+            file_sha256=file_sha256,
+            timeout_seconds=hook_timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
+        typer.echo(
+            f"verify_seal_hook timed out (limit {lim}); set REPLAYT_VERIFY_SEAL_HOOK_TIMEOUT or "
+            "verify_seal_hook_timeout in project config (<=0 for no limit).",
+            err=True,
+        )
+        raise typer.Exit(code=1) from exc
+    except subprocess.CalledProcessError as exc:
+        typer.echo(f"verify_seal_hook exited with code {exc.returncode}", err=True)
         raise typer.Exit(code=1) from exc
 
 
@@ -319,6 +362,16 @@ def cmd_verify_seal(
         mismatches.append("line_sha256")
 
     ok = not mismatches
+    if ok:
+        _maybe_invoke_verify_seal_hook(
+            run_id=safe_run_id,
+            log_dir=log_dir,
+            manifest_path=manifest_path,
+            jsonl_path=jsonl_path,
+            manifest_schema=str(schema),
+            line_count=line_count,
+            file_sha256=file_digest,
+        )
     if output == "json":
         report = {
             "schema": "replayt.verify_seal_report.v1",
@@ -392,11 +445,20 @@ def cmd_report_diff(
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR, "--log-dir"),
     log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, "--sqlite"),
-    out: str | None = typer.Option(None, "--out", help="Write HTML here (default: stdout)."),
+    out: str | None = typer.Option(None, "--out", help="Output file path (default: stdout)."),
+    report_format: Literal["html", "markdown"] = typer.Option(
+        "html",
+        "--format",
+        help="html (self-contained page) or markdown (paste into tickets / chat).",
+    ),
 ) -> None:
-    """HTML side-by-side comparison of two runs from local JSONL (no model calls)."""
+    """Side-by-side comparison of two runs from local JSONL (no model calls)."""
 
-    from replayt.cli.report_template import build_report_diff_html, collect_report_context
+    from replayt.cli.report_template import (
+        build_report_diff_html,
+        build_report_diff_markdown,
+        collect_report_context,
+    )
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
@@ -413,7 +475,10 @@ def cmd_report_diff(
         raise typer.Exit(code=1)
     ctx_a = collect_report_context(events_a)
     ctx_b = collect_report_context(events_b)
-    doc = build_report_diff_html(run_a, run_b, ctx_a, ctx_b)
+    if report_format == "markdown":
+        doc = build_report_diff_markdown(run_a, run_b, ctx_a, ctx_b)
+    else:
+        doc = build_report_diff_html(run_a, run_b, ctx_a, ctx_b)
     if out:
         out_path = Path(out)
         out_path.parent.mkdir(parents=True, exist_ok=True)

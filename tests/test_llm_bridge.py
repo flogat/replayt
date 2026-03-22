@@ -95,6 +95,51 @@ def test_llm_bridge_float_max_tokens_from_defaults_passed_to_client() -> None:
     assert req["effective"]["max_tokens"] == 4096
 
 
+def test_llm_bridge_llm_response_logs_finish_reason_and_provider_ids() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="k", model="m")
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+
+    canned = {
+        "id": "chatcmpl-test-1",
+        "system_fingerprint": "fp_ab12",
+        "choices": [{"message": {"content": "hi"}, "finish_reason": "length"}],
+        "usage": {"total_tokens": 2},
+    }
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(messages=[{"role": "user", "content": "x"}], temperature=0.0)
+
+    resp = next(p for t, p in events if t == "llm_response")
+    assert resp["finish_reason"] == "length"
+    assert resp["chat_completion_id"] == "chatcmpl-test-1"
+    assert resp["system_fingerprint"] == "fp_ab12"
+
+
+def test_llm_bridge_llm_response_omits_optional_ids_when_absent() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(messages=[{"role": "user", "content": "x"}], temperature=0.0)
+
+    resp = next(p for t, p in events if t == "llm_response")
+    assert resp["finish_reason"] is None
+    assert "chat_completion_id" not in resp
+    assert "system_fingerprint" not in resp
+
+
 def test_llm_bridge_with_settings_merges_into_effective_and_request() -> None:
     events: list[tuple[str, dict]] = []
 
@@ -463,6 +508,27 @@ def test_openai_compat_omits_authorization_without_api_key() -> None:
     client.chat_completions(messages=[{"role": "user", "content": "x"}])
     hdrs = fake_http.calls[0][1]["headers"]
     assert "Authorization" not in hdrs
+
+
+def test_openai_compat_401_without_api_key_hints_onboarding() -> None:
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"),
+        http_client=_FakeHTTPClient(lambda *a, **k: _stream_cm(_FakeStreamResp(b"{}", status=401))),
+    )
+    with pytest.raises(RuntimeError, match="OPENAI_API_KEY is unset") as excinfo:
+        client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    assert "replayt doctor" in str(excinfo.value)
+
+
+def test_openai_compat_401_with_api_key_hints_key_or_url() -> None:
+    client = OpenAICompatClient(
+        LLMSettings(api_key="not-empty", base_url="http://127.0.0.1:9999/v1"),
+        http_client=_FakeHTTPClient(lambda *a, **k: _stream_cm(_FakeStreamResp(b"{}", status=401))),
+    )
+    with pytest.raises(RuntimeError, match="401 Unauthorized") as excinfo:
+        client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    assert "OPENAI_API_KEY" in str(excinfo.value)
+    assert "unset" not in str(excinfo.value).lower()
 
 
 def test_openai_compat_supports_base_url_and_top_p_overrides() -> None:

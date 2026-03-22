@@ -8,6 +8,8 @@ from unittest.mock import MagicMock
 import pytest
 
 from replayt.security import (
+    dotenv_permission_trust_checks,
+    dotenv_trust_candidate_paths,
     extraneous_llm_credential_env_names,
     llm_credential_env_presence,
     log_directory_permission_trust_checks,
@@ -93,6 +95,85 @@ def test_log_directory_permission_trust_checks_warns_via_mocked_mode(
     names = {c.name: c for c in log_directory_permission_trust_checks(log_dir)}
     assert names["trust_log_dir_other_readable"].ok is False
     assert names["trust_log_dir_other_writable"].ok is False
+
+
+def test_dotenv_permission_trust_checks_empty_on_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    env_file = tmp_path / ".env"
+    env_file.write_text("X=1\n", encoding="utf-8")
+    monkeypatch.setattr(os, "name", "nt")
+    assert dotenv_permission_trust_checks([env_file]) == []
+
+
+def test_dotenv_permission_trust_checks_empty_when_no_file(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    missing = tmp_path / ".env"
+    assert dotenv_permission_trust_checks([missing]) == []
+
+
+def test_dotenv_permission_trust_checks_ok_for_restrictive_mode(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    env_file = tmp_path / ".env"
+    env_file.write_text("K=v\n", encoding="utf-8")
+    env_file.chmod(0o600)
+    names = {c.name: c for c in dotenv_permission_trust_checks([env_file])}
+    assert names["trust_dotenv_other_readable"].ok is True
+    assert names["trust_dotenv_other_writable"].ok is True
+
+
+def test_dotenv_permission_trust_checks_warns_world_accessible(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    env_file = tmp_path / ".env"
+    env_file.write_text("K=v\n", encoding="utf-8")
+    env_file.chmod(0o666)
+    names = {c.name: c for c in dotenv_permission_trust_checks([env_file])}
+    assert names["trust_dotenv_other_readable"].ok is False
+    assert names["trust_dotenv_other_writable"].ok is False
+    assert str(env_file) in names["trust_dotenv_other_readable"].detail
+
+
+def test_dotenv_permission_trust_checks_warns_via_mocked_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(os, "name", "posix")
+    env_file = tmp_path / ".env"
+    env_file.write_text("K=v\n", encoding="utf-8")
+
+    class _Stat:
+        st_mode = stat.S_IFREG | stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO
+
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr(Path, "resolve", lambda self: self)
+    monkeypatch.setattr(Path, "stat", lambda self: _Stat())
+
+    names = {c.name: c for c in dotenv_permission_trust_checks([env_file])}
+    assert names["trust_dotenv_other_readable"].ok is False
+    assert names["trust_dotenv_other_writable"].ok is False
+
+
+def test_dotenv_trust_candidate_paths_dedupes_config_dir_with_cwd(tmp_path: Path) -> None:
+    pkg = tmp_path / "pkg"
+    pkg.mkdir()
+    cfg = pkg / "pyproject.toml"
+    cfg.write_text("[project]\nname='x'\n", encoding="utf-8")
+    paths = dotenv_trust_candidate_paths(cwd=pkg, project_config_path=cfg)
+    assert len(paths) == 1
+    assert paths[0] == pkg / ".env"
+
+
+def test_dotenv_trust_candidate_paths_includes_distinct_cwd_and_config_parent(tmp_path: Path) -> None:
+    a = tmp_path / "a"
+    b = tmp_path / "b"
+    a.mkdir()
+    b.mkdir()
+    cfg = b / "pyproject.toml"
+    cfg.write_text("[project]\nname='x'\n", encoding="utf-8")
+    paths = dotenv_trust_candidate_paths(cwd=a, project_config_path=cfg)
+    assert paths == [a / ".env", b / ".env"]
 
 
 def test_trust_boundary_checks_messages_never_echo_url_password() -> None:

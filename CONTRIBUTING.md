@@ -11,6 +11,8 @@ pytest
 ruff check src tests
 ```
 
+You can invoke the CLI as **`python -m replayt`** (same as the **`replayt`** script) when verifying editable installs or when **`Scripts/`** is not on **`PATH`**.
+
 The `dev` extra includes the YAML dependency and package build tooling so local checks match CI.
 
 ## Scope

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import stat
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -170,6 +171,120 @@ def log_directory_permission_trust_checks(log_dir: Path | None) -> list[TrustBou
                 name="trust_log_dir_other_writable",
                 ok=True,
                 detail="log_dir is not world-writable",
+            )
+        )
+    return checks
+
+
+def dotenv_trust_candidate_paths(
+    *,
+    cwd: Path | None = None,
+    project_config_path: Path | str | None = None,
+) -> list[Path]:
+    """Paths to common `.env` files for permission audits (no reads of file contents)."""
+
+    root = Path.cwd() if cwd is None else cwd
+    seen: set[str] = set()
+    out: list[Path] = []
+    for candidate in (root / ".env",):
+        try:
+            key = str(candidate.resolve())
+        except OSError:
+            key = str(candidate)
+        if key not in seen:
+            seen.add(key)
+            out.append(candidate)
+    if project_config_path is not None:
+        try:
+            cfg_parent = Path(project_config_path).resolve().parent
+        except OSError:
+            cfg_parent = Path(project_config_path).parent
+        env_next = cfg_parent / ".env"
+        try:
+            key = str(env_next.resolve())
+        except OSError:
+            key = str(env_next)
+        if key not in seen:
+            seen.add(key)
+            out.append(env_next)
+    return out
+
+
+def dotenv_permission_trust_checks(candidate_paths: Sequence[Path]) -> list[TrustBoundaryCheck]:
+    """Soft warnings when a discovered `.env` file is world-readable or world-writable (POSIX only)."""
+
+    if os.name == "nt":
+        return []
+    existing: list[Path] = []
+    resolved_seen: set[str] = set()
+    for raw in candidate_paths:
+        try:
+            p = raw.resolve()
+        except OSError:
+            continue
+        if not p.is_file():
+            continue
+        key = str(p)
+        if key in resolved_seen:
+            continue
+        resolved_seen.add(key)
+        existing.append(p)
+    if not existing:
+        return []
+
+    bad_read: list[str] = []
+    bad_write: list[str] = []
+    for p in existing:
+        try:
+            mode = p.stat().st_mode
+        except OSError:
+            continue
+        label = str(p)
+        if mode & stat.S_IROTH:
+            bad_read.append(label)
+        if mode & stat.S_IWOTH:
+            bad_write.append(label)
+
+    checks: list[TrustBoundaryCheck] = []
+    if bad_read:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_dotenv_other_readable",
+                ok=False,
+                detail="world-readable .env file(s): " + ", ".join(bad_read),
+                hint=(
+                    "Use chmod 600 (or tighter) on .env files that hold API keys; "
+                    "other OS accounts should not read them."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_dotenv_other_readable",
+                ok=True,
+                detail=f"checked {len(existing)} .env file(s); none are world-readable",
+            )
+        )
+
+    if bad_write:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_dotenv_other_writable",
+                ok=False,
+                detail="world-writable .env file(s): " + ", ".join(bad_write),
+                hint=(
+                    "Strip world write on .env so unrelated accounts cannot replace your keys "
+                    "with attacker-controlled values."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_dotenv_other_writable",
+                ok=True,
+                detail=f"checked {len(existing)} .env file(s); none are world-writable",
             )
         )
     return checks

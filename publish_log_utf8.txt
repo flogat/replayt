@@ -1,0 +1,962 @@
+﻿tests / test (3.10)	UNKNOWN STEP	´╗┐2026-03-21T23:44:55.8740069Z Current runner version: '2.332.0'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8764247Z ##[group]Runner Image Provisioner
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8765054Z Hosted Compute Agent
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8765727Z Version: 20260213.493
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8766339Z Commit: 5c115507f6dd24b8de37d8bbe0bb4509d0cc0fa3
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8767013Z Build Date: 2026-02-13T00:28:41Z
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8767732Z Worker ID: {cb00b15f-ecb4-4582-8412-8314d2a1ee10}
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8768364Z Azure Region: centralus
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8768897Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8770667Z ##[group]Operating System
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8771321Z Ubuntu
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8771754Z 24.04.3
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8772356Z LTS
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8772794Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8773765Z ##[group]Runner Image
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8774469Z Image: ubuntu-24.04
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8774961Z Version: 20260309.50.1
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8776102Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20260309.50/images/ubuntu/Ubuntu2404-Readme.md
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8777639Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20260309.50
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8778540Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8779562Z ##[group]GITHUB_TOKEN Permissions
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8781566Z Contents: read
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8782184Z Metadata: read
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8782682Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8785235Z Secret source: Actions
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.8786208Z Prepare workflow directory
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.9113971Z Prepare all required actions
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:55.9154246Z Getting action download info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.2467496Z Download action repository 'actions/checkout@v5' (SHA:93cb6efe18208431cddfb8368fd83d5badbf9bfd)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.4013647Z Download action repository 'actions/setup-python@v6' (SHA:a309ff8b426b58ec0e2a45f0f869d46889d02405)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.5977178Z Uses: flogat/replayt/.github/workflows/ci.yml@refs/tags/v0.4.7 (a555871d5df0065d313f296f105fd5dc68773e80)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.5981387Z Complete job name: tests / test (3.10)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6680779Z ##[group]Run actions/checkout@v5
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6681570Z with:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6681938Z   fetch-depth: 0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6682348Z   repository: flogat/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6683110Z   token: ***
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6683493Z   ssh-strict: true
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6683880Z   ssh-user: git
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6684273Z   persist-credentials: true
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6684705Z   clean: true
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6685091Z   sparse-checkout-cone-mode: true
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6685567Z   fetch-tags: false
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6685958Z   show-progress: true
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6686351Z   lfs: false
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6686701Z   submodules: false
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6687088Z   set-safe-directory: true
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.6687751Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7653952Z Syncing repository: flogat/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7656226Z ##[group]Getting Git version info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7656959Z Working directory is '/home/runner/work/replayt/replayt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7657951Z [command]/usr/bin/git version
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7741980Z git version 2.53.0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7795431Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7811648Z Temporarily overriding HOME='/home/runner/work/_temp/7a288840-4da3-4558-8414-ff3557824dd8' before making global git config changes
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7814215Z Adding repository directory to the temporary git global config as a safe directory
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7817365Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/replayt/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7859850Z Deleting the contents of '/home/runner/work/replayt/replayt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7864594Z ##[group]Initializing the repository
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7869411Z [command]/usr/bin/git init /home/runner/work/replayt/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7978449Z hint: Using 'master' as the name for the initial branch. This default branch name
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7979432Z hint: will change to "main" in Git 3.0. To configure the initial branch name
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7980973Z hint: to use in all of your new repositories, which will suppress this warning,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7982452Z hint: call:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7983346Z hint:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7984239Z hint: 	git config --global init.defaultBranch <name>
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7985170Z hint:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7985771Z hint: Names commonly chosen instead of 'master' are 'main', 'trunk' and
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7986637Z hint: 'development'. The just-created branch can be renamed via this command:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7987302Z hint:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7987675Z hint: 	git branch -m <name>
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7988091Z hint:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7988654Z hint: Disable this message with "git config set advice.defaultBranchName false"
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7989630Z Initialized empty Git repository in /home/runner/work/replayt/replayt/.git/
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.7995657Z [command]/usr/bin/git remote add origin https://github.com/flogat/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8031514Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8032242Z ##[group]Disabling automatic garbage collection
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8034805Z [command]/usr/bin/git config --local gc.auto 0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8064509Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8065240Z ##[group]Setting up auth
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8070889Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8103822Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8468011Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8502707Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8745333Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.8778792Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.9020912Z [command]/usr/bin/git config --local http.https://github.com/.extraheader AUTHORIZATION: basic ***
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.9058479Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.9059751Z ##[group]Fetching the repository
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:56.9068980Z [command]/usr/bin/git -c protocol.version=2 fetch --prune --no-recurse-submodules origin +refs/heads/*:refs/remotes/origin/* +refs/tags/*:refs/tags/*
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3518309Z From https://github.com/flogat/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3519359Z  * [new branch]      main       -> origin/main
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3520239Z  * [new tag]         v0.1.0     -> v0.1.0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3521080Z  * [new tag]         v0.2.0     -> v0.2.0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3521911Z  * [new tag]         v0.4.0     -> v0.4.0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3522727Z  * [new tag]         v0.4.3     -> v0.4.3
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3523804Z  * [new tag]         v0.4.4     -> v0.4.4
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3524643Z  * [new tag]         v0.4.5     -> v0.4.5
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3525258Z  * [new tag]         v0.4.6     -> v0.4.6
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3525749Z  * [new tag]         v0.4.7     -> v0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3567556Z [command]/usr/bin/git tag --list v0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3596142Z v0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3607545Z [command]/usr/bin/git rev-parse refs/tags/v0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3633171Z 15ad90a5304202e2a75c0850826cea1388445279
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3644475Z [command]/usr/bin/git -c protocol.version=2 fetch --no-tags --prune --no-recurse-submodules origin +a555871d5df0065d313f296f105fd5dc68773e80:refs/tags/v0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3691003Z From https://github.com/flogat/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3692140Z  t [tag update]      a555871d5df0065d313f296f105fd5dc68773e80 -> v0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3716582Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3717805Z ##[group]Determining the checkout info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3719132Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3723528Z [command]/usr/bin/git sparse-checkout disable
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3769464Z [command]/usr/bin/git config --local --unset-all extensions.worktreeConfig
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3797632Z ##[group]Checking out the ref
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3803296Z [command]/usr/bin/git checkout --progress --force refs/tags/v0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3947533Z Note: switching to 'refs/tags/v0.4.7'.
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3947966Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3948382Z You are in 'detached HEAD' state. You can look around, make experimental
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3949248Z changes and commit them, and you can discard any commits you make in this
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3950092Z state without impacting any branches by switching back to a branch.
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3950583Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3950912Z If you want to create a new branch to retain commits you create, you may
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3951697Z do so (now or later) by using -c with the switch command. Example:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3952146Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3952345Z   git switch -c <new-branch-name>
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3952740Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3953253Z Or undo this operation with:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3953785Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3954093Z   git switch -
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3954511Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3955170Z Turn off this advice by setting config variable advice.detachedHead to false
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3956183Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3956539Z HEAD is now at a555871 release: v0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3958794Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.3995097Z [command]/usr/bin/git log -1 --format=%H
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4019029Z a555871d5df0065d313f296f105fd5dc68773e80
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4265815Z ##[group]Run actions/setup-python@v6
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4266330Z with:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4266678Z   python-version: 3.10
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4267084Z   check-latest: false
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4267615Z   token: ***
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4267994Z   update-environment: true
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4268425Z   allow-prereleases: false
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4269002Z   freethreaded: false
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.4269596Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5525484Z ##[group]Installed versions
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5625390Z Successfully set up CPython (3.10.20)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5626851Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5746787Z ##[group]Run python -m pip install -U pip
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5747507Z [36;1mpython -m pip install -U pip[0m
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5748110Z [36;1mpython -m pip install -e ".[dev]"[0m
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5814018Z shell: /usr/bin/bash -e {0}
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5814504Z env:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5814978Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5815747Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5816512Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5817183Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5817863Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5818548Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:57.5819144Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:58.2891073Z Requirement already satisfied: pip in /opt/hostedtoolcache/Python/3.10.20/x64/lib/python3.10/site-packages (26.0.1)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:58.9660947Z Obtaining file:///home/runner/work/replayt/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:44:58.9680760Z   Installing build dependencies: started
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:00.1207987Z   Installing build dependencies: finished with status 'done'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:00.1214964Z   Checking if build backend supports build_editable: started
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:00.4337555Z   Checking if build backend supports build_editable: finished with status 'done'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:00.4345536Z   Getting requirements to build editable: started
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:00.7465904Z   Getting requirements to build editable: finished with status 'done'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:00.7477272Z   Preparing editable metadata (pyproject.toml): started
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:00.9329909Z   Preparing editable metadata (pyproject.toml): finished with status 'done'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.0473908Z Collecting httpx>=0.27.0 (from replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.1301902Z   Downloading httpx-0.28.1-py3-none-any.whl.metadata (7.1 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.3246514Z Collecting pydantic>=2.6.0 (from replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.3383947Z   Downloading pydantic-2.12.5-py3-none-any.whl.metadata (90 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.3975247Z Collecting typer>=0.12.0 (from replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.4109979Z   Downloading typer-0.24.1-py3-none-any.whl.metadata (16 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.4405196Z Collecting build>=1.2.2 (from replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.4544238Z   Downloading build-1.4.0-py3-none-any.whl.metadata (5.8 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.5157489Z Collecting PyYAML>=6.0 (from replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.5297056Z   Downloading pyyaml-6.0.3-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl.metadata (2.4 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.5757430Z Collecting pytest>=8.0 (from replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:01.5892358Z   Downloading pytest-9.0.2-py3-none-any.whl.metadata (7.6 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.0972362Z Collecting ruff>=0.6.0 (from replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.1118148Z   Downloading ruff-0.15.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (26 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.1407774Z Collecting packaging>=24.0 (from build>=1.2.2->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.1421361Z   Using cached packaging-26.0-py3-none-any.whl.metadata (3.3 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.1598595Z Collecting pyproject_hooks (from build>=1.2.2->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.1733883Z   Downloading pyproject_hooks-1.2.0-py3-none-any.whl.metadata (1.3 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.2044181Z Collecting tomli>=1.1.0 (from build>=1.2.2->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.2201845Z   Downloading tomli-2.4.0-py3-none-any.whl.metadata (10 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.2525698Z Collecting anyio (from httpx>=0.27.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.2661617Z   Downloading anyio-4.12.1-py3-none-any.whl.metadata (4.3 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.2985233Z Collecting certifi (from httpx>=0.27.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.3143215Z   Downloading certifi-2026.2.25-py3-none-any.whl.metadata (2.5 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.3435122Z Collecting httpcore==1.* (from httpx>=0.27.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.3573190Z   Downloading httpcore-1.0.9-py3-none-any.whl.metadata (21 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.3872224Z Collecting idna (from httpx>=0.27.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.4007119Z   Downloading idna-3.11-py3-none-any.whl.metadata (8.4 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.4242108Z Collecting h11>=0.16 (from httpcore==1.*->httpx>=0.27.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.4378864Z   Downloading h11-0.16.0-py3-none-any.whl.metadata (8.3 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.4598042Z Collecting annotated-types>=0.6.0 (from pydantic>=2.6.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:02.4733352Z   Downloading annotated_types-0.7.0-py3-none-any.whl.metadata (15 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.3968161Z Collecting pydantic-core==2.41.5 (from pydantic>=2.6.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.4112354Z   Downloading pydantic_core-2.41.5-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl.metadata (7.3 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.4388415Z Collecting typing-extensions>=4.14.1 (from pydantic>=2.6.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.4525269Z   Downloading typing_extensions-4.15.0-py3-none-any.whl.metadata (3.3 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.4740934Z Collecting typing-inspection>=0.4.2 (from pydantic>=2.6.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.4877574Z   Downloading typing_inspection-0.4.2-py3-none-any.whl.metadata (2.6 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.5137334Z Collecting exceptiongroup>=1 (from pytest>=8.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.5275435Z   Downloading exceptiongroup-1.3.1-py3-none-any.whl.metadata (6.7 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.5490714Z Collecting iniconfig>=1.0.1 (from pytest>=8.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.5626663Z   Downloading iniconfig-2.3.0-py3-none-any.whl.metadata (2.5 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.5875119Z Collecting pluggy<2,>=1.5 (from pytest>=8.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.6009894Z   Downloading pluggy-1.6.0-py3-none-any.whl.metadata (4.8 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.6327055Z Collecting pygments>=2.7.2 (from pytest>=8.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.6469887Z   Downloading pygments-2.19.2-py3-none-any.whl.metadata (2.5 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.6835368Z Collecting click>=8.2.1 (from typer>=0.12.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.7070216Z   Downloading click-8.3.1-py3-none-any.whl.metadata (2.6 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.7311876Z Collecting shellingham>=1.3.0 (from typer>=0.12.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.7452058Z   Downloading shellingham-1.5.4-py2.py3-none-any.whl.metadata (3.5 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.7961511Z Collecting rich>=12.3.0 (from typer>=0.12.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.8106573Z   Downloading rich-14.3.3-py3-none-any.whl.metadata (18 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.8377783Z Collecting annotated-doc>=0.0.2 (from typer>=0.12.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.8514171Z   Downloading annotated_doc-0.0.4-py3-none-any.whl.metadata (6.6 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.8787701Z Collecting markdown-it-py>=2.2.0 (from rich>=12.3.0->typer>=0.12.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.8924376Z   Downloading markdown_it_py-4.0.0-py3-none-any.whl.metadata (7.3 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.9219412Z Collecting mdurl~=0.1 (from markdown-it-py>=2.2.0->rich>=12.3.0->typer>=0.12.0->replayt==0.4.7)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.9355896Z   Downloading mdurl-0.1.2-py3-none-any.whl.metadata (1.6 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.9643210Z Downloading build-1.4.0-py3-none-any.whl (24 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:03.9835002Z Downloading httpx-0.28.1-py3-none-any.whl (73 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.0093055Z Downloading httpcore-1.0.9-py3-none-any.whl (78 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.0366718Z Downloading h11-0.16.0-py3-none-any.whl (37 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.0430927Z Using cached packaging-26.0-py3-none-any.whl (74 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.0566642Z Downloading pydantic-2.12.5-py3-none-any.whl (463 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.1331342Z Downloading pydantic_core-2.41.5-cp310-cp310-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (2.1 MB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.3030931Z    ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü 2.1/2.1 MB 12.9 MB/s  0:00:00
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.3172308Z Downloading annotated_types-0.7.0-py3-none-any.whl (13 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.3353639Z Downloading pytest-9.0.2-py3-none-any.whl (374 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.3702544Z Downloading pluggy-1.6.0-py3-none-any.whl (20 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.3862141Z Downloading exceptiongroup-1.3.1-py3-none-any.whl (16 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.4021133Z Downloading iniconfig-2.3.0-py3-none-any.whl (7.5 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.4175538Z Downloading pygments-2.19.2-py3-none-any.whl (1.2 MB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.4804105Z    ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü 1.2/1.2 MB 20.2 MB/s  0:00:00
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.4942026Z Downloading pyyaml-6.0.3-cp310-cp310-manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_28_x86_64.whl (770 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.5287429Z    ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü 770.3/770.3 kB 24.4 MB/s  0:00:00
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.5421148Z Downloading ruff-0.15.7-py3-none-manylinux_2_17_x86_64.manylinux2014_x86_64.whl (11.2 MB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.8033737Z    ÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöüÔöü 11.2/11.2 MB 43.5 MB/s  0:00:00
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.8169429Z Downloading tomli-2.4.0-py3-none-any.whl (14 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.8335832Z Downloading typer-0.24.1-py3-none-any.whl (56 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.8499339Z Downloading annotated_doc-0.0.4-py3-none-any.whl (5.3 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.8661155Z Downloading click-8.3.1-py3-none-any.whl (108 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.8821649Z Downloading rich-14.3.3-py3-none-any.whl (310 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.9011843Z Downloading markdown_it_py-4.0.0-py3-none-any.whl (87 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.9175768Z Downloading mdurl-0.1.2-py3-none-any.whl (10.0 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.9331709Z Downloading shellingham-1.5.4-py2.py3-none-any.whl (9.8 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.9491272Z Downloading typing_extensions-4.15.0-py3-none-any.whl (44 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.9697450Z Downloading typing_inspection-0.4.2-py3-none-any.whl (14 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:04.9856310Z Downloading anyio-4.12.1-py3-none-any.whl (113 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.0018583Z Downloading idna-3.11-py3-none-any.whl (71 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.0179001Z Downloading certifi-2026.2.25-py3-none-any.whl (153 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.0342230Z Downloading pyproject_hooks-1.2.0-py3-none-any.whl (10 kB)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.0753856Z Building wheels for collected packages: replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.0763689Z   Building editable for replayt (pyproject.toml): started
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.2876651Z   Building editable for replayt (pyproject.toml): finished with status 'done'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.2883296Z   Created wheel for replayt: filename=replayt-0.4.7-0.editable-py3-none-any.whl size=16550 sha256=7c4679f50eda957fbdfac48817fe4b0623c2177926fe7b8a37046f09fef91929
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.2885677Z   Stored in directory: /tmp/pip-ephem-wheel-cache-vz_h0n_1/wheels/c0/3a/d6/dd6a138232ddd7879e82df35d2bb4b5ac25fb5249e1f1b86e0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.2907114Z Successfully built replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:05.3424103Z Installing collected packages: typing-extensions, tomli, shellingham, ruff, PyYAML, pyproject_hooks, pygments, pluggy, packaging, mdurl, iniconfig, idna, h11, click, certifi, annotated-types, annotated-doc, typing-inspection, pydantic-core, markdown-it-py, httpcore, exceptiongroup, build, rich, pytest, pydantic, anyio, typer, httpx, replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.7129133Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.7178050Z Successfully installed PyYAML-6.0.3 annotated-doc-0.0.4 annotated-types-0.7.0 anyio-4.12.1 build-1.4.0 certifi-2026.2.25 click-8.3.1 exceptiongroup-1.3.1 h11-0.16.0 httpcore-1.0.9 httpx-0.28.1 idna-3.11 iniconfig-2.3.0 markdown-it-py-4.0.0 mdurl-0.1.2 packaging-26.0 pluggy-1.6.0 pydantic-2.12.5 pydantic-core-2.41.5 pygments-2.19.2 pyproject_hooks-1.2.0 pytest-9.0.2 replayt-0.4.7 rich-14.3.3 ruff-0.15.7 shellingham-1.5.4 tomli-2.4.0 typer-0.24.1 typing-extensions-4.15.0 typing-inspection-0.4.2
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9489758Z ##[group]Run python -m build
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9490038Z [36;1mpython -m build[0m
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9541115Z shell: /usr/bin/bash -e {0}
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9541342Z env:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9541592Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9542016Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9542427Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9542790Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9543391Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9543748Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:07.9544050Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:08.0610933Z * Creating isolated environment: venv+pip...
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:08.0797423Z * Installing packages in isolated environment:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:08.0797925Z   - setuptools>=61
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:08.0798268Z   - wheel
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.0528054Z * Getting build dependencies for sdist...
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.5848447Z running egg_info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.5861967Z writing src/replayt.egg-info/PKG-INFO
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.5876049Z writing dependency_links to src/replayt.egg-info/dependency_links.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.5880198Z writing entry points to src/replayt.egg-info/entry_points.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.5888685Z writing requirements to src/replayt.egg-info/requires.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.5890460Z writing top-level names to src/replayt.egg-info/top_level.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.5962562Z reading manifest file 'src/replayt.egg-info/SOURCES.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.5976230Z adding license file 'LICENSE'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.5994991Z writing manifest file 'src/replayt.egg-info/SOURCES.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.6235085Z * Building sdist...
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8032456Z running sdist
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8034318Z running egg_info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8057432Z writing src/replayt.egg-info/PKG-INFO
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8070121Z writing dependency_links to src/replayt.egg-info/dependency_links.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8073843Z writing entry points to src/replayt.egg-info/entry_points.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8080978Z writing requirements to src/replayt.egg-info/requires.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8082754Z writing top-level names to src/replayt.egg-info/top_level.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8140885Z reading manifest file 'src/replayt.egg-info/SOURCES.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8153192Z adding license file 'LICENSE'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8171450Z writing manifest file 'src/replayt.egg-info/SOURCES.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8173451Z running check
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8198824Z creating replayt-0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8203992Z creating replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8206535Z creating replayt-0.4.7/src/replayt.egg-info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8208017Z creating replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8210077Z creating replayt-0.4.7/src/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8211688Z creating replayt-0.4.7/src/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8213668Z creating replayt-0.4.7/src/replayt/schemas
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8215338Z creating replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8216924Z creating replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8218098Z copying files to replayt-0.4.7...
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8219054Z copying LICENSE -> replayt-0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8222240Z copying README.md -> replayt-0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8223863Z copying pyproject.toml -> replayt-0.4.7
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8225895Z copying src/replayt/__init__.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8227970Z copying src/replayt/exceptions.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8229919Z copying src/replayt/export_run.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8231835Z copying src/replayt/graph_export.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8234022Z copying src/replayt/llm.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8236515Z copying src/replayt/llm_coercion.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8238778Z copying src/replayt/notebook.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8240444Z copying src/replayt/runner.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8242650Z copying src/replayt/security.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8244900Z copying src/replayt/testing.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8246884Z copying src/replayt/tools.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8248799Z copying src/replayt/types.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8250721Z copying src/replayt/workflow.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8252688Z copying src/replayt/yaml_workflow.py -> replayt-0.4.7/src/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8255050Z copying src/replayt.egg-info/PKG-INFO -> replayt-0.4.7/src/replayt.egg-info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8257303Z copying src/replayt.egg-info/SOURCES.txt -> replayt-0.4.7/src/replayt.egg-info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8259258Z copying src/replayt.egg-info/dependency_links.txt -> replayt-0.4.7/src/replayt.egg-info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8261086Z copying src/replayt.egg-info/entry_points.txt -> replayt-0.4.7/src/replayt.egg-info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8263584Z copying src/replayt.egg-info/requires.txt -> replayt-0.4.7/src/replayt.egg-info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8265050Z copying src/replayt.egg-info/top_level.txt -> replayt-0.4.7/src/replayt.egg-info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8267015Z copying src/replayt/cli/__init__.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8268972Z copying src/replayt/cli/ci_artifacts.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8270911Z copying src/replayt/cli/config.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8273099Z copying src/replayt/cli/constants.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8275093Z copying src/replayt/cli/display.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8277140Z copying src/replayt/cli/main.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8279178Z copying src/replayt/cli/path_readiness.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8281147Z copying src/replayt/cli/report_template.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8284199Z copying src/replayt/cli/run_id_hints.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8286368Z copying src/replayt/cli/run_support.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8288149Z copying src/replayt/cli/stores.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8290028Z copying src/replayt/cli/targets.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8292081Z copying src/replayt/cli/templates.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8294412Z copying src/replayt/cli/validation.py -> replayt-0.4.7/src/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8296503Z copying src/replayt/cli/commands/__init__.py -> replayt-0.4.7/src/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8298499Z copying src/replayt/cli/commands/config_cmd.py -> replayt-0.4.7/src/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8300509Z copying src/replayt/cli/commands/doctor.py -> replayt-0.4.7/src/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8305944Z copying src/replayt/cli/commands/export.py -> replayt-0.4.7/src/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8311139Z copying src/replayt/cli/commands/inspect.py -> replayt-0.4.7/src/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8312575Z copying src/replayt/cli/commands/run.py -> replayt-0.4.7/src/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8314013Z copying src/replayt/cli/commands/version_cmd.py -> replayt-0.4.7/src/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8314693Z copying src/replayt/persistence/__init__.py -> replayt-0.4.7/src/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8321607Z copying src/replayt/persistence/base.py -> replayt-0.4.7/src/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8323003Z copying src/replayt/persistence/jsonl.py -> replayt-0.4.7/src/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8325039Z copying src/replayt/persistence/multi.py -> replayt-0.4.7/src/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8327233Z copying src/replayt/persistence/sqlite.py -> replayt-0.4.7/src/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8328629Z copying src/replayt/schemas/run_log_event_line.schema.json -> replayt-0.4.7/src/replayt/schemas
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8329721Z copying src/replayt_examples/__init__.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8330696Z copying src/replayt_examples/catalog.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8331715Z copying src/replayt_examples/e01_hello_world.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8333063Z copying src/replayt_examples/e02_intake_normalization.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8334222Z copying src/replayt_examples/e03_support_routing.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8335392Z copying src/replayt_examples/e04_tool_using_procurement.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8336597Z copying src/replayt_examples/e05_retrying_vendor_lookup.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8337722Z copying src/replayt_examples/e06_sales_call_brief.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8340036Z copying src/replayt_examples/e07_feedback_clustering.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8341521Z copying src/replayt_examples/e08_travel_approval.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8343624Z copying src/replayt_examples/e09_incident_response.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8345598Z copying src/replayt_examples/e10_openai_sdk_integration.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8347472Z copying src/replayt_examples/e11_anthropic_native.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8349347Z copying src/replayt_examples/issue_triage.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8351256Z copying src/replayt_examples/publishing_preflight.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8353313Z copying src/replayt_examples/refund_policy.py -> replayt-0.4.7/src/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8355060Z copying tests/test_changelog_gate.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8356884Z copying tests/test_cli.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8360630Z copying tests/test_export_run.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8362534Z copying tests/test_graph_export.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8364730Z copying tests/test_jsonl_store.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8366638Z copying tests/test_llm_bridge.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8369086Z copying tests/test_llm_coercion.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8370871Z copying tests/test_llm_settings.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8372804Z copying tests/test_maintainer_scripts.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8375273Z copying tests/test_multi_store.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8376971Z copying tests/test_notebook.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8379074Z copying tests/test_run_id_hints.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8380828Z copying tests/test_runner.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8383500Z copying tests/test_security.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8385451Z copying tests/test_skill_release_loop.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8387781Z copying tests/test_skill_release_loop_agent.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8389759Z copying tests/test_sqlite_store.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8391950Z copying tests/test_testing.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8393922Z copying tests/test_tools.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8396390Z copying tests/test_tutorial_targets_importable.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8397983Z copying tests/test_validation_warnings.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8399909Z copying tests/test_yaml_workflow.py -> replayt-0.4.7/tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8402258Z copying src/replayt.egg-info/SOURCES.txt -> replayt-0.4.7/src/replayt.egg-info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8414802Z Writing replayt-0.4.7/setup.cfg
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.8416695Z Creating tar archive
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.9179400Z removing 'replayt-0.4.7' (and everything under it)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.9943611Z * Building wheel from sdist
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.9951569Z * Creating isolated environment: venv+pip...
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.9969130Z * Installing packages in isolated environment:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.9969676Z   - setuptools>=61
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:09.9969976Z   - wheel
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:10.9598635Z * Getting build dependencies for wheel...
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3553732Z running egg_info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3566596Z writing src/replayt.egg-info/PKG-INFO
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3580080Z writing dependency_links to src/replayt.egg-info/dependency_links.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3583856Z writing entry points to src/replayt.egg-info/entry_points.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3590730Z writing requirements to src/replayt.egg-info/requires.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3592387Z writing top-level names to src/replayt.egg-info/top_level.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3650214Z reading manifest file 'src/replayt.egg-info/SOURCES.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3662364Z adding license file 'LICENSE'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3680751Z writing manifest file 'src/replayt.egg-info/SOURCES.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.3907614Z * Building wheel...
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5396251Z running bdist_wheel
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5445325Z running build
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5445741Z running build_py
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5461201Z creating build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5464395Z copying src/replayt/security.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5466983Z copying src/replayt/__init__.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5469911Z copying src/replayt/testing.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5472184Z copying src/replayt/notebook.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5475024Z copying src/replayt/llm_coercion.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5477591Z copying src/replayt/exceptions.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5480088Z copying src/replayt/workflow.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5482582Z copying src/replayt/types.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5485324Z copying src/replayt/llm.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5488259Z copying src/replayt/export_run.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5490857Z copying src/replayt/yaml_workflow.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5493319Z copying src/replayt/tools.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5496058Z copying src/replayt/graph_export.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5498360Z copying src/replayt/runner.py -> build/lib/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5503303Z creating build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5504947Z copying src/replayt_examples/issue_triage.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5507770Z copying src/replayt_examples/e10_openai_sdk_integration.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5509987Z copying src/replayt_examples/e05_retrying_vendor_lookup.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5512308Z copying src/replayt_examples/e02_intake_normalization.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5515004Z copying src/replayt_examples/e03_support_routing.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5517234Z copying src/replayt_examples/publishing_preflight.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5519685Z copying src/replayt_examples/e11_anthropic_native.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5521806Z copying src/replayt_examples/__init__.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5524752Z copying src/replayt_examples/e04_tool_using_procurement.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5526802Z copying src/replayt_examples/catalog.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5529614Z copying src/replayt_examples/refund_policy.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5531775Z copying src/replayt_examples/e08_travel_approval.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5534839Z copying src/replayt_examples/e07_feedback_clustering.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5536752Z copying src/replayt_examples/e06_sales_call_brief.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5539187Z copying src/replayt_examples/e09_incident_response.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5541386Z copying src/replayt_examples/e01_hello_world.py -> build/lib/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5545459Z creating build/lib/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5547035Z copying src/replayt/persistence/multi.py -> build/lib/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5549744Z copying src/replayt/persistence/jsonl.py -> build/lib/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5552297Z copying src/replayt/persistence/base.py -> build/lib/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5555080Z copying src/replayt/persistence/__init__.py -> build/lib/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5557184Z copying src/replayt/persistence/sqlite.py -> build/lib/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5562356Z creating build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5564105Z copying src/replayt/cli/report_template.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5567545Z copying src/replayt/cli/run_support.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5570047Z copying src/replayt/cli/main.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5572741Z copying src/replayt/cli/ci_artifacts.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5575397Z copying src/replayt/cli/stores.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5577921Z copying src/replayt/cli/__init__.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5580442Z copying src/replayt/cli/run_id_hints.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5583078Z copying src/replayt/cli/config.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5585761Z copying src/replayt/cli/display.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5588429Z copying src/replayt/cli/targets.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5590917Z copying src/replayt/cli/templates.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5593453Z copying src/replayt/cli/constants.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5596146Z copying src/replayt/cli/validation.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5598698Z copying src/replayt/cli/path_readiness.py -> build/lib/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5602749Z creating build/lib/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5604650Z copying src/replayt/cli/commands/export.py -> build/lib/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5607656Z copying src/replayt/cli/commands/doctor.py -> build/lib/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5610028Z copying src/replayt/cli/commands/__init__.py -> build/lib/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5612568Z copying src/replayt/cli/commands/version_cmd.py -> build/lib/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5615178Z copying src/replayt/cli/commands/inspect.py -> build/lib/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5618066Z copying src/replayt/cli/commands/config_cmd.py -> build/lib/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5620680Z copying src/replayt/cli/commands/run.py -> build/lib/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5623322Z running egg_info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5634991Z writing src/replayt.egg-info/PKG-INFO
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5648111Z writing dependency_links to src/replayt.egg-info/dependency_links.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5652320Z writing entry points to src/replayt.egg-info/entry_points.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5659542Z writing requirements to src/replayt.egg-info/requires.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5661241Z writing top-level names to src/replayt.egg-info/top_level.txt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5698421Z reading manifest file 'src/replayt.egg-info/SOURCES.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5710641Z adding license file 'LICENSE'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5729096Z writing manifest file 'src/replayt.egg-info/SOURCES.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5741980Z creating build/lib/replayt/schemas
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5743990Z copying src/replayt/schemas/run_log_event_line.schema.json -> build/lib/replayt/schemas
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5775887Z installing to build/bdist.linux-x86_64/wheel
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5776666Z running install
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5833289Z running install_lib
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5844963Z creating build/bdist.linux-x86_64/wheel
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5847968Z creating build/bdist.linux-x86_64/wheel/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5850412Z creating build/bdist.linux-x86_64/wheel/replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5852355Z copying build/lib/replayt/persistence/multi.py -> build/bdist.linux-x86_64/wheel/./replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5854684Z copying build/lib/replayt/persistence/jsonl.py -> build/bdist.linux-x86_64/wheel/./replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5856763Z copying build/lib/replayt/persistence/base.py -> build/bdist.linux-x86_64/wheel/./replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5858797Z copying build/lib/replayt/persistence/__init__.py -> build/bdist.linux-x86_64/wheel/./replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5860748Z copying build/lib/replayt/persistence/sqlite.py -> build/bdist.linux-x86_64/wheel/./replayt/persistence
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5863432Z creating build/bdist.linux-x86_64/wheel/replayt/schemas
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5865430Z copying build/lib/replayt/schemas/run_log_event_line.schema.json -> build/bdist.linux-x86_64/wheel/./replayt/schemas
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5867757Z creating build/bdist.linux-x86_64/wheel/replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5869895Z copying build/lib/replayt/cli/report_template.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5873232Z copying build/lib/replayt/cli/run_support.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5875098Z copying build/lib/replayt/cli/main.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5877141Z copying build/lib/replayt/cli/ci_artifacts.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5879921Z creating build/bdist.linux-x86_64/wheel/replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5881752Z copying build/lib/replayt/cli/commands/export.py -> build/bdist.linux-x86_64/wheel/./replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5884280Z copying build/lib/replayt/cli/commands/doctor.py -> build/bdist.linux-x86_64/wheel/./replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5886322Z copying build/lib/replayt/cli/commands/__init__.py -> build/bdist.linux-x86_64/wheel/./replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5888320Z copying build/lib/replayt/cli/commands/version_cmd.py -> build/bdist.linux-x86_64/wheel/./replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5890278Z copying build/lib/replayt/cli/commands/inspect.py -> build/bdist.linux-x86_64/wheel/./replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5892539Z copying build/lib/replayt/cli/commands/config_cmd.py -> build/bdist.linux-x86_64/wheel/./replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5894827Z copying build/lib/replayt/cli/commands/run.py -> build/bdist.linux-x86_64/wheel/./replayt/cli/commands
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5897157Z copying build/lib/replayt/cli/stores.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5899172Z copying build/lib/replayt/cli/__init__.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5901161Z copying build/lib/replayt/cli/run_id_hints.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5903313Z copying build/lib/replayt/cli/config.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5905481Z copying build/lib/replayt/cli/display.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5907484Z copying build/lib/replayt/cli/targets.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5909512Z copying build/lib/replayt/cli/templates.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5911621Z copying build/lib/replayt/cli/constants.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5913799Z copying build/lib/replayt/cli/validation.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5915814Z copying build/lib/replayt/cli/path_readiness.py -> build/bdist.linux-x86_64/wheel/./replayt/cli
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5917946Z copying build/lib/replayt/security.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5919832Z copying build/lib/replayt/__init__.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5921763Z copying build/lib/replayt/testing.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5924061Z copying build/lib/replayt/notebook.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5926075Z copying build/lib/replayt/llm_coercion.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5928043Z copying build/lib/replayt/exceptions.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5930093Z copying build/lib/replayt/workflow.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5932039Z copying build/lib/replayt/types.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5934238Z copying build/lib/replayt/llm.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5936709Z copying build/lib/replayt/export_run.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5938664Z copying build/lib/replayt/yaml_workflow.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5940656Z copying build/lib/replayt/tools.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5942721Z copying build/lib/replayt/graph_export.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5944891Z copying build/lib/replayt/runner.py -> build/bdist.linux-x86_64/wheel/./replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5947577Z creating build/bdist.linux-x86_64/wheel/replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5950051Z copying build/lib/replayt_examples/issue_triage.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5951804Z copying build/lib/replayt_examples/e10_openai_sdk_integration.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5954053Z copying build/lib/replayt_examples/e05_retrying_vendor_lookup.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5955968Z copying build/lib/replayt_examples/e02_intake_normalization.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5957831Z copying build/lib/replayt_examples/e03_support_routing.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5959795Z copying build/lib/replayt_examples/publishing_preflight.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5961710Z copying build/lib/replayt_examples/e11_anthropic_native.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5963608Z copying build/lib/replayt_examples/__init__.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5965805Z copying build/lib/replayt_examples/e04_tool_using_procurement.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5967578Z copying build/lib/replayt_examples/catalog.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5969770Z copying build/lib/replayt_examples/refund_policy.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5971737Z copying build/lib/replayt_examples/e08_travel_approval.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5973714Z copying build/lib/replayt_examples/e07_feedback_clustering.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5975766Z copying build/lib/replayt_examples/e06_sales_call_brief.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5977687Z copying build/lib/replayt_examples/e09_incident_response.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5979558Z copying build/lib/replayt_examples/e01_hello_world.py -> build/bdist.linux-x86_64/wheel/./replayt_examples
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5980914Z running install_egg_info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.5992563Z Copying src/replayt.egg-info to build/bdist.linux-x86_64/wheel/./replayt-0.4.7-py3.10.egg-info
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6002075Z running install_scripts
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6014467Z creating build/bdist.linux-x86_64/wheel/replayt-0.4.7.dist-info/WHEEL
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6020000Z creating '/home/runner/work/replayt/replayt/dist/.tmp-vz6ienqn/replayt-0.4.7-py3-none-any.whl' and adding 'build/bdist.linux-x86_64/wheel' to it
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6024129Z adding 'replayt/__init__.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6027432Z adding 'replayt/exceptions.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6030368Z adding 'replayt/export_run.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6033315Z adding 'replayt/graph_export.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6042734Z adding 'replayt/llm.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6046481Z adding 'replayt/llm_coercion.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6049990Z adding 'replayt/notebook.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6058455Z adding 'replayt/runner.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6063159Z adding 'replayt/security.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6067858Z adding 'replayt/testing.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6070998Z adding 'replayt/tools.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6073875Z adding 'replayt/types.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6077413Z adding 'replayt/workflow.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6081836Z adding 'replayt/yaml_workflow.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6084978Z adding 'replayt/cli/__init__.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6088595Z adding 'replayt/cli/ci_artifacts.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6093491Z adding 'replayt/cli/config.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6096602Z adding 'replayt/cli/constants.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6100714Z adding 'replayt/cli/display.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6103363Z adding 'replayt/cli/main.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6106429Z adding 'replayt/cli/path_readiness.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6120812Z adding 'replayt/cli/report_template.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6124136Z adding 'replayt/cli/run_id_hints.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6128260Z adding 'replayt/cli/run_support.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6131133Z adding 'replayt/cli/stores.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6134630Z adding 'replayt/cli/targets.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6138851Z adding 'replayt/cli/templates.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6142518Z adding 'replayt/cli/validation.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6145673Z adding 'replayt/cli/commands/__init__.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6150361Z adding 'replayt/cli/commands/config_cmd.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6155473Z adding 'replayt/cli/commands/doctor.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6162093Z adding 'replayt/cli/commands/export.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6170572Z adding 'replayt/cli/commands/inspect.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6179830Z adding 'replayt/cli/commands/run.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6183286Z adding 'replayt/cli/commands/version_cmd.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6186065Z adding 'replayt/persistence/__init__.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6188615Z adding 'replayt/persistence/base.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6192442Z adding 'replayt/persistence/jsonl.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6195988Z adding 'replayt/persistence/multi.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6199220Z adding 'replayt/persistence/sqlite.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6202274Z adding 'replayt/schemas/run_log_event_line.schema.json'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6209259Z adding 'replayt-0.4.7.dist-info/licenses/LICENSE'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6212305Z adding 'replayt_examples/__init__.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6215904Z adding 'replayt_examples/catalog.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6218664Z adding 'replayt_examples/e01_hello_world.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6221377Z adding 'replayt_examples/e02_intake_normalization.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6224368Z adding 'replayt_examples/e03_support_routing.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6227255Z adding 'replayt_examples/e04_tool_using_procurement.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6229911Z adding 'replayt_examples/e05_retrying_vendor_lookup.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6232561Z adding 'replayt_examples/e06_sales_call_brief.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6235537Z adding 'replayt_examples/e07_feedback_clustering.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6238398Z adding 'replayt_examples/e08_travel_approval.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6241453Z adding 'replayt_examples/e09_incident_response.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6245193Z adding 'replayt_examples/e10_openai_sdk_integration.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6248059Z adding 'replayt_examples/e11_anthropic_native.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6250998Z adding 'replayt_examples/issue_triage.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6254164Z adding 'replayt_examples/publishing_preflight.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6257505Z adding 'replayt_examples/refund_policy.py'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6268488Z adding 'replayt-0.4.7.dist-info/METADATA'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6270459Z adding 'replayt-0.4.7.dist-info/WHEEL'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6272141Z adding 'replayt-0.4.7.dist-info/entry_points.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6274204Z adding 'replayt-0.4.7.dist-info/top_level.txt'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6279051Z adding 'replayt-0.4.7.dist-info/RECORD'
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6282489Z removing build/bdist.linux-x86_64/wheel
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6747107Z Successfully built replayt-0.4.7.tar.gz and replayt-0.4.7-py3-none-any.whl
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6918660Z ##[group]Run ruff check src tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6918955Z [36;1mruff check src tests[0m
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6970554Z shell: /usr/bin/bash -e {0}
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6970786Z env:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6971025Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6971447Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6971861Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6972212Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6972567Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6973154Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.6973460Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7284676Z All checks passed!
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7340459Z ##[group]Run pytest
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7340680Z [36;1mpytest[0m
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7392344Z shell: /usr/bin/bash -e {0}
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7392574Z env:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7393002Z   pythonLocation: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7393462Z   PKG_CONFIG_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib/pkgconfig
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7393885Z   Python_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7394233Z   Python2_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7394584Z   Python3_ROOT_DIR: /opt/hostedtoolcache/Python/3.10.20/x64
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7394930Z   LD_LIBRARY_PATH: /opt/hostedtoolcache/Python/3.10.20/x64/lib
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:11.7395223Z ##[endgroup]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:14.0631209Z ============================= test session starts ==============================
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:14.0632155Z platform linux -- Python 3.10.20, pytest-9.0.2, pluggy-1.6.0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:14.0633379Z rootdir: /home/runner/work/replayt/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:14.0633911Z configfile: pyproject.toml
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:14.0634298Z testpaths: tests
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:14.0634621Z plugins: anyio-4.12.1
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:14.0634966Z collected 394 items
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:14.0635171Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:14.0731174Z tests/test_changelog_gate.py ....                                        [  1%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:18.4254214Z tests/test_cli.py ...............................F...................... [ 14%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:21.5380005Z .......................F.......FF....................................... [ 32%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.1116174Z ................                                                         [ 37%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.1151741Z tests/test_export_run.py .....                                           [ 38%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.1175022Z tests/test_graph_export.py ...                                           [ 39%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.1572521Z tests/test_jsonl_store.py ............                                   [ 42%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.3429164Z tests/test_llm_bridge.py .........................                       [ 48%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.3519965Z tests/test_llm_coercion.py ............                                  [ 51%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.3598050Z tests/test_llm_settings.py ..........                                    [ 54%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.4176075Z tests/test_maintainer_scripts.py ..............F.                        [ 58%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.4231137Z tests/test_multi_store.py ..                                             [ 58%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.4352436Z tests/test_notebook.py ..............                                    [ 62%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.4375150Z tests/test_run_id_hints.py ..                                            [ 62%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.6452077Z tests/test_runner.py ............................................        [ 73%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:22.6643528Z tests/test_security.py .................                                 [ 78%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:23.6944249Z tests/test_skill_release_loop.py ........................                [ 84%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.7111033Z tests/test_skill_release_loop_agent.py ........................          [ 90%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.7907723Z tests/test_sqlite_store.py .............                                 [ 93%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.8080053Z tests/test_testing.py .......                                            [ 95%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.8193093Z tests/test_tools.py ..                                                   [ 95%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.8427015Z tests/test_tutorial_targets_importable.py .                              [ 96%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.8456804Z tests/test_validation_warnings.py ....                                   [ 97%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9226061Z tests/test_yaml_workflow.py ...........                                  [100%]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9226659Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9226871Z =================================== FAILURES ===================================
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9227946Z _________________ test_cli_try_copy_to_rejects_live_and_inputs _________________
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9228482Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9228917Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_cli_try_copy_to_rejects_l0')
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9229559Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9229933Z     def test_cli_try_copy_to_rejects_live_and_inputs(tmp_path: Path) -> None:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9230591Z         runner = CliRunner()
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9231147Z         r = runner.invoke(app, ["try", "--copy-to", str(tmp_path), "--live"])
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9231764Z         assert r.exit_code == 2
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9232314Z >       assert "Cannot combine --copy-to" in (r.stderr or r.stdout or "")
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9234934Z E       assert 'Cannot combine --copy-to' in (("\x1b[33mUsage: \x1b[0mroot try [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root try \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2;3...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n"))
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9238324Z E        +  where "\x1b[33mUsage: \x1b[0mroot try [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root try \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2;3...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n" = <Result SystemExit(2)>.stderr
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9239665Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9239837Z tests/test_cli.py:729: AssertionError
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9240488Z ______________ test_cli_run_missing_module_target_onboarding_hint ______________
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9241010Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9241442Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_cli_run_missing_module_ta0')
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9242046Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9242403Z     def test_cli_run_missing_module_target_onboarding_hint(tmp_path: Path) -> None:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9243237Z         runner = CliRunner()
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9243613Z         r = runner.invoke(
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9243963Z             app,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9244244Z             [
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9244532Z                 "run",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9244893Z                 "zzreplayt_cli_missing_mod_12345:wf",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9245336Z                 "--dry-run",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9245682Z                 "--log-dir",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9245994Z                 str(tmp_path),
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9246308Z             ],
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9246549Z         )
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9246820Z         assert r.exit_code != 0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9247180Z         out = (r.stdout or "") + (r.stderr or "")
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9247648Z         assert "zzreplayt_cli_missing_mod_12345" in out
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9248083Z         assert "pip install" in out.lower()
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9248485Z         assert "PYTHONPATH" in out
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9248920Z >       assert "doctor --target" in out.replace("\n", " ")
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9251121Z E       assert 'doctor --target' in "\x1b[33mUsage: \x1b[0mroot run [OPTIONS] [TARGET] \x1b[2mTry \x1b[0m\x1b[2;34m'root run \x1b[0m\x1b[1;2;34m-\x1b[0m\x...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m "
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9254290Z E        +  where "\x1b[33mUsage: \x1b[0mroot run [OPTIONS] [TARGET] \x1b[2mTry \x1b[0m\x1b[2;34m'root run \x1b[0m\x1b[1;2;34m-\x1b[0m\x...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m " = <built-in method replace of str object at 0x55e384f85fc0>('\n', ' ')
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9257462Z E        +    where <built-in method replace of str object at 0x55e384f85fc0> = "\x1b[33mUsage: \x1b[0mroot run [OPTIONS] [TARGET]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root run \x1b[0m\x1b[1;2;34m-\x1b[0m\...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n".replace
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9259137Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9259277Z tests/test_cli.py:2255: AssertionError
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9259796Z _________________________ test_cli_runs_filter_status __________________________
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9260419Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9260790Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_cli_runs_filter_status0')
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9261288Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9261498Z     def test_cli_runs_filter_status(tmp_path: Path) -> None:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9261969Z         log_dir = tmp_path / "runs"
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9262301Z         log_dir.mkdir()
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9262598Z         completed = [
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9263005Z             {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9263287Z                 "ts": "2026-03-01T00:00:00+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9263669Z                 "run_id": "rid-ok",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9263998Z                 "seq": 1,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9264309Z                 "type": "run_started",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9264772Z                 "payload": {"workflow_name": "w", "workflow_version": "1"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9265274Z             },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9265515Z             {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9265773Z                 "ts": "2026-03-01T00:00:01+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9266145Z                 "run_id": "rid-ok",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9266482Z                 "seq": 2,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9266788Z                 "type": "run_completed",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9290433Z                 "payload": {"status": "completed"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9290868Z             },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9291113Z         ]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9291336Z         failed = [
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9291587Z             {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9291853Z                 "ts": "2026-03-01T00:00:00+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9292242Z                 "run_id": "rid-bad",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9292587Z                 "seq": 1,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9293061Z                 "type": "run_started",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9293520Z                 "payload": {"workflow_name": "w", "workflow_version": "1"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9294011Z             },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9294255Z             {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9294517Z                 "ts": "2026-03-01T00:00:01+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9294905Z                 "run_id": "rid-bad",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9295264Z                 "seq": 2,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9295564Z                 "type": "run_completed",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9295959Z                 "payload": {"status": "failed"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9296308Z             },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9296544Z         ]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9296766Z         paused = [
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9297020Z             {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9297293Z                 "ts": "2026-03-01T00:00:00+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9297685Z                 "run_id": "rid-wait",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9298005Z                 "seq": 1,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9298302Z                 "type": "run_started",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9298769Z                 "payload": {"workflow_name": "w", "workflow_version": "1"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9299233Z             },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9299477Z             {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9299731Z                 "ts": "2026-03-01T00:00:01+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9300099Z                 "run_id": "rid-wait",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9300641Z                 "seq": 2,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9300948Z                 "type": "run_paused",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9301412Z                 "payload": {"reason": "approval_required", "approval_id": "a1"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9301896Z             },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9302188Z         ]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9302409Z         unknown_only = [
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9302678Z             {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9303088Z                 "ts": "2026-03-01T00:00:00+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9303467Z                 "run_id": "rid-open",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9303790Z                 "seq": 1,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9304089Z                 "type": "run_started",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9304536Z                 "payload": {"workflow_name": "w", "workflow_version": "1"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9305004Z             },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9305411Z         ]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9305655Z         for lines, name in (
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9305982Z             (completed, "rid-ok"),
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9306319Z             (failed, "rid-bad"),
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9306659Z             (paused, "rid-wait"),
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9306989Z             (unknown_only, "rid-open"),
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9307332Z         ):
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9307597Z             (log_dir / f"{name}.jsonl").write_text(
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9308115Z                 "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9308583Z             )
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9308820Z     
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9309053Z         runner = CliRunner()
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9309600Z         r_paused = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--status", "paused"])
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9310228Z         assert r_paused.exit_code == 0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9310612Z         assert "rid-wait" in r_paused.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9311016Z         assert "rid-ok" not in r_paused.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9311430Z         assert "rid-bad" not in r_paused.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9311796Z     
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9312027Z         r_or = runner.invoke(
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9312562Z             app, ["runs", "--log-dir", str(log_dir), "--status", "failed", "--status", "unknown"]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9313316Z         )
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9313556Z         assert r_or.exit_code == 0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9313889Z         out_or = r_or.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9314265Z         assert "rid-bad" in out_or and "rid-open" in out_or
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9314709Z         assert "rid-ok" not in out_or
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9315066Z         assert "rid-wait" not in out_or
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9315404Z     
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9315818Z         bad = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--status", "nope"])
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9316373Z         assert bad.exit_code != 0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9317224Z >       assert "Invalid --status" in (bad.stdout + (bad.stderr or ""))
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9319078Z E       assert 'Invalid --status' in ('' + ("\x1b[33mUsage: \x1b[0mroot runs [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root runs \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n"))
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9320410Z E        +  where '' = <Result SystemExit(2)>.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9322123Z E        +  and   "\x1b[33mUsage: \x1b[0mroot runs [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root runs \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n" = <Result SystemExit(2)>.stderr
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9323408Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9323555Z tests/test_cli.py:2640: AssertionError
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9324048Z __________________________ test_cli_runs_tool_filter ___________________________
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9324449Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9324773Z tmp_path = PosixPath('/tmp/pytest-of-runner/pytest-0/test_cli_runs_tool_filter0')
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9325261Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9325453Z     def test_cli_runs_tool_filter(tmp_path: Path) -> None:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9326096Z         log_dir = tmp_path / "logs"
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9326446Z         log_dir.mkdir()
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9326711Z     
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9327074Z         def _run_with_tools(tool_names: list[str], rid: str) -> list[dict]:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9327567Z             lines = [
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9327823Z                 {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9328095Z                     "ts": "2026-03-01T00:00:00+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9328464Z                     "run_id": rid,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9328774Z                     "seq": 1,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9329120Z                     "type": "run_started",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9329579Z                     "payload": {"workflow_name": "w", "workflow_version": "1"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9330045Z                 },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9330286Z             ]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9330761Z             seq = 2
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9331029Z             for name in tool_names:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9331377Z                 lines.append(
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9331683Z                     {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9331982Z                         "ts": "2026-03-01T00:00:01+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9332357Z                         "run_id": rid,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9332703Z                         "seq": seq,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9333259Z                         "type": "tool_call",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9333725Z                         "payload": {"state": "s", "name": name, "arguments": {}},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9334184Z                     }
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9334433Z                 )
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9334675Z                 seq += 1
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9334963Z             lines.append(
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9335235Z                 {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9335520Z                     "ts": "2026-03-01T00:00:02+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9335896Z                     "run_id": rid,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9336230Z                     "seq": seq,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9336556Z                     "type": "run_completed",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9336952Z                     "payload": {"status": "completed"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9337321Z                 }
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9337551Z             )
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9337787Z             return lines
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9338046Z     
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9338274Z         for lines, name in (
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9338630Z             (_run_with_tools(["lookup"], "rid-a"), "rid-a"),
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9339100Z             (_run_with_tools(["other"], "rid-b"), "rid-b"),
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9339491Z             (
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9339710Z                 [
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9339951Z                     {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9340246Z                         "ts": "2026-03-01T00:00:00+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9340631Z                         "run_id": "rid-c",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9340981Z                         "seq": 1,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9341317Z                         "type": "run_started",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9341802Z                         "payload": {"workflow_name": "w", "workflow_version": "1"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9342280Z                     },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9342533Z                     {
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9342959Z                         "ts": "2026-03-01T00:00:01+00:00",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9343345Z                         "run_id": "rid-c",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9343686Z                         "seq": 2,
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9344026Z                         "type": "run_completed",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9344443Z                         "payload": {"status": "completed"},
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9344831Z                     },
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9345086Z                 ],
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9345339Z                 "rid-c",
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9345613Z             ),
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9345840Z         ):
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9346107Z             (log_dir / f"{name}.jsonl").write_text(
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9346611Z                 "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9347100Z             )
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9347327Z     
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9347557Z         runner = CliRunner()
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9348241Z         r_one = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--tool", "lookup"])
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9348830Z         assert r_one.exit_code == 0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9349186Z         assert "rid-a" in r_one.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9349548Z         assert "rid-b" not in r_one.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9349929Z         assert "rid-c" not in r_one.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9350260Z     
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9350760Z         r_or = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--tool", "lookup", "--tool", "other"])
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9351399Z         assert r_or.exit_code == 0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9351827Z         assert "rid-a" in r_or.stdout and "rid-b" in r_or.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9352282Z         assert "rid-c" not in r_or.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9352626Z     
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9353377Z         bad = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--tool", ""])
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9353922Z         assert bad.exit_code != 0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9354368Z >       assert "Empty --tool" in (bad.stdout + (bad.stderr or ""))
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9356077Z E       assert 'Empty --tool' in ('' + ("\x1b[33mUsage: \x1b[0mroot runs [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root runs \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n"))
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9357357Z E        +  where '' = <Result SystemExit(2)>.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9358993Z E        +  and   "\x1b[33mUsage: \x1b[0mroot runs [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root runs \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n" = <Result SystemExit(2)>.stderr
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9360129Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9360282Z tests/test_cli.py:2721: AssertionError
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9360791Z ____________________ test_maintainer_checks_real_repo_full _____________________
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9361206Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9361419Z     def test_maintainer_checks_real_repo_full() -> None:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9361989Z         mod = _load_script("maintainer_checks_replayt", "maintainer_checks.py")
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9362546Z         root = Path(__file__).resolve().parents[1]
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9363226Z         report = mod.maintainer_checks_report(root, changelog_nonempty=True)
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9363722Z     
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9363961Z >       assert report["ok"] is True, report
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9365385Z E       AssertionError: {'changelog_nonempty_required': True, 'checks': {'changelog_unreleased': {'item_count': 0, 'ok': False, 'schema': 'rep...consistency.v1'}}, 'errors': ['changelog_unreleased failed (--changelog-nonempty: no bullet items)'], 'ok': False, ...}
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9366816Z E       assert False is True
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9367031Z 
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9367208Z tests/test_maintainer_scripts.py:392: AssertionError
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9367724Z =========================== short test summary info ============================
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9370045Z FAILED tests/test_cli.py::test_cli_try_copy_to_rejects_live_and_inputs - assert 'Cannot combine --copy-to' in (("\x1b[33mUsage: \x1b[0mroot try [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root try \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2;3...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n"))
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:24.9373008Z  +  where "\x1b[33mUsage: \x1b[0mroot try [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root try \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2;3...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n" = <Result SystemExit(2)>.stderr
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0004313Z FAILED tests/test_cli.py::test_cli_run_missing_module_target_onboarding_hint - assert 'doctor --target' in "\x1b[33mUsage: \x1b[0mroot run [OPTIONS] [TARGET] \x1b[2mTry \x1b[0m\x1b[2;34m'root run \x1b[0m\x1b[1;2;34m-\x1b[0m\x...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m "
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0007769Z  +  where "\x1b[33mUsage: \x1b[0mroot run [OPTIONS] [TARGET] \x1b[2mTry \x1b[0m\x1b[2;34m'root run \x1b[0m\x1b[1;2;34m-\x1b[0m\x...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m " = <built-in method replace of str object at 0x55e384f85fc0>('\n', ' ')
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0010382Z  +    where <built-in method replace of str object at 0x55e384f85fc0> = "\x1b[33mUsage: \x1b[0mroot run [OPTIONS] [TARGET]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root run \x1b[0m\x1b[1;2;34m-\x1b[0m\...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n".replace
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0013115Z FAILED tests/test_cli.py::test_cli_runs_filter_status - assert 'Invalid --status' in ('' + ("\x1b[33mUsage: \x1b[0mroot runs [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root runs \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n"))
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0014442Z  +  where '' = <Result SystemExit(2)>.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0015720Z  +  and   "\x1b[33mUsage: \x1b[0mroot runs [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root runs \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n" = <Result SystemExit(2)>.stderr
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0017933Z FAILED tests/test_cli.py::test_cli_runs_tool_filter - assert 'Empty --tool' in ('' + ("\x1b[33mUsage: \x1b[0mroot runs [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root runs \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n"))
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0019192Z  +  where '' = <Result SystemExit(2)>.stdout
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0020467Z  +  and   "\x1b[33mUsage: \x1b[0mroot runs [OPTIONS]\n\x1b[2mTry \x1b[0m\x1b[2;34m'root runs \x1b[0m\x1b[1;2;34m-\x1b[0m\x1b[1;2...ÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔöÇÔò»\x1b[0m\n" = <Result SystemExit(2)>.stderr
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0022255Z FAILED tests/test_maintainer_scripts.py::test_maintainer_checks_real_repo_full - AssertionError: {'changelog_nonempty_required': True, 'checks': {'changelog_unreleased': {'item_count': 0, 'ok': False, 'schema': 'rep...consistency.v1'}}, 'errors': ['changelog_unreleased failed (--changelog-nonempty: no bullet items)'], 'ok': False, ...}
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0023569Z assert False is True
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0023837Z ======================== 5 failed, 389 passed in 12.56s ========================
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0718817Z ##[error]Process completed with exit code 1.
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.0820174Z Post job cleanup.
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.1653657Z [command]/usr/bin/git version
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.1691062Z git version 2.53.0
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.1729029Z Temporarily overriding HOME='/home/runner/work/_temp/185f8c95-f07e-474c-b3ea-313a8dcd99dc' before making global git config changes
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.1730052Z Adding repository directory to the temporary git global config as a safe directory
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.1734808Z [command]/usr/bin/git config --global --add safe.directory /home/runner/work/replayt/replayt
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.1772448Z [command]/usr/bin/git config --local --name-only --get-regexp core\.sshCommand
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.1807142Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'core\.sshCommand' && git config --local --unset-all 'core.sshCommand' || :"
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.2053093Z [command]/usr/bin/git config --local --name-only --get-regexp http\.https\:\/\/github\.com\/\.extraheader
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.2077969Z http.https://github.com/.extraheader
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.2089781Z [command]/usr/bin/git config --local --unset-all http.https://github.com/.extraheader
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.2124106Z [command]/usr/bin/git submodule foreach --recursive sh -c "git config --local --name-only --get-regexp 'http\.https\:\/\/github\.com\/\.extraheader' && git config --local --unset-all 'http.https://github.com/.extraheader' || :"
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.2369333Z [command]/usr/bin/git config --local --name-only --get-regexp ^includeIf\.gitdir:
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.2404022Z [command]/usr/bin/git submodule foreach --recursive git config --local --show-origin --name-only --get-regexp remote.origin.url
+tests / test (3.10)	UNKNOWN STEP	2026-03-21T23:45:25.2777692Z Cleaning up orphan processes

@@ -50,10 +50,42 @@ def test_coerce_temperature_rejects_bool() -> None:
 
 def test_coerce_temperature_string() -> None:
     assert coerce_temperature("0.5", default=0.0) == 0.5
+    assert coerce_temperature("2", default=0.0) == 2.0
+    assert coerce_temperature("0", default=0.0) == 0.0
+
+
+def test_coerce_temperature_rejects_out_of_range() -> None:
+    with pytest.raises(ValueError, match="between 0 and 2"):
+        coerce_temperature(2.0001)
+    with pytest.raises(ValueError, match="between 0 and 2"):
+        coerce_temperature("-0.1")
+
+
+def test_coerce_temperature_rejects_non_finite() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        coerce_temperature(float("nan"))
+    with pytest.raises(ValueError, match="finite"):
+        coerce_temperature(float("inf"))
 
 
 def test_coerce_timeout_seconds_string() -> None:
     assert coerce_timeout_seconds("30.5") == 30.5
+
+
+def test_coerce_timeout_seconds_rejects_non_positive() -> None:
+    with pytest.raises(ValueError, match="greater than zero"):
+        coerce_timeout_seconds(0)
+    with pytest.raises(ValueError, match="greater than zero"):
+        coerce_timeout_seconds("-1")
+    with pytest.raises(ValueError, match="greater than zero"):
+        coerce_timeout_seconds("0")
+
+
+def test_coerce_timeout_seconds_rejects_non_finite() -> None:
+    with pytest.raises(ValueError, match="greater than zero"):
+        coerce_timeout_seconds(float("nan"))
+    with pytest.raises(ValueError, match="greater than zero"):
+        coerce_timeout_seconds(float("inf"))
 
 
 def test_coerce_openai_penalty_none_and_bounds() -> None:
