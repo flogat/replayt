@@ -495,6 +495,8 @@ def test_maintainer_checks_tmp_pass_skipping_public_api(tmp_path: Path) -> None:
     assert report["checks"]["changelog_unreleased"]["ok"] is True
     assert report["checks"]["docs_index"]["ok"] is True
     assert report["checks"]["example_catalog"]["ok"] is True
+    assert report["checks"]["changelog_gate_policy"]["ok"] is True
+    assert report["checks"]["changelog_gate_policy"]["schema"] == "replayt.changelog_gate_policy.v1"
 
 
 def test_maintainer_checks_tmp_pass_with_public_api_snapshot(tmp_path: Path) -> None:
@@ -629,6 +631,7 @@ def test_maintainer_checks_tmp_pass_with_public_api_snapshot(tmp_path: Path) -> 
     assert report["ok"] is True
     assert report["checks"]["pyproject_pep621"]["ok"] is True
     assert report["checks"]["public_api"]["ok"] is True
+    assert report["checks"]["changelog_gate_policy"]["ok"] is True
 
 
 def test_maintainer_checks_version_only_failure(tmp_path: Path) -> None:
@@ -707,6 +710,7 @@ def test_maintainer_checks_main_all_skips_exits_2(capsys) -> None:
         [
             "--skip-version",
             "--skip-pyproject-pep621",
+            "--skip-changelog-gate-policy",
             "--skip-changelog",
             "--skip-docs-index",
             "--skip-example-catalog",

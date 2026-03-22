@@ -9,10 +9,12 @@ from typing import Literal
 import typer
 
 import replayt
-from replayt.cli.config import SUPPORTED_CONFIG_KEYS
+from replayt.cli.config import SUPPORTED_CONFIG_KEYS, build_project_config_discovery_report
+from replayt.cli.path_readiness import build_operational_paths_report
 from replayt.cli.run_support import (
     RUN_RESULT_SCHEMA,
     build_cli_exit_codes_report,
+    build_cli_json_stdout_contract,
     build_cli_stdio_contract,
     build_policy_hook_env_catalog,
 )
@@ -35,6 +37,7 @@ def _registered_cli_subcommands() -> list[str]:
 
 MAINTAINER_SCRIPT_SCHEMAS: dict[str, str] = {
     "unreleased_changelog": "replayt.unreleased_changelog.v1",
+    "changelog_gate_policy": "replayt.changelog_gate_policy.v1",
     "docs_index_report": "replayt.docs_index_report.v1",
     "version_consistency": "replayt.version_consistency.v1",
     "pyproject_pep621": "replayt.pyproject_pep621_report.v1",
@@ -42,6 +45,7 @@ MAINTAINER_SCRIPT_SCHEMAS: dict[str, str] = {
     "public_api_report": "replayt.public_api_report.v1",
     "maintainer_checks": "replayt.maintainer_checks.v1",
     "skill_invocation": "replayt.skill_invocation.v1",
+    "skill_release_pipeline": "replayt.skill_release_pipeline.v1",
 }
 
 
@@ -65,14 +69,19 @@ def build_version_report() -> dict[str, object]:
         "policy_hook_env_catalog": build_policy_hook_env_catalog(),
         "cli_exit_codes": build_cli_exit_codes_report(),
         "cli_stdio_contract": build_cli_stdio_contract(),
+        "cli_json_stdout_contract": build_cli_json_stdout_contract(),
+        "project_config_discovery": build_project_config_discovery_report(),
+        "operational_paths": build_operational_paths_report(),
         "cli_machine_readable_schemas": {
             "version_report": VERSION_REPORT_SCHEMA,
+            "project_config_discovery": "replayt.project_config_discovery.v1",
             "workflow_contract": "replayt.workflow_contract.v1",
             "workflow_contract_check": "replayt.workflow_contract_check.v1",
             "validate_report": "replayt.validate_report.v1",
             "doctor_report": "replayt.doctor_report.v1",
             "config_report": "replayt.config_report.v1",
             "ci_run_summary": "replayt.ci_run_summary.v1",
+            "operational_paths": "replayt.operational_paths.v1",
             "run_result": RUN_RESULT_SCHEMA,
             "inspect_report": "replayt.inspect_report.v1",
             "runs_report": "replayt.runs_report.v1",

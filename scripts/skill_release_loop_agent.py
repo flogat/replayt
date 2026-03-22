@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import hashlib
 import json
 import os
 import re
@@ -75,6 +76,8 @@ LOG_BANNER_USAGE_RETRY = "--- skill_release_loop: retry after Codex usage-limit 
 LOG_BANNER_RESUME = "--- skill_release_loop: resume ---"
 # Written beside each *.prompt.md so harnesses can read the resolved contract without parsing Markdown.
 SKILL_INVOCATION_SCHEMA = "replayt.skill_invocation.v1"
+# Written once per run directory when the first skill phase runs; stable for the whole run (--resume must match).
+SKILL_RELEASE_PIPELINE_SCHEMA = "replayt.skill_release_pipeline.v1"
 
 SKILL_LOOP_MAIN_INJECTED_ENV_KEYS: tuple[str, ...] = (
     "REPO_ROOT",
@@ -83,6 +86,7 @@ SKILL_LOOP_MAIN_INJECTED_ENV_KEYS: tuple[str, ...] = (
     "SKILL_MAX_ITERATIONS",
     "SKILL_NAME",
     "SKILL_PATH",
+    "SKILL_PIPELINE_SHA256",
     "SKILL_PROMPT_FILE",
     "SKILL_REQUESTED_NAME",
     "SKILL_ROOT",
@@ -97,6 +101,7 @@ SKILL_LOOP_FIX_INJECTED_ENV_KEYS: tuple[str, ...] = (
     "SKILL_LOG_FILE",
     "SKILL_MAX_ITERATIONS",
     "SKILL_NAME",
+    "SKILL_PIPELINE_SHA256",
     "SKILL_PROMPT_FILE",
     "SKILL_ROOT",
     "SKILL_RUN_DIR",
@@ -129,6 +134,65 @@ def skill_invocation_json_path(prompt_path: Path) -> Path:
     return prompt_path.with_name(f"{name[: -len('.prompt.md')]}.invocation.json")
 
 
+def skill_pipeline_sha256(skill_names: list[str]) -> str:
+    """Stable fingerprint for the ordered resolved skill folder names (UTF-8 newline join)."""
+
+    return hashlib.sha256("\n".join(skill_names).encode("utf-8")).hexdigest()
+
+
+def ensure_skill_release_pipeline_file(run_dir: Path, skill_names: list[str], task: str) -> str:
+    """Create run_dir/pipeline.json on first skill phase, or verify it matches --skills on resume."""
+
+    sha = skill_pipeline_sha256(skill_names)
+    path = run_dir / "pipeline.json"
+    payload: dict[str, Any] = {
+        "schema": SKILL_RELEASE_PIPELINE_SCHEMA,
+        "skills": list(skill_names),
+        "pipeline_sha256": sha,
+        "task": task,
+        "written_at": _utc_iso(),
+    }
+    if path.is_file():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise LoopError(f"Invalid JSON in {path}: {exc}") from exc
+        if existing.get("skills") != skill_names:
+            raise LoopError(
+                f"{path} lists skills {existing.get('skills')!r} but this run uses {skill_names!r}; "
+                "use the same --skills as the original run or pick a fresh run directory."
+            )
+        if existing.get("pipeline_sha256") != sha:
+            raise LoopError(
+                f"{path} pipeline_sha256 {existing.get('pipeline_sha256')!r} != computed {sha!r}; "
+                "refusing to continue."
+            )
+        return sha
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(path)
+    return sha
+
+
+def load_skill_release_pipeline_sha256(run_dir: Path) -> str:
+    """Read pipeline_sha256 from a prior skill phase (checks and pre-tag fixes reuse the same value)."""
+
+    path = run_dir / "pipeline.json"
+    if not path.is_file():
+        raise LoopError(
+            f"Missing {path}; expected the skill phase to write it before this step. "
+            "If you removed it, start a fresh run directory."
+        )
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise LoopError(f"Invalid JSON in {path}: {exc}") from exc
+    sha = data.get("pipeline_sha256")
+    if not isinstance(sha, str) or len(sha) != 64:
+        raise LoopError(f"{path} is missing a valid pipeline_sha256 field.")
+    return sha
+
+
 def write_skill_invocation_json(
     *,
     prompt_path: Path,
@@ -144,6 +208,7 @@ def write_skill_invocation_json(
     task: str,
     step_index: int,
     step_total: int,
+    pipeline_sha256: str,
     skill_requested_name: str | None = None,
 ) -> Path:
     """Atomically write machine-readable metadata for one skill / fix prompt invocation."""
@@ -154,6 +219,7 @@ def write_skill_invocation_json(
         "skill_root": skill_root,
         "skill_name": skill_name,
         "skill_path": skill_path,
+        "pipeline_sha256": pipeline_sha256,
         "prompt_file": str(prompt_path.resolve()),
         "log_file": str(Path(log_file).resolve()),
         "run_dir": run_dir,
@@ -272,12 +338,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--skill-command runs OpenAI Codex.\n"
             "--skill-command runs once per skill and can use placeholders:\n"
             "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {run_dir}\n"
-            "  {repo} {iteration} {max_iterations} {step_index} {step_total}\n"
+            "  {repo} {iteration} {max_iterations} {step_index} {step_total} {pipeline_sha256}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
             "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
             "Pipeline position within one iteration uses {step_index}/{step_total} (SKILL_STEP_*); "
             "fix prompts use 0/0. Outer retry loop uses {iteration}/{max_iterations} "
             "(SKILL_ITERATION / SKILL_MAX_ITERATIONS).\n"
+            "Ordered --skills resolve to SKILL_PIPELINE_SHA256 / run_dir/pipeline.json "
+            "(replayt.skill_release_pipeline.v1); resume fails fast if --skills order changes.\n"
             "Progress: prints configuration, a decision-tree summary, each command and log path, streamed "
             "child output (unless --quiet), and explicit decision lines after checks. Use --quiet for logs only.\n"
             "Codex usage limits: with --wait-on-codex-usage-limit, if a skill log matches a Codex usage-limit message "
@@ -704,6 +772,7 @@ def describe_skill_env_snippet(env: dict[str, str], *, task_max: int = 160) -> s
         "SKILL_ITERATION",
         "SKILL_STEP_INDEX",
         "SKILL_STEP_TOTAL",
+        "SKILL_PIPELINE_SHA256",
         "SKILL_PROMPT_FILE",
         "SKILL_LOG_FILE",
         "SKILL_RUN_DIR",
@@ -1027,6 +1096,8 @@ def run_skill_iteration(
         "Decision: run each skill in sequence; each step invokes --skill-command with a fresh prompt file."
         + ("; resume skips steps whose logs end with exit_code=0." if resume else ".")
     )
+    skill_names = [s.name for s in skills]
+    pipeline_sha256 = ensure_skill_release_pipeline_file(run_dir, skill_names, args.task)
     step_total = len(skills)
     for step_index, skill in enumerate(skills, start=1):
         stem = f"iter-{iteration:02d}-{skill.name}"
@@ -1065,6 +1136,7 @@ def run_skill_iteration(
             task=args.task,
             step_index=step_index,
             step_total=step_total,
+            pipeline_sha256=pipeline_sha256,
             skill_requested_name=skill.requested_name,
         )
         # Inject safe.directory so child processes (e.g. Codex sandbox running as a
@@ -1087,6 +1159,7 @@ def run_skill_iteration(
                 "SKILL_RUN_DIR": run_dir_resolved,
                 "SKILL_STEP_INDEX": str(step_index),
                 "SKILL_STEP_TOTAL": str(step_total),
+                "SKILL_PIPELINE_SHA256": pipeline_sha256,
             }
         )
         augment_env_path_for_cursor_agent(env, args)
@@ -1105,6 +1178,7 @@ def run_skill_iteration(
                 "task": args.task,
                 "step_index": str(step_index),
                 "step_total": str(step_total),
+                "pipeline_sha256": pipeline_sha256,
             },
         )
         progress_banner(f"Skill: {skill.name}")
@@ -1229,6 +1303,7 @@ def run_checks(
         "successfully."
         + ("; resume skips checks whose logs end with exit_code=0." if resume else ".")
     )
+    pipeline_sha256 = load_skill_release_pipeline_sha256(run_dir)
     for index, template in enumerate(args.checks, start=1):
         log_path = run_dir / f"iter-{iteration:02d}-check-{index:02d}.log"
         if resume and log_path_last_exit_code(log_path) == 0:
@@ -1332,6 +1407,7 @@ def run_checks(
                 task="Fix the failing check.",
                 step_index=0,
                 step_total=0,
+                pipeline_sha256=pipeline_sha256,
             )
 
             fix_command = render_command(
@@ -1348,6 +1424,7 @@ def run_checks(
                     "max_iterations": str(args.max_iterations),
                     "step_index": "0",
                     "step_total": "0",
+                    "pipeline_sha256": pipeline_sha256,
                 },
             )
 
@@ -1366,6 +1443,7 @@ def run_checks(
                     "SKILL_RUN_DIR": run_dir_resolved,
                     "SKILL_STEP_INDEX": "0",
                     "SKILL_STEP_TOTAL": "0",
+                    "SKILL_PIPELINE_SHA256": pipeline_sha256,
                 }
             )
             augment_env_path_for_cursor_agent(fix_env, args)
@@ -1661,6 +1739,7 @@ def run_pre_tag_github_ci_with_fixes(
     max_fix = args.pre_tag_github_ci_max_fix_attempts
     fix_round = 0
     verify_append = False
+    pipeline_sha256 = load_skill_release_pipeline_sha256(run_dir)
 
     while True:
         if tracker is not None:
@@ -1728,6 +1807,7 @@ def run_pre_tag_github_ci_with_fixes(
             task="Fix the failure so pre-tag GitHub Actions verification passes.",
             step_index=0,
             step_total=0,
+            pipeline_sha256=pipeline_sha256,
         )
 
         fix_command = render_command(
@@ -1744,6 +1824,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "max_iterations": str(args.max_iterations),
                 "step_index": "0",
                 "step_total": "0",
+                "pipeline_sha256": pipeline_sha256,
             },
         )
 
@@ -1762,6 +1843,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "SKILL_RUN_DIR": run_dir_resolved,
                 "SKILL_STEP_INDEX": "0",
                 "SKILL_STEP_TOTAL": "0",
+                "SKILL_PIPELINE_SHA256": pipeline_sha256,
             }
         )
         augment_env_path_for_cursor_agent(fix_env, args)
@@ -1878,6 +1960,7 @@ def _main_run(
     progress_line(f"Run status (this run only): {run_dir / 'status.json'}")
     progress_line(f"Skill root: {skill_root}")
     progress_line(f"Skill pipeline: {' -> '.join(s.name for s in skills)}")
+    progress_line(f"Skill pipeline fingerprint: {skill_pipeline_sha256([s.name for s in skills])}")
     progress_line(f"Max iterations: {args.max_iterations}")
     progress_line(f"Dry run: {args.dry_run}")
     progress_line(f"Skip push: {args.skip_push}")

@@ -501,6 +501,135 @@ def workflow_entrypoint_permission_trust_checks(candidate_paths: Sequence[Path])
     return checks
 
 
+def policy_hook_script_permission_trust_checks(candidate_paths: Sequence[Path]) -> list[TrustBoundaryCheck]:
+    """Soft warnings when a configured policy hook script path is group/world-readable or writable (POSIX only)."""
+
+    if os.name == "nt" or not candidate_paths:
+        return []
+    existing: list[Path] = []
+    resolved_seen: set[str] = set()
+    for raw in candidate_paths:
+        try:
+            p = raw.resolve()
+        except OSError:
+            continue
+        if not p.is_file():
+            continue
+        key = str(p)
+        if key in resolved_seen:
+            continue
+        resolved_seen.add(key)
+        existing.append(p)
+    if not existing:
+        return []
+
+    bad_group_read: list[str] = []
+    bad_group_write: list[str] = []
+    bad_other_read: list[str] = []
+    bad_other_write: list[str] = []
+    for p in existing:
+        try:
+            mode = p.stat().st_mode
+        except OSError:
+            continue
+        label = str(p)
+        if mode & stat.S_IRGRP:
+            bad_group_read.append(label)
+        if mode & stat.S_IWGRP:
+            bad_group_write.append(label)
+        if mode & stat.S_IROTH:
+            bad_other_read.append(label)
+        if mode & stat.S_IWOTH:
+            bad_other_write.append(label)
+
+    checks: list[TrustBoundaryCheck] = []
+    if bad_group_read:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_policy_hook_script_group_readable",
+                ok=False,
+                detail="group-readable policy hook script file(s): " + ", ".join(bad_group_read),
+                hint=(
+                    "Tighten permissions on hook scripts (for example chmod 750) unless every account "
+                    "in the owning Unix group is trusted to read the code replayt invokes before runs, "
+                    "exports, or resumes."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_policy_hook_script_group_readable",
+                ok=True,
+                detail=f"checked {len(existing)} policy hook script file(s); none are group-readable",
+            )
+        )
+
+    if bad_group_write:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_policy_hook_script_group_writable",
+                ok=False,
+                detail="group-writable policy hook script file(s): " + ", ".join(bad_group_write),
+                hint=(
+                    "Strip group write on hook scripts so peer accounts cannot replace run_gate, export_gate, "
+                    "or resume_gate logic with attacker-controlled code."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_policy_hook_script_group_writable",
+                ok=True,
+                detail=f"checked {len(existing)} policy hook script file(s); none are group-writable",
+            )
+        )
+
+    if bad_other_read:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_policy_hook_script_other_readable",
+                ok=False,
+                detail="world-readable policy hook script file(s): " + ", ".join(bad_other_read),
+                hint=(
+                    "Restrict hook script permissions so other OS accounts cannot read policy logic "
+                    "that gates regulated workflows."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_policy_hook_script_other_readable",
+                ok=True,
+                detail=f"checked {len(existing)} policy hook script file(s); none are world-readable",
+            )
+        )
+
+    if bad_other_write:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_policy_hook_script_other_writable",
+                ok=False,
+                detail="world-writable policy hook script file(s): " + ", ".join(bad_other_write),
+                hint=(
+                    "Strip world write on policy hook scripts so unrelated accounts cannot swap in "
+                    "malicious gate implementations."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_policy_hook_script_other_writable",
+                ok=True,
+                detail=f"checked {len(existing)} policy hook script file(s); none are world-writable",
+            )
+        )
+    return checks
+
+
 def inputs_file_permission_trust_checks(candidate_paths: Sequence[Path]) -> list[TrustBoundaryCheck]:
     """Soft warnings when a default or explicit inputs JSON file is group/world-readable or writable (POSIX only)."""
 

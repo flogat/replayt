@@ -198,3 +198,29 @@ def ci_artifact_readiness_checks(
             )
         )
     return checks
+
+
+def build_operational_paths_report() -> dict[str, object]:
+    """Cwd-resolved paths for CI wrappers (``replayt version --format json``)."""
+
+    from replayt.cli.ci_artifacts import (
+        resolve_ci_junit_path,
+        resolve_ci_summary_json_path,
+        step_summary_env_snapshot,
+    )
+    from replayt.cli.config import DEFAULT_LOG_DIR, resolve_log_dir
+
+    cwd = Path.cwd().resolve()
+    log_dir = resolve_log_dir(DEFAULT_LOG_DIR).resolve()
+    junit = resolve_ci_junit_path(None)
+    summary_json = resolve_ci_summary_json_path(None)
+    return {
+        "schema": "replayt.operational_paths.v1",
+        "cwd": str(cwd),
+        "effective_log_dir": str(log_dir),
+        "step_summary": step_summary_env_snapshot(),
+        "ci_artifact_paths": {
+            "junit_xml": str(junit.resolve()) if junit is not None else None,
+            "summary_json": str(summary_json.resolve()) if summary_json is not None else None,
+        },
+    }

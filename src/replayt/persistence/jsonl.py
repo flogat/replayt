@@ -148,46 +148,61 @@ class JSONLStore:
 
     def append_event(self, run_id: str, *, ts: str, typ: str, payload: dict[str, Any]) -> dict[str, Any]:
         path = self._ensure_path(run_id)
-        with path.open("a+", encoding="utf-8") as f:
-            with _lock_file(f):
-                seq = self._read_last_seq_locked(f) + 1
-                event = {"ts": ts, "run_id": run_id, "seq": seq, "type": typ, "payload": payload}
-                f.seek(0, os.SEEK_END)
-                f.write(json.dumps(event, default=str, ensure_ascii=False) + "\n")
-                return event
+        try:
+            with path.open("a+", encoding="utf-8") as f:
+                with _lock_file(f):
+                    seq = self._read_last_seq_locked(f) + 1
+                    event = {"ts": ts, "run_id": run_id, "seq": seq, "type": typ, "payload": payload}
+                    f.seek(0, os.SEEK_END)
+                    f.write(json.dumps(event, default=str, ensure_ascii=False) + "\n")
+                    return event
+        except UnicodeDecodeError as e:
+            raise RuntimeError(
+                f"Corrupted JSONL event log for run_id={run_id!r}: file is not valid UTF-8"
+            ) from e
 
     def append(self, run_id: str, event: dict[str, Any]) -> None:
         path = self._ensure_path(run_id)
         seq = int(event["seq"])
         line = json.dumps(event, default=str, ensure_ascii=False)
-        with path.open("a+", encoding="utf-8") as f:
-            with _lock_file(f):
-                last_seq = self._read_last_seq_locked(f)
-                if seq <= last_seq:
-                    raise RuntimeError(
-                        f"Out-of-order event sequence for run_id={run_id!r}: seq={seq} last_seq={last_seq}"
-                    )
-                f.seek(0, os.SEEK_END)
-                f.write(line + "\n")
+        try:
+            with path.open("a+", encoding="utf-8") as f:
+                with _lock_file(f):
+                    last_seq = self._read_last_seq_locked(f)
+                    if seq <= last_seq:
+                        raise RuntimeError(
+                            f"Out-of-order event sequence for run_id={run_id!r}: seq={seq} last_seq={last_seq}"
+                        )
+                    f.seek(0, os.SEEK_END)
+                    f.write(line + "\n")
+        except UnicodeDecodeError as e:
+            raise RuntimeError(
+                f"Corrupted JSONL event log for run_id={run_id!r}: file is not valid UTF-8"
+            ) from e
 
     def load_events(self, run_id: str) -> list[dict[str, Any]]:
         path = self._path(run_id)
         if not path.is_file():
             return []
         out: list[dict[str, Any]] = []
-        with path.open("r", encoding="utf-8") as f:
-            with _lock_file(f, shared=True):
-                f.seek(0)
-                for lineno, line in enumerate(f, start=1):
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        out.append(json.loads(line))
-                    except json.JSONDecodeError as e:
-                        raise RuntimeError(
-                            f"Corrupted JSONL event log for run_id={run_id!r} at line {lineno}"
-                        ) from e
+        try:
+            with path.open("r", encoding="utf-8") as f:
+                with _lock_file(f, shared=True):
+                    f.seek(0)
+                    for lineno, line in enumerate(f, start=1):
+                        line = line.strip()
+                        if not line:
+                            continue
+                        try:
+                            out.append(json.loads(line))
+                        except json.JSONDecodeError as e:
+                            raise RuntimeError(
+                                f"Corrupted JSONL event log for run_id={run_id!r} at line {lineno}"
+                            ) from e
+        except UnicodeDecodeError as e:
+            raise RuntimeError(
+                f"Corrupted JSONL event log for run_id={run_id!r}: file is not valid UTF-8"
+            ) from e
         return out
 
     def list_run_ids(self) -> list[str]:

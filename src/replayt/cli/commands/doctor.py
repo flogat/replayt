@@ -27,7 +27,13 @@ from replayt.cli.config import (
     resolve_sqlite_path,
 )
 from replayt.cli.path_readiness import ci_artifact_readiness_checks, readiness_checks
-from replayt.cli.run_support import export_hook_audit, resume_hook_audit, run_hook_audit, seal_hook_audit
+from replayt.cli.run_support import (
+    export_hook_audit,
+    policy_hook_trust_audit_paths_for_cfg,
+    resume_hook_audit,
+    run_hook_audit,
+    seal_hook_audit,
+)
 from replayt.cli.targets import load_target, workflow_trust_audit_paths
 from replayt.cli.validation import validate_workflow_graph, validation_report
 from replayt.security import (
@@ -37,6 +43,7 @@ from replayt.security import (
     inputs_file_permission_trust_checks,
     llm_credential_env_presence,
     log_directory_permission_trust_checks,
+    policy_hook_script_permission_trust_checks,
     trust_boundary_checks,
     workflow_entrypoint_permission_trust_checks,
 )
@@ -98,7 +105,7 @@ def cmd_doctor(
     except ImportError:
         pkg_ver = "unknown"
 
-    cfg, cfg_path, unknown_cfg_keys = get_project_config()
+    cfg, cfg_path, unknown_cfg_keys, shadowed_cfg_sources = get_project_config()
     settings, llm_report = resolve_llm_settings(cfg)
     settings_error = llm_report.get("error")
     resolved_log_mode, _log_mode_source = resolve_log_mode_setting("redacted", cfg)
@@ -127,6 +134,17 @@ def cmd_doctor(
         )
     else:
         checks.append(("project_config_unknown_keys", True, "none"))
+
+    if shadowed_cfg_sources:
+        checks.append(
+            (
+                "project_config_shadowed_sources",
+                False,
+                "ignored (.replaytrc.toml wins): " + ", ".join(shadowed_cfg_sources),
+            )
+        )
+    else:
+        checks.append(("project_config_shadowed_sources", True, "none"))
 
     mv = min_replayt_version_report(cfg, installed=pkg_ver)
     if mv["constraint"] is None:
@@ -309,6 +327,8 @@ def cmd_doctor(
         )
     ):
         checks.append((check.name, check.ok, check.detail))
+    for check in policy_hook_script_permission_trust_checks(policy_hook_trust_audit_paths_for_cfg(cfg)):
+        checks.append((check.name, check.ok, check.detail))
     if target is not None:
         for check in workflow_entrypoint_permission_trust_checks(workflow_trust_audit_paths(target)):
             checks.append((check.name, check.ok, check.detail))
@@ -362,6 +382,10 @@ def cmd_doctor(
         "project_config_unknown_keys": (
             "Remove or rename keys to match docs/CONFIG.md; run `replayt config --format json` "
             "and inspect project_config.unknown_keys."
+        ),
+        "project_config_shadowed_sources": (
+            "Use either .replaytrc.toml or pyproject.toml [tool.replayt] in the same directory, not both; "
+            "see docs/CONFIG.md (precedence: .replaytrc.toml wins)."
         ),
         "project_config_min_replayt_version": (
             "Set min_replayt_version to a replayt-style release (e.g. 0.4.7), upgrade the installed "
@@ -425,6 +449,22 @@ def cmd_doctor(
         "trust_inputs_file_other_writable": (
             "Strip world write on inputs files so unrelated accounts cannot inject malicious run inputs."
         ),
+        "trust_policy_hook_script_group_readable": (
+            "Tighten permissions on run_hook / resume_hook / export_hook / seal_hook / verify_seal_hook scripts "
+            "unless every account in the owning Unix group may read that gate code."
+        ),
+        "trust_policy_hook_script_group_writable": (
+            "Remove group write on policy hook scripts so peer accounts cannot replace gate logic before the next "
+            "run, export, or resume."
+        ),
+        "trust_policy_hook_script_other_readable": (
+            "Restrict hook script permissions so other OS accounts cannot read policy gates that protect regulated "
+            "workflows."
+        ),
+        "trust_policy_hook_script_other_writable": (
+            "Strip world write on policy hook scripts so unrelated accounts cannot swap in malicious gate "
+            "implementations."
+        ),
         "log_dir_ready": "Fix the resolved log_dir path or its parent-directory permissions before running replayt.",
         "sqlite_ready": "Fix the resolved sqlite path or its parent-directory permissions before enabling the mirror.",
         "ci_junit_xml_ready": (
@@ -460,6 +500,7 @@ def cmd_doctor(
             "openai_api_key",
             "project_config",
             "project_config_unknown_keys",
+            "project_config_shadowed_sources",
             "yaml_extra",
             "trust_log_mode",
             "trust_base_url_transport",
@@ -480,6 +521,10 @@ def cmd_doctor(
             "trust_inputs_file_group_writable",
             "trust_inputs_file_other_readable",
             "trust_inputs_file_other_writable",
+            "trust_policy_hook_script_group_readable",
+            "trust_policy_hook_script_group_writable",
+            "trust_policy_hook_script_other_readable",
+            "trust_policy_hook_script_other_writable",
             "credential_env_extra_providers",
             "approval_reason_policy",
             "policy_hooks_external_code",

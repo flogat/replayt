@@ -74,6 +74,22 @@ def test_jsonl_store_raises_for_truncated_line(tmp_path: Path) -> None:
         store.load_events("trunc")
 
 
+def test_jsonl_store_raises_for_invalid_utf8_on_load(tmp_path: Path) -> None:
+    path = tmp_path / "badenc.jsonl"
+    path.write_bytes(b"\xff\xfe\x00")
+    store = JSONLStore(tmp_path)
+    with pytest.raises(RuntimeError, match=r"Corrupted JSONL.*not valid UTF-8"):
+        store.load_events("badenc")
+
+
+def test_jsonl_append_event_raises_for_invalid_utf8(tmp_path: Path) -> None:
+    path = tmp_path / "badappend.jsonl"
+    path.write_bytes(b"\xff")
+    store = JSONLStore(tmp_path)
+    with pytest.raises(RuntimeError, match=r"Corrupted JSONL.*not valid UTF-8"):
+        store.append_event("badappend", ts="t", typ="run_started", payload={})
+
+
 def test_jsonl_load_events_opens_read_only(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     store = JSONLStore(tmp_path)
     store.append_event("r1", ts="t1", typ="run_started", payload={})

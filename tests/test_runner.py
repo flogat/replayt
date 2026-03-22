@@ -337,6 +337,7 @@ def test_runner_persists_llm_request_schema_fingerprints(tmp_path: Path) -> None
     assert structured["messages_sha256"] == request["messages_sha256"]
     assert structured["effective_sha256"] == request["effective_sha256"]
     assert structured["schema_sha256"] == request["schema_sha256"]
+    assert structured["effective"] == request["effective"]
     assert structured["usage"] == response["usage"]
     assert structured["latency_ms"] == response["latency_ms"]
     assert structured["finish_reason"] == response["finish_reason"]

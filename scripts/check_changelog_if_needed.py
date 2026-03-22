@@ -3,16 +3,25 @@
 
 from __future__ import annotations
 
+import importlib.util
 import os
 import subprocess
 import sys
 from pathlib import Path
 
 
-def is_protected_path(path: str) -> bool:
-    if path == "docs/RUN_LOG_SCHEMA.md":
-        return True
-    return path.startswith("src/replayt/") or path.startswith("src/replayt_examples/")
+def _load_changelog_gate_policy():
+    path = Path(__file__).resolve().parent / "changelog_gate_policy.py"
+    spec = importlib.util.spec_from_file_location("_replayt_changelog_gate_policy", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load changelog gate policy: {path}")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+_cgp = _load_changelog_gate_policy()
+is_protected_path = _cgp.is_protected_path
 
 
 def _git_command(repo: Path, *args: str) -> list[str]:

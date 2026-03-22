@@ -22,16 +22,19 @@ from replayt.cli.display import (
     parse_duration,
     parse_finish_reason_filters,
     parse_iso_ts,
+    parse_llm_model_filters,
     parse_meta_filters,
     parse_note_kind_filters,
     parse_structured_schema_name_filters,
     parse_tag_filters,
     parse_tool_name_filters,
+    payload_llm_model,
     replay_html,
     replay_timeline_lines,
     run_attention_summary,
     run_diff_data,
     run_matches_finish_reason_filter,
+    run_matches_llm_model_filter,
     run_matches_note_kind_filter,
     run_matches_structured_schema_name_filter,
     run_matches_tool_name_filter,
@@ -157,6 +160,29 @@ def _filter_events_by_structured_schema_name(
             sn = payload.get("schema_name")
             if isinstance(sn, str) and sn in filters:
                 filtered.append(event)
+            continue
+        if event_type_filters is not None and typ in event_type_filters:
+            filtered.append(event)
+    return filtered
+
+
+def _filter_events_by_llm_model(
+    events: list[dict[str, Any]],
+    filters: frozenset[str] | None,
+    *,
+    event_type_filters: frozenset[str] | None,
+) -> list[dict[str, Any]]:
+    if filters is None:
+        return events
+    filtered: list[dict[str, Any]] = []
+    for event in events:
+        typ = event.get("type")
+        if typ in {"llm_request", "llm_response", "structured_output", "structured_output_failed"}:
+            payload = event.get("payload") or {}
+            if isinstance(payload, dict):
+                m = payload_llm_model(payload)
+                if m is not None and m in filters:
+                    filtered.append(event)
             continue
         if event_type_filters is not None and typ in event_type_filters:
             filtered.append(event)
@@ -297,6 +323,15 @@ def cmd_inspect(
             "those events only."
         ),
     ),
+    llm_model: list[str] | None = typer.Option(
+        None,
+        "--llm-model",
+        help=(
+            "Only include `llm_request` / `llm_response` / structured-output events whose logged "
+            "model id matches (repeatable; OR). Uses payload `effective.model` when present, else "
+            "top-level `model`. Without --event-type, narrows the list to matching LLM lines only."
+        ),
+    ),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -324,6 +359,7 @@ def cmd_inspect(
     finish_reason_filters = parse_finish_reason_filters(finish_reason)
     tool_name_filters = parse_tool_name_filters(tool)
     structured_schema_filters = parse_structured_schema_name_filters(structured_schema)
+    llm_model_filters = parse_llm_model_filters(llm_model)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
@@ -341,10 +377,11 @@ def cmd_inspect(
             or finish_reason_filters is not None
             or tool_name_filters is not None
             or structured_schema_filters is not None
+            or llm_model_filters is not None
         ):
             raise typer.BadParameter(
                 "--print-inputs reads run_started from the full timeline; omit --event-type, "
-                "--note-kind, --finish-reason, --tool, and --structured-schema."
+                "--note-kind, --finish-reason, --tool, --structured-schema, and --llm-model."
             )
         try:
             inputs_obj = _extract_run_started_inputs(events)
@@ -364,10 +401,11 @@ def cmd_inspect(
             or finish_reason_filters is not None
             or tool_name_filters is not None
             or structured_schema_filters is not None
+            or llm_model_filters is not None
         ):
             raise typer.BadParameter(
                 "--output markdown summarizes the full run; omit --event-type, --note-kind, "
-                "--finish-reason, --tool, and --structured-schema."
+                "--finish-reason, --tool, --structured-schema, and --llm-model."
             )
         typer.echo(inspect_stakeholder_markdown(run_id, events))
         return
@@ -378,6 +416,7 @@ def cmd_inspect(
     filtered = _filter_events_by_structured_schema_name(
         filtered, structured_schema_filters, event_type_filters=type_filters
     )
+    filtered = _filter_events_by_llm_model(filtered, llm_model_filters, event_type_filters=type_filters)
     if use_json:
         summary = event_summary(events)
         payload: dict[str, Any] = {
@@ -396,6 +435,8 @@ def cmd_inspect(
             payload["tool_name_filter"] = sorted(tool_name_filters)
         if structured_schema_filters is not None:
             payload["structured_schema_filter"] = sorted(structured_schema_filters)
+        if llm_model_filters is not None:
+            payload["llm_model_filter"] = sorted(llm_model_filters)
         typer.echo(json.dumps(payload, indent=2, default=str))
         return
     summary = event_summary(events)
@@ -412,6 +453,7 @@ def cmd_inspect(
         or finish_reason_filters is not None
         or tool_name_filters is not None
         or structured_schema_filters is not None
+        or llm_model_filters is not None
     ):
         event_counts += f" shown={len(filtered)}"
     typer.echo(
@@ -620,7 +662,7 @@ def cmd_validate(
 
     wf = load_target(target)
     errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
-    cfg, cfg_path, _unknown = get_project_config()
+    cfg, cfg_path, _unknown, _shadowed = get_project_config()
     inputs_resolved, _inputs_src = resolve_run_inputs_json(
         inputs_json, inputs_file, cfg=cfg, config_path=cfg_path, input_value=input_value
     )
@@ -706,6 +748,14 @@ def cmd_runs(
             "(exact match; repeatable; OR)."
         ),
     ),
+    llm_model: list[str] | None = typer.Option(
+        None,
+        "--llm-model",
+        help=(
+            "Only runs that logged this model id on an `llm_request`, `llm_response`, or structured-output "
+            "line (`effective.model` when present, else top-level `model`; exact match; repeatable; OR)."
+        ),
+    ),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """List recent local runs from JSONL logs."""
@@ -720,6 +770,7 @@ def cmd_runs(
     schema_filters = parse_structured_schema_name_filters(structured_schema)
     note_kind_filters = parse_note_kind_filters(note_kind)
     finish_reason_filters = parse_finish_reason_filters(finish_reason)
+    llm_model_filters = parse_llm_model_filters(llm_model)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     now = datetime.now(timezone.utc)
     with read_store(log_dir, sqlite) as store:
@@ -751,6 +802,8 @@ def cmd_runs(
             if not run_matches_note_kind_filter(events, note_kind_filters):
                 continue
             if not run_matches_finish_reason_filter(events, finish_reason_filters):
+                continue
+            if not run_matches_llm_model_filter(events, llm_model_filters):
                 continue
             runs_data.append((rid, summary, attention, age_seconds))
 
@@ -792,6 +845,7 @@ def cmd_runs(
                         "structured_schema": sorted(schema_filters) if schema_filters is not None else [],
                         "note_kind": sorted(note_kind_filters) if note_kind_filters is not None else [],
                         "finish_reason": sorted(finish_reason_filters) if finish_reason_filters is not None else [],
+                        "llm_model": sorted(llm_model_filters) if llm_model_filters is not None else [],
                         "older_than": older_than,
                         "newer_than": newer_than,
                     },
@@ -865,6 +919,14 @@ def cmd_stats(
             "(exact match; repeatable; OR)."
         ),
     ),
+    llm_model: list[str] | None = typer.Option(
+        None,
+        "--llm-model",
+        help=(
+            "Only runs that logged this model id on an `llm_request`, `llm_response`, or structured-output "
+            "line (`effective.model` when present, else top-level `model`; exact match; repeatable; OR)."
+        ),
+    ),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """Summarize local run logs: counts, LLM latency averages, token usage, common failure states."""
@@ -876,6 +938,7 @@ def cmd_stats(
     schema_filters = parse_structured_schema_name_filters(structured_schema)
     note_kind_filters = parse_note_kind_filters(note_kind)
     finish_reason_filters = parse_finish_reason_filters(finish_reason)
+    llm_model_filters = parse_llm_model_filters(llm_model)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     now = datetime.now(timezone.utc)
     cutoff = None
@@ -921,6 +984,8 @@ def cmd_stats(
         if not run_matches_note_kind_filter(events, note_kind_filters):
             continue
         if not run_matches_finish_reason_filter(events, finish_reason_filters):
+            continue
+        if not run_matches_llm_model_filter(events, llm_model_filters):
             continue
         total += 1
         st = str(summ.get("status", "unknown"))

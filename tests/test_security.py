@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
 from replayt.cli.config import inputs_file_trust_audit_paths
+from replayt.cli.run_support import policy_hook_trust_audit_paths_for_cfg
 from replayt.cli.targets import workflow_trust_audit_paths
 from replayt.security import (
     approval_reason_missing,
@@ -19,6 +21,7 @@ from replayt.security import (
     log_directory_permission_trust_checks,
     missing_actor_fields,
     normalize_name_list,
+    policy_hook_script_permission_trust_checks,
     redact_named_fields,
     sanitize_base_url_for_output,
     trust_boundary_checks,
@@ -448,3 +451,116 @@ def test_inputs_file_permission_trust_checks_warns_via_mocked_mode(
     assert names["trust_inputs_file_group_writable"].ok is False
     assert names["trust_inputs_file_other_readable"].ok is False
     assert names["trust_inputs_file_other_writable"].ok is False
+
+
+def test_policy_hook_script_permission_trust_checks_empty_on_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    script = tmp_path / "gate.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(os, "name", "nt")
+    assert policy_hook_script_permission_trust_checks([script]) == []
+
+
+def test_policy_hook_script_permission_trust_checks_ok_for_restrictive_mode(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    script = tmp_path / "gate.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    script.chmod(0o600)
+    names = {c.name: c for c in policy_hook_script_permission_trust_checks([script])}
+    assert names["trust_policy_hook_script_group_readable"].ok is True
+    assert names["trust_policy_hook_script_group_writable"].ok is True
+    assert names["trust_policy_hook_script_other_readable"].ok is True
+    assert names["trust_policy_hook_script_other_writable"].ok is True
+
+
+def test_policy_hook_script_permission_trust_checks_warns_group_accessible(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    script = tmp_path / "gate.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    script.chmod(0o660)
+    names = {c.name: c for c in policy_hook_script_permission_trust_checks([script])}
+    assert names["trust_policy_hook_script_group_readable"].ok is False
+    assert names["trust_policy_hook_script_group_writable"].ok is False
+    assert str(script) in names["trust_policy_hook_script_group_readable"].detail
+
+
+def test_policy_hook_script_permission_trust_checks_warns_via_mocked_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(os, "name", "posix")
+    script = tmp_path / "gate.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+
+    class _Stat:
+        st_mode = stat.S_IFREG | stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO
+
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr(Path, "resolve", lambda self: self)
+    monkeypatch.setattr(Path, "stat", lambda self: _Stat())
+
+    names = {c.name: c for c in policy_hook_script_permission_trust_checks([script])}
+    assert names["trust_policy_hook_script_group_readable"].ok is False
+    assert names["trust_policy_hook_script_group_writable"].ok is False
+    assert names["trust_policy_hook_script_other_readable"].ok is False
+    assert names["trust_policy_hook_script_other_writable"].ok is False
+
+
+def test_policy_hook_trust_audit_paths_for_cfg_resolves_direct_script(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "gate.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "REPLAYT_RUN_HOOK",
+        "REPLAYT_RESUME_HOOK",
+        "REPLAYT_EXPORT_HOOK",
+        "REPLAYT_SEAL_HOOK",
+        "REPLAYT_VERIFY_SEAL_HOOK",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    paths = policy_hook_trust_audit_paths_for_cfg({"run_hook": script.name})
+    assert paths == [script.resolve()]
+
+
+def test_policy_hook_trust_audit_paths_for_cfg_python_argv1(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "hook.py"
+    script.write_text("print('ok')\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "REPLAYT_RUN_HOOK",
+        "REPLAYT_RESUME_HOOK",
+        "REPLAYT_EXPORT_HOOK",
+        "REPLAYT_SEAL_HOOK",
+        "REPLAYT_VERIFY_SEAL_HOOK",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    paths = policy_hook_trust_audit_paths_for_cfg(
+        {"run_hook": [sys.executable, str(script.name)]},
+    )
+    assert paths == [script.resolve()]
+
+
+def test_policy_hook_trust_audit_paths_for_cfg_dedupes_across_hooks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "gate.sh"
+    script.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    for name in (
+        "REPLAYT_RUN_HOOK",
+        "REPLAYT_RESUME_HOOK",
+        "REPLAYT_EXPORT_HOOK",
+        "REPLAYT_SEAL_HOOK",
+        "REPLAYT_VERIFY_SEAL_HOOK",
+    ):
+        monkeypatch.delenv(name, raising=False)
+    paths = policy_hook_trust_audit_paths_for_cfg(
+        {"run_hook": script.name, "resume_hook": script.name},
+    )
+    assert paths == [script.resolve()]

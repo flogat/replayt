@@ -94,6 +94,17 @@ PACKAGED_EXAMPLES: dict[str, ExampleSpec] = {
 }
 
 
+def packaged_example_cli_snippets(key: str) -> dict[str, str]:
+    """Copy-paste one-liners for docs and ``replayt try --list --output json``."""
+
+    return {
+        "try_offline": f"replayt try --example {key}",
+        "try_live": f"replayt try --example {key} --live",
+        "try_dry_check": f"replayt try --example {key} --dry-check",
+        "copy_to_dot": f"replayt try --example {key} --copy-to .",
+    }
+
+
 def list_packaged_examples() -> list[ExampleSpec]:
     return [PACKAGED_EXAMPLES[key] for key in sorted(PACKAGED_EXAMPLES)]
 

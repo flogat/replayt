@@ -42,6 +42,7 @@ def maintainer_checks_report(
     skip_changelog: bool = False,
     skip_docs_index: bool = False,
     skip_pyproject_pep621: bool = False,
+    skip_changelog_gate_policy: bool = False,
     skip_example_catalog: bool = False,
     skip_public_api: bool = False,
     verbose: bool = False,
@@ -72,6 +73,13 @@ def maintainer_checks_report(
             details["pyproject_pep621"] = pr
         if not pr["ok"]:
             errors.append("pyproject_pep621 failed (parse error or missing [project])")
+
+    if not skip_changelog_gate_policy:
+        cgp = _load_script("cgp", "changelog_gate_policy.py")
+        gr = cgp.changelog_gate_policy_report()
+        checks["changelog_gate_policy"] = {"ok": True, "schema": gr["schema"]}
+        if verbose:
+            details["changelog_gate_policy"] = gr
 
     if not skip_changelog:
         cl = _load_script("cl", "changelog_unreleased.py")
@@ -182,6 +190,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Skip [project] PEP 621 metadata parse report.",
     )
+    parser.add_argument(
+        "--skip-changelog-gate-policy",
+        action="store_true",
+        help="Skip machine-readable PR changelog gate policy report.",
+    )
     parser.add_argument("--skip-changelog", action="store_true", help="Skip Unreleased changelog check.")
     parser.add_argument("--skip-docs-index", action="store_true", help="Skip docs/README.md index check.")
     parser.add_argument(
@@ -206,6 +219,7 @@ def main(argv: list[str] | None = None) -> int:
         skip_changelog=args.skip_changelog,
         skip_docs_index=args.skip_docs_index,
         skip_pyproject_pep621=args.skip_pyproject_pep621,
+        skip_changelog_gate_policy=args.skip_changelog_gate_policy,
         skip_example_catalog=args.skip_example_catalog,
         skip_public_api=args.skip_public_api,
         verbose=args.verbose,

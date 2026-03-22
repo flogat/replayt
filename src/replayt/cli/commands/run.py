@@ -53,9 +53,10 @@ from replayt.cli.run_support import (
     run_hook_argv,
     run_hook_audit,
     run_result_payload,
+    run_started_hook_json_blobs_from_events,
     subprocess_env_child,
 )
-from replayt.cli.stores import open_store
+from replayt.cli.stores import open_store, read_store
 from replayt.cli.targets import load_target
 from replayt.cli.validation import (
     inputs_json_from_options,
@@ -69,6 +70,7 @@ from replayt_examples.catalog import (
     copy_packaged_example_to_directory,
     get_packaged_example,
     list_packaged_examples,
+    packaged_example_cli_snippets,
 )
 
 _log = logging.getLogger(__name__)
@@ -366,7 +368,7 @@ def cmd_run(
         raise typer.Exit(code=1)
 
     in_child = os.environ.get("REPLAYT_SUBPROCESS_RUN") == "1"
-    cfg, cfg_path, _ = get_project_config()
+    cfg, cfg_path, _, _ = get_project_config()
     inputs_resolved, _inputs_source = resolve_run_inputs_json(
         inputs_json, inputs_file, cfg=cfg, config_path=cfg_path, input_value=input_value
     )
@@ -729,6 +731,7 @@ def cmd_try(
                                 "target": spec.target,
                                 "description": spec.description,
                                 "llm_backed": spec.llm_backed,
+                                "cli": packaged_example_cli_snippets(spec.key),
                             }
                             for spec in examples
                         ],
@@ -743,6 +746,8 @@ def cmd_try(
             typer.echo(f"  - {spec.key}: {spec.title} [{mode}]")
             typer.echo(f"      {spec.description}")
             typer.echo(f"      target={spec.target}")
+            cli = packaged_example_cli_snippets(spec.key)
+            typer.echo(f"      {cli['try_offline']}")
         raise typer.Exit(code=0)
 
     try:
@@ -1014,7 +1019,7 @@ def cmd_resume(
         help="Case-insensitive structured field name to scrub from logged payloads (repeatable).",
     ),
 ) -> None:
-    cfg, cfg_path, _ = get_project_config()
+    cfg, cfg_path, _, _ = get_project_config()
     if sqlite is None and cfg.get("sqlite"):
         sqlite = resolve_project_path(cfg["sqlite"], config_path=cfg_path)
     strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite)
@@ -1033,6 +1038,9 @@ def cmd_resume(
     hook = resume_hook_argv(cfg)
     resume_policy_hook = resume_hook_audit(cfg) if hook else None
     if hook:
+        with read_store(log_dir, sqlite) as pre_store:
+            pre_events = pre_store.load_events(run_id)
+        metadata_json, tags_json, experiment_json = run_started_hook_json_blobs_from_events(pre_events)
         hook_timeout = resume_hook_timeout_seconds(cfg)
         try:
             invoke_resume_hook(
@@ -1043,6 +1051,9 @@ def cmd_resume(
                 reject=reject,
                 workflow_contract=workflow_contract,
                 timeout_seconds=hook_timeout,
+                metadata_json=metadata_json,
+                tags_json=tags_json,
+                experiment_json=experiment_json,
             )
         except subprocess.TimeoutExpired as exc:
             lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"

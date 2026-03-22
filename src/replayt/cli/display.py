@@ -533,6 +533,52 @@ def run_matches_finish_reason_filter(events: list[dict[str, Any]], wanted: froze
     return False
 
 
+def payload_llm_model(payload: dict[str, Any]) -> str | None:
+    """Resolve logged model id from `effective.model` when present, else top-level `model`."""
+    eff = payload.get("effective")
+    if isinstance(eff, dict):
+        m = eff.get("model")
+        if isinstance(m, str) and m:
+            return m
+    m = payload.get("model")
+    if isinstance(m, str) and m:
+        return m
+    return None
+
+
+def parse_llm_model_filters(raw: list[str] | None) -> frozenset[str] | None:
+    """Normalize repeatable `--llm-model` values (exact match; OR across values)."""
+    if not raw:
+        return None
+    normalized: list[str] = []
+    for item in raw:
+        model = str(item).strip()
+        if not model:
+            raise typer.BadParameter(
+                "Empty --llm-model is not allowed; omit the flag or pass a model id "
+                "(exact match on `llm_request` / `llm_response` / structured-output payload "
+                "`effective.model`, with legacy fallback to top-level `model`; repeat for OR)."
+            )
+        normalized.append(model)
+    return frozenset(normalized)
+
+
+def run_matches_llm_model_filter(events: list[dict[str, Any]], wanted: frozenset[str] | None) -> bool:
+    if wanted is None:
+        return True
+    for e in events:
+        typ = e.get("type")
+        if typ not in {"llm_request", "llm_response", "structured_output", "structured_output_failed"}:
+            continue
+        payload = e.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        m = payload_llm_model(payload)
+        if m is not None and m in wanted:
+            return True
+    return False
+
+
 def parse_iso_ts(ts: str | None) -> datetime | None:
     if not ts:
         return None

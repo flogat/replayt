@@ -1036,6 +1036,7 @@ class LLMBridge:
                 "state": self._state_getter(),
                 "schema_name": model_type.__name__,
                 "data": result.model_dump(),
+                "effective": effective,
                 **fingerprints,
                 **response_meta,
             },

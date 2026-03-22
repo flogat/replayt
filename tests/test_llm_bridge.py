@@ -533,6 +533,7 @@ def test_llm_bridge_parse_success_emits_schema_and_request_fingerprints() -> Non
     assert structured["messages_sha256"] == req["messages_sha256"]
     assert structured["effective_sha256"] == req["effective_sha256"]
     assert structured["schema_sha256"] == req["schema_sha256"]
+    assert structured["effective"] == req["effective"]
     assert structured["usage"] == canned["usage"]
     assert structured["finish_reason"] == "stop"
     assert structured["latency_ms"] == resp["latency_ms"]

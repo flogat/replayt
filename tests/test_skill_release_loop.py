@@ -506,10 +506,13 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert env["SKILL_RUN_DIR"] == str(run_dir.resolve())
     assert env["SKILL_STEP_INDEX"] == "1"
     assert env["SKILL_STEP_TOTAL"] == "1"
+    expected_pipeline = mod.skill_pipeline_sha256(["demo"])
+    assert env["SKILL_PIPELINE_SHA256"] == expected_pipeline
     inv_path = run_dir / "iter-01-demo.invocation.json"
     assert inv_path.is_file()
     inv = json.loads(inv_path.read_text(encoding="utf-8"))
     assert inv["schema"] == mod.SKILL_INVOCATION_SCHEMA
+    assert inv["pipeline_sha256"] == expected_pipeline
     assert inv["skill_name"] == "demo"
     assert inv["skill_requested_name"] == "demo"
     assert inv["iteration"] == 1
@@ -522,6 +525,29 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert inv["prompt_file"] == str((run_dir / "iter-01-demo.prompt.md").resolve())
     assert inv["log_file"] == str((run_dir / "iter-01-demo.log").resolve())
     assert "Pipeline step: 1/1" in (run_dir / "iter-01-demo.prompt.md").read_text(encoding="utf-8")
+    pipe_path = run_dir / "pipeline.json"
+    assert pipe_path.is_file()
+    pipe = json.loads(pipe_path.read_text(encoding="utf-8"))
+    assert pipe["schema"] == mod.SKILL_RELEASE_PIPELINE_SCHEMA
+    assert pipe["skills"] == ["demo"]
+    assert pipe["pipeline_sha256"] == expected_pipeline
+
+
+def test_skill_pipeline_file_rejects_reordered_skills_on_resume(tmp_path: Path) -> None:
+    mod = _load_script()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    mod.ensure_skill_release_pipeline_file(run_dir, ["a", "b"], "task")
+    with pytest.raises(mod.LoopError, match="same --skills"):
+        mod.ensure_skill_release_pipeline_file(run_dir, ["b", "a"], "task")
+
+
+def test_load_skill_release_pipeline_sha256_roundtrip(tmp_path: Path) -> None:
+    mod = _load_script()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    sha = mod.ensure_skill_release_pipeline_file(run_dir, ["x"], "t")
+    assert mod.load_skill_release_pipeline_sha256(run_dir) == sha
 
 
 def test_preflight_rejects_dirty_worktree(tmp_path: Path) -> None:
@@ -642,12 +668,17 @@ def _pre_tag_fix_args(mod, repo: Path, *, max_fix: int) -> argparse.Namespace:
     )
 
 
+def _stub_pipeline_json_for_pre_tag(mod, run_dir: Path) -> None:
+    mod.ensure_skill_release_pipeline_file(run_dir, ["pre_tag_ci_stub"], "pre-tag unit test")
+
+
 def test_run_pre_tag_github_ci_with_fixes_zero_max_fails_fast(tmp_path: Path, monkeypatch) -> None:
     mod = _load_script()
     repo = tmp_path / "repo"
     repo.mkdir()
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    _stub_pipeline_json_for_pre_tag(mod, run_dir)
     pre_tag_log = run_dir / "pre-tag-iter-01-github-ci.log"
     pre_tag_log.write_text("fail\n", encoding="utf-8")
     args = _pre_tag_fix_args(mod, repo, max_fix=0)
@@ -670,6 +701,7 @@ def test_run_pre_tag_github_ci_with_fixes_retries_after_fix(tmp_path: Path, monk
     repo.mkdir()
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    _stub_pipeline_json_for_pre_tag(mod, run_dir)
     pre_tag_log = run_dir / "pre-tag-iter-01-github-ci.log"
     args = _pre_tag_fix_args(mod, repo, max_fix=3)
     shell_calls: list[tuple[str | None, str]] = []
@@ -712,6 +744,7 @@ def test_run_pre_tag_github_ci_with_fixes_exhausts_max_rounds(tmp_path: Path, mo
     repo.mkdir()
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    _stub_pipeline_json_for_pre_tag(mod, run_dir)
     pre_tag_log = run_dir / "pre-tag-iter-01-github-ci.log"
     pre_tag_log.write_text("x\n", encoding="utf-8")
     args = _pre_tag_fix_args(mod, repo, max_fix=1)
@@ -741,6 +774,7 @@ def test_run_pre_tag_github_ci_with_fixes_no_working_tree_change_raises(tmp_path
     repo.mkdir()
     run_dir = tmp_path / "run"
     run_dir.mkdir()
+    _stub_pipeline_json_for_pre_tag(mod, run_dir)
     pre_tag_log = run_dir / "pre-tag-iter-01-github-ci.log"
     pre_tag_log.write_text("x\n", encoding="utf-8")
     args = _pre_tag_fix_args(mod, repo, max_fix=3)

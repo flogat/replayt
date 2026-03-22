@@ -103,6 +103,19 @@ def _step_summary_path_and_source() -> tuple[Path | None, str]:
     return None, "unset"
 
 
+def step_summary_env_snapshot() -> dict[str, str | None]:
+    """Machine-readable step-summary path for ``replayt version --format json``."""
+
+    path, src = _step_summary_path_and_source()
+    if path is None:
+        return {"path": None, "path_source": src}
+    try:
+        resolved = str(path.resolve())
+    except OSError:
+        resolved = str(path)
+    return {"path": resolved, "path_source": src}
+
+
 def _resolve_step_summary_path() -> Path | None:
     """Where to append markdown when ``--github-summary`` / ``REPLAYT_GITHUB_SUMMARY`` is on."""
 

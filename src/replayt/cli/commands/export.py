@@ -27,9 +27,12 @@ from replayt.cli.run_id_hints import echo_missing_run_hints
 from replayt.cli.run_support import (
     export_hook_argv,
     export_hook_audit,
+    first_jsonl_event_with_type,
     invoke_export_hook,
     invoke_seal_hook,
     invoke_verify_seal_hook,
+    run_started_hook_json_blobs_from_events,
+    run_started_hook_json_blobs_from_jsonl_path,
     seal_hook_argv,
     seal_hook_audit,
     verify_seal_hook_argv,
@@ -55,11 +58,12 @@ def _maybe_invoke_export_hook(
     cli_target: str | None = None,
     report_style: str | None = None,
 ) -> dict[str, Any] | None:
-    cfg, _, _ = get_project_config()
+    cfg, _, _, _ = get_project_config()
     hook = export_hook_argv(cfg)
     if not hook:
         return None
     hook_timeout = export_hook_timeout_seconds(cfg)
+    meta_j, tags_j, exp_j = run_started_hook_json_blobs_from_events(events)
     try:
         invoke_export_hook(
             hook,
@@ -75,6 +79,9 @@ def _maybe_invoke_export_hook(
             workflow_contract=_policy_workflow_contract_from_events(events),
             cli_target=cli_target,
             timeout_seconds=hook_timeout,
+            metadata_json=meta_j,
+            tags_json=tags_j,
+            experiment_json=exp_j,
         )
     except subprocess.TimeoutExpired as exc:
         lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
@@ -98,12 +105,13 @@ def _maybe_invoke_seal_hook(
     seal_out: Path,
     line_count: int,
 ) -> dict[str, Any] | None:
-    cfg, _, _ = get_project_config()
+    cfg, _, _, _ = get_project_config()
     hook = seal_hook_argv(cfg)
     if not hook:
         return None
     hook_timeout = seal_hook_timeout_seconds(cfg)
     workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
+    meta_j, tags_j, exp_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
     try:
         invoke_seal_hook(
             hook,
@@ -114,6 +122,9 @@ def _maybe_invoke_seal_hook(
             line_count=line_count,
             workflow_contract=workflow_contract,
             timeout_seconds=hook_timeout,
+            metadata_json=meta_j,
+            tags_json=tags_j,
+            experiment_json=exp_j,
         )
     except subprocess.TimeoutExpired as exc:
         lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
@@ -139,12 +150,13 @@ def _maybe_invoke_verify_seal_hook(
     line_count: int,
     file_sha256: str,
 ) -> None:
-    cfg, _, _ = get_project_config()
+    cfg, _, _, _ = get_project_config()
     hook = verify_seal_hook_argv(cfg)
     if not hook:
         return
     hook_timeout = verify_seal_hook_timeout_seconds(cfg)
     workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
+    meta_j, tags_j, exp_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
     try:
         invoke_verify_seal_hook(
             hook,
@@ -157,6 +169,9 @@ def _maybe_invoke_verify_seal_hook(
             file_sha256=file_sha256,
             workflow_contract=workflow_contract,
             timeout_seconds=hook_timeout,
+            metadata_json=meta_j,
+            tags_json=tags_j,
+            experiment_json=exp_j,
         )
     except subprocess.TimeoutExpired as exc:
         lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
@@ -246,21 +261,10 @@ def _policy_workflow_contract_from_events(events: list[dict[str, Any]]) -> dict[
 def _policy_workflow_contract_from_jsonl_path(path: Path) -> dict[str, Any]:
     """First ``run_started`` line in a JSONL file (standalone ``seal`` / ``verify-seal``)."""
 
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError:
+    event = first_jsonl_event_with_type(path, event_type="run_started")
+    if event is None:
         return {"contract_sha256": None, "workflow": {}}
-    for line in text.splitlines():
-        s = line.strip()
-        if not s:
-            continue
-        try:
-            event = json.loads(s)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(event, dict) and event.get("type") == "run_started":
-            return _policy_workflow_contract_from_events([event])
-    return {"contract_sha256": None, "workflow": {}}
+    return _policy_workflow_contract_from_events([event])
 
 
 def _workflow_contract_snapshot(
@@ -556,6 +560,12 @@ def cmd_report_diff(
         "--format",
         help="html (self-contained page) or markdown (tickets / chat / docs).",
     ),
+    style: Literal["default", "stakeholder", "support"] = typer.Option(
+        "default",
+        "--style",
+        help="default (standard section order), stakeholder (attention hints + same order), "
+        "or support (failure/approvals before context, for triage handoffs).",
+    ),
 ) -> None:
     """Side-by-side comparison of two runs from local JSONL (no model calls)."""
 
@@ -581,9 +591,9 @@ def cmd_report_diff(
     ctx_a = collect_report_context(events_a)
     ctx_b = collect_report_context(events_b)
     if report_format == "markdown":
-        doc = build_report_diff_markdown(run_a, run_b, ctx_a, ctx_b)
+        doc = build_report_diff_markdown(run_a, run_b, ctx_a, ctx_b, style=style)
     else:
-        doc = build_report_diff_html(run_a, run_b, ctx_a, ctx_b)
+        doc = build_report_diff_html(run_a, run_b, ctx_a, ctx_b, style=style)
     if out:
         out_path = Path(out)
         out_path.parent.mkdir(parents=True, exist_ok=True)

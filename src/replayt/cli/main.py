@@ -26,7 +26,7 @@ def _replayt_cli_root(ctx: typer.Context) -> None:
         return
     if ctx.invoked_subcommand in _SKIP_MIN_REPLAYT_VERSION:
         return
-    cfg, _, _ = get_project_config()
+    cfg, _, _, _ = get_project_config()
     enforce_min_replayt_version_cli(cfg, installed=replayt.__version__)
 
 

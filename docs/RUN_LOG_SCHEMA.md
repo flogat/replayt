@@ -88,6 +88,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `state` (string)
 - `schema_name` (string)
 - `data` (object): validated model dump
+- `effective` (object): same shape as on `llm_request` / `llm_response` for this completion (model, sampling, timeouts, optional `experiment`, `structured_output_mode`, and so on) so analytics can filter on one event type without joining prior LLM lines
 - `messages_sha256` (string): same fingerprint as the triggering `llm_request`
 - `effective_sha256` (string): same fingerprint as the triggering `llm_request`
 - `schema_sha256` (string): stable SHA-256 fingerprint of the parse schema

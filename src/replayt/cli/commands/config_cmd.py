@@ -37,6 +37,7 @@ from replayt.cli.config import (
 from replayt.cli.path_readiness import ci_artifact_readiness_checks, readiness_checks
 from replayt.cli.run_support import (
     export_hook_argv,
+    policy_hook_trust_audit_paths_for_cfg,
     resume_hook_argv,
     run_hook_argv,
     seal_hook_argv,
@@ -49,6 +50,7 @@ from replayt.security import (
     extraneous_llm_credential_env_names,
     inputs_file_permission_trust_checks,
     log_directory_permission_trust_checks,
+    policy_hook_script_permission_trust_checks,
     trust_boundary_checks,
     workflow_entrypoint_permission_trust_checks,
 )
@@ -62,7 +64,7 @@ def _config_report(
     log_mode: str,
     timeout: int | None,
 ) -> dict[str, object]:
-    cfg, cfg_path, unknown_keys = get_project_config()
+    cfg, cfg_path, unknown_keys, shadowed_sources = get_project_config()
     resolved_log_dir = resolve_log_dir(log_dir, log_subdir)
     sqlite_path, sqlite_source = resolve_sqlite_path(sqlite, cfg, config_path=cfg_path)
     resolved_log_mode, log_mode_source = resolve_log_mode_setting(log_mode, cfg)
@@ -185,6 +187,7 @@ def _config_report(
         )
         + workflow_entrypoint_permission_trust_checks(wf_trust_paths)
         + inputs_file_permission_trust_checks(inputs_trust_paths)
+        + policy_hook_script_permission_trust_checks(policy_hook_trust_audit_paths_for_cfg(cfg))
     )
     filesystem_checks = readiness_checks(log_dir=resolved_log_dir, sqlite=sqlite_path) + ci_artifact_readiness_checks(
         junit_xml=ci_artifacts.junit_xml,
@@ -200,6 +203,7 @@ def _config_report(
             "path": cfg_path,
             "keys": sorted(cfg.keys()),
             "unknown_keys": sorted(unknown_keys),
+            "shadowed_sources": list(shadowed_sources),
             "min_replayt_version": min_ver["constraint"],
             "min_replayt_version_source": min_ver["constraint_source"],
             "min_replayt_version_satisfied": min_ver["satisfied"],
@@ -332,6 +336,13 @@ def cmd_config(
     uk = project.get("unknown_keys") or []
     if uk:
         typer.echo(f"project_config_unknown_keys={uk} (ignored; see docs/CONFIG.md#unknown-keys)")
+    sh = project.get("shadowed_sources") or []
+    if sh:
+        typer.echo(
+            "project_config_shadowed_sources="
+            + ", ".join(str(p) for p in sh)
+            + " (ignored; .replaytrc.toml takes precedence over pyproject.toml [tool.replayt] in the same directory)"
+        )
     mv = project.get("min_replayt_version")
     if mv:
         typer.echo(

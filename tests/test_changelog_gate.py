@@ -15,6 +15,16 @@ def _load_script():
     return mod
 
 
+def _load_policy():
+    root = Path(__file__).resolve().parents[1]
+    path = root / "scripts" / "changelog_gate_policy.py"
+    spec = importlib.util.spec_from_file_location("changelog_gate_policy", path)
+    assert spec and spec.loader
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
 def test_is_protected_path() -> None:
     gate = _load_script()
     assert gate.is_protected_path("src/replayt/runner.py")
@@ -22,6 +32,22 @@ def test_is_protected_path() -> None:
     assert gate.is_protected_path("docs/RUN_LOG_SCHEMA.md")
     assert not gate.is_protected_path("tests/test_runner.py")
     assert not gate.is_protected_path("README.md")
+
+
+def test_changelog_gate_policy_report_matches_gate() -> None:
+    pol = _load_policy()
+    gate = _load_script()
+    report = pol.changelog_gate_policy_report()
+    assert report["schema"] == "replayt.changelog_gate_policy.v1"
+    assert report["exact_paths"] == ["docs/RUN_LOG_SCHEMA.md"]
+    assert report["path_prefixes"] == ["src/replayt/", "src/replayt_examples/"]
+    for p in report["exact_paths"]:
+        assert gate.is_protected_path(p)
+        assert pol.is_protected_path(p)
+    assert pol.is_protected_path("src/replayt/foo.py")
+    assert gate.is_protected_path("src/replayt/foo.py")
+    assert pol.is_protected_path("src/replayt_examples/bar.py")
+    assert gate.is_protected_path("src/replayt_examples/bar.py")
 
 
 def test_need_changelog_update() -> None:

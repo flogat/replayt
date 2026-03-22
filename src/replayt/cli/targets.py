@@ -138,6 +138,43 @@ def load_python_file(path: Path) -> Any:
     )
 
 
+def _module_syntax_bad_parameter(target: str, mod_name: str, exc: SyntaxError) -> typer.BadParameter:
+    """Syntax errors while loading *mod_name* (import hits a broken ``.py`` file)."""
+
+    detail = exc.msg or "invalid syntax"
+    location = f"line {exc.lineno}"
+    if exc.offset is not None:
+        location += f", column {exc.offset}"
+    path_hint = exc.filename or mod_name
+    compile_tip = (
+        f"Tip: `python -m py_compile {path_hint}` shows the same parser error outside replayt."
+        if exc.filename
+        else "Fix the syntax error in that module on disk, then retry."
+    )
+    head = (
+        f"Could not import module {mod_name!r} for target {target!r}: syntax error at {location} "
+        f"in {path_hint!r}: {detail}. "
+    )
+    return typer.BadParameter(
+        head + f"{compile_tip} "
+        f"After the file parses, `replayt doctor --skip-connectivity --target {target}` checks the workflow graph."
+    )
+
+
+def _module_other_import_bad_parameter(target: str, mod_name: str, exc: ImportError) -> typer.BadParameter:
+    """ImportError while loading *mod_name* when the module is not simply missing (circular import, etc.)."""
+
+    detail = str(exc).strip() or exc.__class__.__name__
+    py_cmd = f'python -c "import {mod_name}"'
+    return typer.BadParameter(
+        f"Importing module {mod_name!r} for target {target!r} failed with {exc.__class__.__name__}: {detail}. "
+        "Python started loading the package but did not finish (often a circular import, import-time side effects, "
+        "or a dependency that only fails once the parent package is loading). "
+        f"Run {py_cmd} from the same working directory and virtual environment to see the full traceback. "
+        f"After imports succeed, `replayt doctor --skip-connectivity --target {target}` checks the workflow graph."
+    )
+
+
 def _module_import_bad_parameter(target: str, mod_name: str, exc: ModuleNotFoundError) -> typer.BadParameter:
     """Turn import failures into onboarding-friendly CLI errors (common footguns)."""
 
@@ -182,6 +219,10 @@ def load_target(target: str) -> Workflow:
             mod = importlib.import_module(mod_name)
         except ModuleNotFoundError as exc:
             raise _module_import_bad_parameter(target, mod_name, exc) from exc
+        except SyntaxError as exc:
+            raise _module_syntax_bad_parameter(target, mod_name, exc) from exc
+        except ImportError as exc:
+            raise _module_other_import_bad_parameter(target, mod_name, exc) from exc
         if not hasattr(mod, attr):
             workflows = _workflow_objects(mod)
             if workflows:
