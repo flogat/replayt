@@ -57,7 +57,7 @@ def test_resolve_skill_root_rejects_missing_or_non_directory(tmp_path: Path, mon
         mod.resolve_skill_root(str(file_path))
 
 
-def test_main_passes_skill_root_to_codex_exec(tmp_path: Path, monkeypatch) -> None:
+def test_main_invokes_codex_exec_without_skill_root_flag(tmp_path: Path, monkeypatch) -> None:
     mod = _load_script()
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -88,11 +88,39 @@ def test_main_passes_skill_root_to_codex_exec(tmp_path: Path, monkeypatch) -> No
         "-C",
         str(repo),
         "--skip-git-repo-check",
-        "--skill-root",
-        str(skill_root.resolve()),
         "--full-auto",
         "-",
     ]
+    assert "--skill-root" not in captured["cmd"]
     kwargs = captured["kwargs"]
     assert kwargs["cwd"] == repo
     assert kwargs["input"] == b"follow the prompt"
+
+
+def test_main_add_dir_when_skill_root_outside_repo(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    outside = tmp_path / "external-skills"
+    outside.mkdir()
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("x\n", encoding="utf-8")
+    binary = tmp_path / "codex.exe"
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(mod, "repo_root", lambda: repo)
+    monkeypatch.setattr(mod, "ensure_codex_installed", lambda: binary)
+    monkeypatch.setattr(mod, "codex_path_entries", lambda _binary: [])
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = cmd
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    rc = mod.main(["--prompt-file", str(prompt), "--skill-root", str(outside)])
+    assert rc == 0
+    cmd = captured["cmd"]
+    assert "--add-dir" in cmd
+    assert str(outside.resolve()) in cmd
+    assert "--skill-root" not in cmd
