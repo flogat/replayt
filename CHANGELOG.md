@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- **Testing:** Disable `rich` console output in test configuration to prevent string assertion failures in GitHub Actions.
+
 ## 0.4.7 - 2026-03-22
 
 - **reviewcodebase pass:** `replayt doctor` no longer relies on `assert` before the optional `/models` connectivity probe (explicit `settings is None` guard so `python -O` cannot skip validation); `coerce_max_tokens_for_api` rejects non-finite floats and numeric strings (`inf` / `nan` / overflow-sized literals) with a clear `ValueError` instead of `OverflowError` or `int` conversion failures; covered in [`tests/test_llm_coercion.py`](tests/test_llm_coercion.py).
