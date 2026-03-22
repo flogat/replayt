@@ -202,6 +202,54 @@ def test_llm_bridge_with_settings_passes_stop_to_client_and_effective() -> None:
     assert req["effective"]["stop"] == ["###", "END"]
 
 
+def test_llm_bridge_with_settings_passes_extra_body_to_client_and_effective() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="k", model="m", extra_body={"provider_hint": {"tier": "base"}})
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "s",
+    ).with_settings(extra_body={"reasoning": {"effort": "high"}})
+
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    assert mock_cc.call_args.kwargs["extra_body"] == {
+        "provider_hint": {"tier": "base"},
+        "reasoning": {"effort": "high"},
+    }
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["extra_body"] == {
+        "provider_hint": {"tier": "base"},
+        "reasoning": {"effort": "high"},
+    }
+
+
+def test_llm_bridge_call_extra_body_empty_dict_clears_defaults() -> None:
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=lambda *_args, **_kwargs: None,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "s",
+    ).with_settings(extra_body={"reasoning": {"effort": "medium"}})
+
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0, extra_body={})
+
+    assert mock_cc.call_args.kwargs["extra_body"] is None
+
+
 def test_llm_bridge_with_settings_passes_penalties_and_seed_to_client() -> None:
     events: list[tuple[str, dict]] = []
 
@@ -552,6 +600,22 @@ def test_openai_compat_supports_base_url_and_top_p_overrides() -> None:
     assert kwargs["json"]["frequency_penalty"] == 0.1
     assert kwargs["json"]["presence_penalty"] == 0.2
     assert kwargs["json"]["seed"] == 3
+
+
+def test_openai_compat_merges_extra_body_into_payload() -> None:
+    body = b'{"choices":[{"message":{"content":"{}"}}]}'
+    fake_http = _FakeHTTPClient(lambda *a, **k: _stream_cm(_FakeStreamResp(body)))
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", extra_body={"provider_hint": "base"}),
+        http_client=fake_http,
+    )
+    client.chat_completions(
+        messages=[{"role": "user", "content": "x"}],
+        extra_body={"reasoning": {"effort": "low"}},
+    )
+    kwargs = fake_http.calls[0][1]
+    assert kwargs["json"]["provider_hint"] == "base"
+    assert kwargs["json"]["reasoning"] == {"effort": "low"}
 
 
 def test_openai_compat_rejects_response_over_max_bytes() -> None:

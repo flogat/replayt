@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import importlib.resources
 import json
 from collections import Counter
@@ -19,12 +20,14 @@ from replayt.cli.display import (
     parse_duration,
     parse_iso_ts,
     parse_meta_filters,
+    parse_note_kind_filters,
     parse_structured_schema_name_filters,
     parse_tag_filters,
     parse_tool_name_filters,
     replay_html,
     replay_timeline_lines,
     run_diff_data,
+    run_matches_note_kind_filter,
     run_matches_structured_schema_name_filter,
     run_matches_tool_name_filter,
     run_meta_filters_match,
@@ -38,6 +41,11 @@ from replayt.graph_export import workflow_to_mermaid
 from replayt.persistence import JSONLStore, SQLiteStore
 
 _RUN_STATUS_CHOICES = frozenset({"completed", "failed", "paused", "unknown"})
+_WORKFLOW_CONTRACT_SCHEMA = "replayt.workflow_contract.v1"
+_WORKFLOW_CONTRACT_CHECK_SCHEMA = "replayt.workflow_contract_check.v1"
+_INSPECT_REPORT_SCHEMA = "replayt.inspect_report.v1"
+_STATS_REPORT_SCHEMA = "replayt.stats_report.v1"
+_DIFF_REPORT_SCHEMA = "replayt.diff_report.v1"
 
 
 def _event_type_filters(event_types: list[str] | None) -> frozenset[str] | None:
@@ -59,6 +67,80 @@ def _filter_events_by_type(events: list[dict[str, Any]], filters: frozenset[str]
     if filters is None:
         return events
     return [e for e in events if e.get("type") in filters]
+
+
+def _filter_events_by_note_kind(
+    events: list[dict[str, Any]],
+    filters: frozenset[str] | None,
+    *,
+    event_type_filters: frozenset[str] | None,
+) -> list[dict[str, Any]]:
+    if filters is None:
+        return events
+    filtered: list[dict[str, Any]] = []
+    for event in events:
+        typ = event.get("type")
+        if typ == "step_note":
+            payload = event.get("payload") or {}
+            kind = payload.get("kind")
+            if isinstance(kind, str) and kind in filters:
+                filtered.append(event)
+            continue
+        if event_type_filters is not None and typ in event_type_filters:
+            filtered.append(event)
+    return filtered
+
+
+def _contract_json_lines(contract: dict[str, Any]) -> list[str]:
+    return json.dumps(contract, indent=2, sort_keys=True).splitlines()
+
+
+def _write_contract_snapshot(path: Path, contract: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(contract, indent=2) + "\n", encoding="utf-8")
+
+
+def _load_contract_snapshot(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise ValueError(f"Contract snapshot not found: {path}")
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError as exc:
+        raise ValueError(f"Contract snapshot must be UTF-8 text: {path} ({exc})") from exc
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Contract snapshot must be valid JSON: {path} ({exc})") from exc
+    if not isinstance(data, dict):
+        raise ValueError(f"Contract snapshot must be a JSON object: {path}")
+    if data.get("schema") != _WORKFLOW_CONTRACT_SCHEMA:
+        got = data.get("schema")
+        raise ValueError(
+            f"Contract snapshot schema mismatch: expected {_WORKFLOW_CONTRACT_SCHEMA!r}, got {got!r}"
+        )
+    return data
+
+
+def _contract_check_report(
+    current: dict[str, Any], *, expected: dict[str, Any], snapshot_path: Path
+) -> dict[str, Any]:
+    matches = current == expected
+    diff = list(
+        difflib.unified_diff(
+            _contract_json_lines(expected),
+            _contract_json_lines(current),
+            fromfile=str(snapshot_path),
+            tofile="current",
+            lineterm="",
+        )
+    )
+    return {
+        "schema": _WORKFLOW_CONTRACT_CHECK_SCHEMA,
+        "ok": matches,
+        "snapshot_path": str(snapshot_path),
+        "workflow": current.get("workflow"),
+        "diff": diff,
+    }
 
 
 def _run_status_filters(status: list[str] | None) -> frozenset[str] | None:
@@ -85,6 +167,14 @@ def cmd_inspect(
             "Summary counts still reflect the full run; the event list (and JSON `events`) are filtered."
         ),
     ),
+    note_kind: list[str] | None = typer.Option(
+        None,
+        "--note-kind",
+        help=(
+            "Only include `step_note` events whose payload `kind` matches (repeatable; OR). "
+            "Without --event-type, this narrows the event list to matching notes only."
+        ),
+    ),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -99,6 +189,7 @@ def cmd_inspect(
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
     type_filters = _event_type_filters(event_type)
+    note_kind_filters = parse_note_kind_filters(note_kind)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
@@ -106,12 +197,20 @@ def cmd_inspect(
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
     filtered = _filter_events_by_type(events, type_filters)
+    filtered = _filter_events_by_note_kind(filtered, note_kind_filters, event_type_filters=type_filters)
     use_json = as_json or output == "json"
     if use_json:
         summary = event_summary(events)
-        payload: dict[str, Any] = {"summary": summary, "events": filtered}
+        payload: dict[str, Any] = {
+            "schema": _INSPECT_REPORT_SCHEMA,
+            "run_id": run_id,
+            "summary": summary,
+            "events": filtered,
+        }
         if type_filters is not None:
             payload["event_type_filter"] = sorted(type_filters)
+        if note_kind_filters is not None:
+            payload["note_kind_filter"] = sorted(note_kind_filters)
         typer.echo(json.dumps(payload, indent=2, default=str))
         return
     summary = event_summary(events)
@@ -119,7 +218,7 @@ def cmd_inspect(
         f"run_id={run_id} workflow={summary['workflow_name']}@{summary['workflow_version']} status={summary['status']}"
     )
     event_counts = f"events={len(events)}"
-    if type_filters is not None:
+    if type_filters is not None or note_kind_filters is not None:
         event_counts += f" shown={len(filtered)}"
     typer.echo(
         (
@@ -210,11 +309,44 @@ def cmd_contract(
         "-f",
         help="text (default) or json.",
     ),
+    snapshot_out: Path | None = typer.Option(
+        None,
+        "--snapshot-out",
+        help="Write the current replayt.workflow_contract.v1 JSON snapshot to this path.",
+    ),
+    check: Path | None = typer.Option(
+        None,
+        "--check",
+        help="Compare the current contract against a checked-in replayt.workflow_contract.v1 JSON snapshot.",
+    ),
 ) -> None:
     """Print a snapshot-friendly workflow contract: states, retries, expects, and declared edges."""
 
+    if snapshot_out is not None and check is not None:
+        typer.echo("Use only one of --snapshot-out or --check", err=True)
+        raise typer.Exit(code=1)
+
     wf = load_target(target)
     contract = wf.contract()
+    if snapshot_out is not None:
+        _write_contract_snapshot(snapshot_out, contract)
+    if check is not None:
+        try:
+            expected = _load_contract_snapshot(check)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        report = _contract_check_report(contract, expected=expected, snapshot_path=check)
+        if output == "json":
+            typer.echo(json.dumps(report, indent=2))
+        else:
+            if report["ok"]:
+                typer.echo(f"contract matches {check}")
+            else:
+                typer.echo(f"contract drift against {check}", err=True)
+                for line in report["diff"]:
+                    typer.echo(line, err=True)
+        raise typer.Exit(code=0 if report["ok"] else 1)
     if output == "json":
         typer.echo(json.dumps(contract, indent=2))
         return
@@ -236,6 +368,8 @@ def cmd_contract(
             f"{step['name']}: expects={expects} retries={retry['max_attempts']} "
             f"backoff={retry['backoff_seconds']} next={outgoing}"
         )
+    if snapshot_out is not None:
+        typer.echo(f"wrote {snapshot_out}")
 
 
 def cmd_validate(
@@ -262,6 +396,14 @@ def cmd_validate(
         "--inputs-file",
         help="Inputs JSON file (mutually exclusive with --inputs-json).",
     ),
+    input_value: list[str] | None = typer.Option(
+        None,
+        "--input",
+        help=(
+            "Repeatable key=value input override. Dotted keys build nested objects "
+            "(for example issue.title=Crash); values are parsed as JSON scalars/objects when possible."
+        ),
+    ),
     metadata_json: str | None = typer.Option(
         None,
         "--metadata-json",
@@ -285,7 +427,7 @@ def cmd_validate(
     errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
     cfg, cfg_path, _unknown = get_project_config()
     inputs_resolved, _inputs_src = resolve_run_inputs_json(
-        inputs_json, inputs_file, cfg=cfg, config_path=cfg_path
+        inputs_json, inputs_file, cfg=cfg, config_path=cfg_path, input_value=input_value
     )
     report = validation_report(
         target=target,
@@ -346,6 +488,11 @@ def cmd_runs(
             "`schema_name` (exact match; repeatable; OR)."
         ),
     ),
+    note_kind: list[str] | None = typer.Option(
+        None,
+        "--note-kind",
+        help="Only runs that recorded a `step_note` with this `kind` (exact match; repeatable; OR).",
+    ),
 ) -> None:
     """List recent local runs from JSONL logs."""
 
@@ -355,6 +502,7 @@ def cmd_runs(
     exp_filters = parse_tag_filters(experiment)
     tool_filters = parse_tool_name_filters(tool)
     schema_filters = parse_structured_schema_name_filters(structured_schema)
+    note_kind_filters = parse_note_kind_filters(note_kind)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     with read_store(log_dir, sqlite) as store:
         runs_data: list[tuple[str, dict[str, Any]]] = []
@@ -372,6 +520,8 @@ def cmd_runs(
             if not run_matches_tool_name_filter(events, tool_filters):
                 continue
             if not run_matches_structured_schema_name_filter(events, schema_filters):
+                continue
+            if not run_matches_note_kind_filter(events, note_kind_filters):
                 continue
             runs_data.append((rid, summary))
 
@@ -428,6 +578,11 @@ def cmd_stats(
             "`schema_name` (exact match; repeatable; OR)."
         ),
     ),
+    note_kind: list[str] | None = typer.Option(
+        None,
+        "--note-kind",
+        help="Only runs that recorded a `step_note` with this `kind` (exact match; repeatable; OR).",
+    ),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """Summarize local run logs: counts, LLM latency averages, token usage, common failure states."""
@@ -437,6 +592,7 @@ def cmd_stats(
     exp_filters = parse_tag_filters(experiment)
     tool_filters = parse_tool_name_filters(tool)
     schema_filters = parse_structured_schema_name_filters(structured_schema)
+    note_kind_filters = parse_note_kind_filters(note_kind)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     now = datetime.now(timezone.utc)
     cutoff = None
@@ -479,6 +635,8 @@ def cmd_stats(
             continue
         if not run_matches_structured_schema_name_filter(events, schema_filters):
             continue
+        if not run_matches_note_kind_filter(events, note_kind_filters):
+            continue
         total += 1
         st = str(summ.get("status", "unknown"))
         by_status[st] += 1
@@ -512,6 +670,7 @@ def cmd_stats(
     avg_latency = round(sum(latencies) / len(latencies), 2) if latencies else None
     top_fails = fail_states.most_common(5)
     payload = {
+        "schema": _STATS_REPORT_SCHEMA,
         "runs_included": total,
         "runs_total_on_disk": len(all_run_ids),
         "runs_scanned": len(run_ids),
@@ -582,6 +741,7 @@ def cmd_diff(
     db = run_diff_data(events_b)
 
     diff_payload: dict[str, Any] = {
+        "schema": _DIFF_REPORT_SCHEMA,
         "run_a": run_a,
         "run_b": run_b,
         "status": {"a": da["status"], "b": db["status"], "changed": da["status"] != db["status"]},

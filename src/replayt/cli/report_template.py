@@ -1045,19 +1045,14 @@ def build_report_diff_html(
     )
 
 
-def _ab_json_preview_markdown(left: Any, right: Any, *, limit: int = 1200) -> str:
-    sa = json.dumps(left, indent=2, ensure_ascii=False, default=str)
-    sb = json.dumps(right, indent=2, ensure_ascii=False, default=str)
-    a_part = sa[:limit] + ("..." if len(sa) > limit else "")
-    b_part = sb[:limit] + ("..." if len(sb) > limit else "")
-    body = f"A: {a_part}\n\nB: {b_part}"
-    return f"```\n{body}\n```"
-
-
-def _context_diff_markdown(label: str, left: Any, right: Any) -> str:
+def _md_diff_block(label: str, left: Any, right: Any, *, limit: int = 4000) -> list[str]:
+    lines = [f"### {label}", ""]
     if left == right:
-        return f"- **{label}:** match"
-    return f"- **{label}:** different\n\n{_ab_json_preview_markdown(left, right)}"
+        lines += ["- Match: yes", ""]
+        return lines
+    lines += ["- Match: no", "", "**Run A**", "", _md_json_fence(left, limit=limit), "", "**Run B**", ""]
+    lines += [_md_json_fence(right, limit=limit), ""]
+    return lines
 
 
 def build_report_diff_markdown(
@@ -1069,23 +1064,21 @@ def build_report_diff_markdown(
     """Markdown variant of ``replayt report-diff`` for tickets and chat (no HTML)."""
 
     def state_chain(states: list[dict[str, str]]) -> str:
-        return " -> ".join(s["state"] for s in states) if states else "(none)"
+        return " -> ".join(str(s.get("state", "")) for s in states) if states else "(none)"
 
     lines: list[str] = [
         "# Run comparison",
         "",
-        "Summary from recorded JSONL (no model calls).",
+        "Side-by-side summary from recorded JSONL (no model calls).",
         "",
-        "## Runs",
-        "",
-        "### Run A",
+        "## Run A",
         "",
         f"- **ID:** `{run_a}`",
         f"- **Workflow:** {ctx_a['workflow_name']}@{ctx_a['workflow_version']}",
         f"- **Status:** {ctx_a['status']}",
         f"- **States:** {state_chain(ctx_a['states'])}",
         "",
-        "### Run B",
+        "## Run B",
         "",
         f"- **ID:** `{run_b}`",
         f"- **Workflow:** {ctx_b['workflow_name']}@{ctx_b['workflow_version']}",
@@ -1094,60 +1087,45 @@ def build_report_diff_markdown(
         "",
         "## Run context",
         "",
-        _context_diff_markdown("Tags", ctx_a["tags"], ctx_b["tags"]),
-        "",
-        _context_diff_markdown("Run metadata", ctx_a["run_metadata"], ctx_b["run_metadata"]),
-        "",
-        _context_diff_markdown("Experiment", ctx_a["experiment"], ctx_b["experiment"]),
-        "",
-        _context_diff_markdown("Workflow metadata", ctx_a["workflow_meta"], ctx_b["workflow_meta"]),
-        "",
-        "## Failure and pause signals",
-        "",
     ]
+    for label, left, right in (
+        ("Tags", ctx_a["tags"], ctx_b["tags"]),
+        ("Run metadata", ctx_a["run_metadata"], ctx_b["run_metadata"]),
+        ("Experiment", ctx_a["experiment"], ctx_b["experiment"]),
+        ("Workflow metadata", ctx_a["workflow_meta"], ctx_b["workflow_meta"]),
+    ):
+        lines.extend(_md_diff_block(label, left, right))
 
     latest_parse_a = ctx_a["structured_output_failures"][-1] if ctx_a["structured_output_failures"] else None
     latest_parse_b = ctx_b["structured_output_failures"][-1] if ctx_b["structured_output_failures"] else None
-    lines.append(_context_diff_markdown("Run failure", ctx_a["failure"], ctx_b["failure"]))
-    lines.append("")
-    lines.append(_context_diff_markdown("Latest structured parse failure", latest_parse_a, latest_parse_b))
-    lines.append("")
-    lines.append(_context_diff_markdown("Retries scheduled", ctx_a["retry_count"], ctx_b["retry_count"]))
-    lines.extend(["", "## Structured outputs", ""])
-
-    output_blocks: list[str] = []
-    for idx, (left, right) in enumerate(zip_longest(ctx_a["outputs"], ctx_b["outputs"], fillvalue=None), start=1):
-        label = _output_occurrence_label(left if left is not None else right, idx)
-        same = left == right
-        if same:
-            output_blocks.append(f"- **{label}:** match")
-        else:
-            output_blocks.append(
-                f"- **{label}:** different\n\n{_ab_json_preview_markdown(left, right)}",
-            )
-    if not output_blocks:
-        output_blocks.append("_No structured_output events in either run._")
-    lines.append("\n\n".join(output_blocks))
-
-    lines.extend(["", "## Approvals", ""])
-    appr_blocks: list[str] = []
-    for idx, (left, right) in enumerate(
-        zip_longest(ctx_a["approvals"], ctx_b["approvals"], fillvalue=None),
-        start=1,
+    lines += ["## Failure and pause signals", ""]
+    for label, left, right in (
+        ("Run failure", ctx_a["failure"], ctx_b["failure"]),
+        ("Latest structured parse failure", latest_parse_a, latest_parse_b),
+        ("Retries scheduled", ctx_a["retry_count"], ctx_b["retry_count"]),
     ):
-        label = _approval_occurrence_label(left if left is not None else right, idx)
-        same = left == right
-        if same:
-            appr_blocks.append(f"- **{label}:** match")
-        else:
-            appr_blocks.append(
-                f"- **{label}:** different\n\n{_ab_json_preview_markdown(left, right)}",
-            )
-    if not appr_blocks:
-        appr_blocks.append("_No approvals in either run._")
-    lines.append("\n\n".join(appr_blocks))
-    lines.extend(["", "_Generated by replayt_", ""])
-    return "\n".join(lines) + "\n"
+        lines.extend(_md_diff_block(label, left, right))
+
+    lines += ["## Structured outputs", ""]
+    output_pairs = list(zip_longest(ctx_a["outputs"], ctx_b["outputs"], fillvalue=None))
+    if not output_pairs:
+        lines += ["No structured_output events in either run.", ""]
+    else:
+        for idx, (left, right) in enumerate(output_pairs, start=1):
+            label = _output_occurrence_label(left if left is not None else right, idx)
+            lines.extend(_md_diff_block(label, left, right))
+
+    lines += ["## Approvals", ""]
+    approval_pairs = list(zip_longest(ctx_a["approvals"], ctx_b["approvals"], fillvalue=None))
+    if not approval_pairs:
+        lines += ["No approvals in either run.", ""]
+    else:
+        for idx, (left, right) in enumerate(approval_pairs, start=1):
+            label = _approval_occurrence_label(left if left is not None else right, idx)
+            lines.extend(_md_diff_block(label, left, right))
+
+    lines += ["", "_Generated by replayt_", ""]
+    return "\n".join(lines).rstrip() + "\n"
 
 
 def build_run_report_html(

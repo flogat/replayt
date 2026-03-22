@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run maintainer-facing repo checks in one shot (version, changelog, docs index, public API)."""
+"""Run maintainer-facing repo checks in one shot (version, changelog, docs, example catalog, public API)."""
 
 from __future__ import annotations
 
@@ -41,11 +41,13 @@ def maintainer_checks_report(
     skip_version: bool = False,
     skip_changelog: bool = False,
     skip_docs_index: bool = False,
+    skip_example_catalog: bool = False,
     skip_public_api: bool = False,
     verbose: bool = False,
 ) -> dict[str, Any]:
     repo_root = repo_root.resolve()
     changelog_path = repo_root / "CHANGELOG.md"
+    example_catalog_snapshot = repo_root / "docs" / "EXAMPLE_CATALOG_CONTRACT.json"
 
     checks: dict[str, Any] = {}
     details: dict[str, Any] = {}
@@ -87,6 +89,24 @@ def maintainer_checks_report(
             details["docs_index"] = dr
         if not dr["ok"]:
             errors.append("docs_index failed (README map or docs/README.md index)")
+
+    if not skip_example_catalog:
+        ec = _load_script("ec", "example_catalog_contract.py")
+        er = ec.check_snapshot(
+            example_catalog_snapshot,
+            module_name="replayt_examples",
+            repo_root=repo_root,
+        )
+        checks["example_catalog"] = {
+            "ok": bool(er["ok"]),
+            "schema": er["schema"],
+            "snapshot_path": er["snapshot_path"],
+            "error_count": len(er.get("errors") or []),
+        }
+        if verbose:
+            details["example_catalog"] = er
+        if not er["ok"]:
+            errors.append("example_catalog failed (packaged example contract drift)")
 
     if not skip_public_api:
         api = _load_script("api", "public_api_report.py")
@@ -143,6 +163,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--skip-changelog", action="store_true", help="Skip Unreleased changelog check.")
     parser.add_argument("--skip-docs-index", action="store_true", help="Skip docs/README.md index check.")
     parser.add_argument(
+        "--skip-example-catalog",
+        action="store_true",
+        help="Skip replayt_examples packaged-catalog contract snapshot check.",
+    )
+    parser.add_argument(
         "--skip-public-api",
         action="store_true",
         help="Skip replayt __all__ / export surface check (for partial trees).",
@@ -158,6 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         skip_version=args.skip_version,
         skip_changelog=args.skip_changelog,
         skip_docs_index=args.skip_docs_index,
+        skip_example_catalog=args.skip_example_catalog,
         skip_public_api=args.skip_public_api,
         verbose=args.verbose,
     )

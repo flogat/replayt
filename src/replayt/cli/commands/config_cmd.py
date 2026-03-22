@@ -10,6 +10,7 @@ from typing import Literal
 import typer
 
 import replayt
+from replayt.cli.ci_artifacts import ci_artifacts_payload, resolve_ci_artifacts
 from replayt.cli.config import (
     DEFAULT_LOG_DIR,
     export_hook_timeout_seconds,
@@ -18,6 +19,7 @@ from replayt.cli.config import (
     preview_default_cli_target,
     preview_default_inputs_file,
     resolve_approval_actor_required_keys,
+    resolve_approval_reason_required,
     resolve_llm_settings,
     resolve_log_dir,
     resolve_log_mode_setting,
@@ -30,7 +32,7 @@ from replayt.cli.config import (
     seal_hook_timeout_seconds,
     verify_seal_hook_timeout_seconds,
 )
-from replayt.cli.path_readiness import readiness_checks
+from replayt.cli.path_readiness import ci_artifact_readiness_checks, readiness_checks
 from replayt.cli.run_support import (
     export_hook_argv,
     resume_hook_argv,
@@ -63,6 +65,7 @@ def _config_report(
     resolved_timeout, timeout_source = resolve_timeout_setting(timeout, cfg, in_child=False)
     strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite_path)
     required_actor_keys, required_actor_keys_source = resolve_approval_actor_required_keys(None, cfg)
+    required_reason, required_reason_source = resolve_approval_reason_required(False, cfg)
     if "strict_mirror" in cfg:
         strict_mirror_source = "project_config:strict_mirror"
     elif sqlite_path is not None:
@@ -72,6 +75,11 @@ def _config_report(
     llm_settings, llm_report = resolve_llm_settings(cfg)
     default_target, default_target_source = preview_default_cli_target(cfg)
     default_inputs_file, default_inputs_file_source = preview_default_inputs_file(cfg, config_path=cfg_path)
+    ci_artifacts = resolve_ci_artifacts(
+        explicit_junit_xml=None,
+        explicit_summary_json=None,
+        explicit_github_summary=False,
+    )
 
     env_run_hook = os.environ.get("REPLAYT_RUN_HOOK", "").strip()
     run_hook = run_hook_argv(cfg)
@@ -157,17 +165,23 @@ def _config_report(
         verify_seal_hook_timeout_source = "project_config:verify_seal_hook_timeout"
     else:
         verify_seal_hook_timeout_source = "default:120"
+    trust_base_url = llm_settings.base_url if llm_settings is not None else os.environ.get("OPENAI_BASE_URL")
     trust_checks = (
         trust_boundary_checks(
-            base_url=llm_report.get("base_url"),
+            base_url=trust_base_url,
             log_mode=resolved_log_mode,
         )
         + log_directory_permission_trust_checks(resolved_log_dir)
         + dotenv_permission_trust_checks(
-            dotenv_trust_candidate_paths(project_config_path=cfg_path)
+            dotenv_trust_candidate_paths(cwd=Path.cwd(), project_config_path=cfg_path)
         )
     )
-    filesystem_checks = readiness_checks(log_dir=resolved_log_dir, sqlite=sqlite_path)
+    filesystem_checks = readiness_checks(log_dir=resolved_log_dir, sqlite=sqlite_path) + ci_artifact_readiness_checks(
+        junit_xml=ci_artifacts.junit_xml,
+        summary_json=ci_artifacts.summary_json,
+        github_summary_requested=ci_artifacts.github_summary_requested,
+        github_step_summary=ci_artifacts.github_step_summary,
+    )
     min_ver = min_replayt_version_report(cfg, installed=replayt.__version__)
 
     return {
@@ -216,6 +230,8 @@ def _config_report(
             "hook_timeout_source": hook_timeout_source,
             "required_actor_keys": list(required_actor_keys),
             "required_actor_keys_source": required_actor_keys_source,
+            "required_reason": required_reason,
+            "required_reason_source": required_reason_source,
         },
         "export": {
             "hook_argv": export_hook,
@@ -241,6 +257,7 @@ def _config_report(
             "max_response_bytes": llm_settings.max_response_bytes if llm_settings is not None else None,
             "max_schema_json_chars": llm_settings.max_schema_json_chars if llm_settings is not None else None,
         },
+        "ci_artifacts": ci_artifacts_payload(ci_artifacts),
         "trust_boundary": {
             "checks": [
                 {
@@ -298,6 +315,7 @@ def cmd_config(
     seal = report["seal"]
     verify_seal = report["verify_seal"]
     llm = report["llm"]
+    ci_artifacts = report["ci_artifacts"]
     typer.echo(f"project_config={project['path'] or '(none)'}")
     uk = project.get("unknown_keys") or []
     if uk:
@@ -333,6 +351,7 @@ def cmd_config(
         f"approval_actor_required_keys={resume['required_actor_keys'] or '(none)'} "
         f"({resume['required_actor_keys_source']})"
     )
+    typer.echo(f"approval_reason_required={resume['required_reason']} ({resume['required_reason_source']})")
     typer.echo(f"export_hook={export['hook_argv'] or '(none)'} ({export['hook_source']})")
     typer.echo(
         f"export_hook_timeout_seconds={export['hook_timeout_seconds']} "
@@ -351,6 +370,21 @@ def cmd_config(
     typer.echo(f"base_url={llm.get('base_url') or '(invalid)'} ({llm['base_url_source']})")
     typer.echo(f"model={llm.get('model') or '(invalid)'} ({llm['model_source']})")
     typer.echo(f"openai_api_key={'set' if llm['api_key_present'] else 'missing'} ({llm['api_key_source']})")
+    typer.echo(
+        f"ci_junit_xml={ci_artifacts['junit_xml']['path'] or '(none)'} ({ci_artifacts['junit_xml']['source']})"
+    )
+    typer.echo(
+        "ci_summary_json="
+        f"{ci_artifacts['summary_json']['path'] or '(none)'} ({ci_artifacts['summary_json']['source']})"
+    )
+    typer.echo(
+        "ci_github_summary_requested="
+        f"{ci_artifacts['github_summary']['requested']} ({ci_artifacts['github_summary']['requested_source']})"
+    )
+    typer.echo(
+        "ci_github_step_summary="
+        f"{ci_artifacts['github_summary']['path'] or '(none)'} ({ci_artifacts['github_summary']['path_source']})"
+    )
     extra_cred = extraneous_llm_credential_env_names()
     if extra_cred:
         typer.echo(

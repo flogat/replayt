@@ -4,12 +4,25 @@ from __future__ import annotations
 
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from replayt.cli.run_support import exit_code_for_run_result
 from replayt.runner import RunResult
 from replayt.workflow import Workflow
+
+
+@dataclass(frozen=True)
+class ResolvedCIArtifacts:
+    junit_xml: Path | None
+    junit_xml_source: str
+    summary_json: Path | None
+    summary_json_source: str
+    github_summary_requested: bool
+    github_summary_requested_source: str
+    github_step_summary: Path | None
+    github_step_summary_source: str
 
 
 def parse_ci_metadata_from_env() -> dict[str, Any] | None:
@@ -174,6 +187,65 @@ def resolve_ci_summary_json_path(explicit: Path | None) -> Path | None:
 
 def should_write_github_step_summary(explicit: bool) -> bool:
     return explicit or os.environ.get("REPLAYT_GITHUB_SUMMARY") == "1"
+
+
+def resolve_ci_artifacts(
+    *,
+    explicit_junit_xml: Path | None,
+    explicit_summary_json: Path | None,
+    explicit_github_summary: bool,
+) -> ResolvedCIArtifacts:
+    env_junit = os.environ.get("REPLAYT_JUNIT_XML", "").strip()
+    env_summary = os.environ.get("REPLAYT_SUMMARY_JSON", "").strip()
+    env_github_toggle = os.environ.get("REPLAYT_GITHUB_SUMMARY", "").strip()
+    env_github_step_summary = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
+
+    return ResolvedCIArtifacts(
+        junit_xml=resolve_ci_junit_path(explicit_junit_xml),
+        junit_xml_source=(
+            "cli:--junit-xml" if explicit_junit_xml is not None else "env:REPLAYT_JUNIT_XML" if env_junit else "unset"
+        ),
+        summary_json=resolve_ci_summary_json_path(explicit_summary_json),
+        summary_json_source=(
+            "cli:--summary-json"
+            if explicit_summary_json is not None
+            else "env:REPLAYT_SUMMARY_JSON"
+            if env_summary
+            else "unset"
+        ),
+        github_summary_requested=should_write_github_step_summary(explicit_github_summary),
+        github_summary_requested_source=(
+            "cli:--github-summary"
+            if explicit_github_summary
+            else "env:REPLAYT_GITHUB_SUMMARY"
+            if env_github_toggle == "1"
+            else "unset"
+        ),
+        github_step_summary=Path(env_github_step_summary) if env_github_step_summary else None,
+        github_step_summary_source="env:GITHUB_STEP_SUMMARY" if env_github_step_summary else "unset",
+    )
+
+
+def ci_artifacts_payload(artifacts: ResolvedCIArtifacts) -> dict[str, Any]:
+    def _path_value(path: Path | None) -> str | None:
+        return str(path.resolve()) if path is not None else None
+
+    return {
+        "junit_xml": {
+            "path": _path_value(artifacts.junit_xml),
+            "source": artifacts.junit_xml_source,
+        },
+        "summary_json": {
+            "path": _path_value(artifacts.summary_json),
+            "source": artifacts.summary_json_source,
+        },
+        "github_summary": {
+            "requested": artifacts.github_summary_requested,
+            "requested_source": artifacts.github_summary_requested_source,
+            "path": _path_value(artifacts.github_step_summary),
+            "path_source": artifacts.github_step_summary_source,
+        },
+    }
 
 
 def write_ci_artifacts(

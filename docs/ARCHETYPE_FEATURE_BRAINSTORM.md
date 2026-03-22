@@ -1,6 +1,6 @@
 ## Archetype feature brainstorm (10)
 
-These ideas stay inside replayt's contract: explicit states, strict schemas, typed tools, local-first logs, and replay as a first-class artifact. The deferred items below already have user-facing "do this outside core" guidance in the existing docs, so the documentation follow-up is satisfied in this pass without another README or tutorial edit.
+These ideas stay inside replayt's contract: explicit states, strict schemas, typed tools, local-first logs, and replay kept visible in the output. The deferred items below already have user-facing "do this outside core" guidance in the existing docs, so the documentation follow-up is satisfied in this pass without another README or tutorial edit.
 
 ### 1. Staff engineer / platform - Workflow policy profile
 - **Request:** Add a checked-in workflow policy profile so `replayt validate` can fail when a workflow drifts from repo standards such as required transition declarations, allowed log modes, mandatory approval ids, or pinned `llm_defaults`, giving platform teams one explicit policy surface instead of ad hoc review comments.

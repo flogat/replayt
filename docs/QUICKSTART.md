@@ -37,6 +37,14 @@ replayt run replayt_examples.e01_hello_world:wf \
   --inputs-json '{"customer_name":"Sam"}'
 ```
 
+For the common case where you only need one or two fields, skip the JSON blob:
+
+```bash
+replayt run replayt_examples.e01_hello_world:wf --input customer_name=Sam
+```
+
+Repeat **`--input`** for more fields. Dotted keys build nested objects, so **`--input issue.title=Crash --input issue.body="White screen on save"`** becomes the same input object you would have written by hand in JSON.
+
 Note the printed **run ID** (UUID).
 
 ## 3. Inspect and replay

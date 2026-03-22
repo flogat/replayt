@@ -11,10 +11,11 @@ class TemplateSpec:
     filename: str
     inputs_example: str
     inputs_filename: str = "inputs.example.json"
+    llm_backed: bool = False
 
 
 TEMPLATE_BASIC = '''\
-"""Scaffolded replayt workflow. Run with: replayt run workflow.py --inputs-json @inputs.example.json."""
+"""Scaffolded replayt workflow. Run with: replayt run workflow.py --inputs-file inputs.example.json."""
 
 from pathlib import Path
 
@@ -39,7 +40,11 @@ if __name__ == "__main__":
 '''
 
 TEMPLATE_APPROVAL = '''\
-"""Workflow with an approval gate. Run it, then approve with: replayt resume workflow.py RUN_ID --approval review."""
+"""Workflow with an approval gate.
+
+Run with: replayt run workflow.py --inputs-file inputs.example.json.
+Approve with: replayt resume workflow.py RUN_ID --approval review
+"""
 
 from pathlib import Path
 
@@ -73,7 +78,7 @@ if __name__ == "__main__":
 TEMPLATE_TOOL_USING = '''\
 """Workflow that registers and uses typed tools.
 
-Run with: replayt run workflow.py --inputs-json @inputs.example.json.
+Run with: replayt run workflow.py --inputs-file inputs.example.json.
 """
 
 from pathlib import Path
@@ -106,7 +111,7 @@ if __name__ == "__main__":
 '''
 
 TEMPLATE_YAML = '''\
-# Declarative YAML workflow. Run with: replayt run workflow.yaml --inputs-json @inputs.example.json
+# Declarative YAML workflow. Run with: replayt run workflow.yaml --inputs-file inputs.example.json
 # Requires: pip install replayt[yaml]
 
 name: yaml_workflow
@@ -132,7 +137,7 @@ steps:
 TEMPLATE_ISSUE_TRIAGE = '''\
 """Structured issue triage workflow.
 
-Run with: replayt run workflow.py --inputs-json @inputs.example.json.
+Run with: replayt run workflow.py --inputs-file inputs.example.json.
 """
 
 from pathlib import Path
@@ -168,7 +173,7 @@ class TriageDecision(BaseModel):
 def validate(ctx):
     raw = ctx.get("issue")
     if not isinstance(raw, dict):
-        raise ValueError("context issue must be a dict (pass --inputs-json @inputs.example.json)")
+        raise ValueError("context issue must be a dict (pass --inputs-file inputs.example.json)")
     issue = IssuePayload.model_validate(raw)
     ctx.set("issue", issue.model_dump())
     missing = []
@@ -242,7 +247,7 @@ if __name__ == "__main__":
 TEMPLATE_PUBLISHING_PREFLIGHT = '''\
 """Publishing preflight workflow with a human approval gate.
 
-Run with: replayt run workflow.py --inputs-json @inputs.example.json.
+Run with: replayt run workflow.py --inputs-file inputs.example.json.
 Approve with: replayt resume workflow.py RUN_ID --approval publish
 """
 
@@ -273,7 +278,7 @@ def checklist(ctx):
     draft = ctx.get("draft")
     audience = str(ctx.get("audience") or "general")
     if not isinstance(draft, str):
-        raise ValueError("context requires draft: str (pass --inputs-json @inputs.example.json)")
+        raise ValueError("context requires draft: str (pass --inputs-file inputs.example.json)")
     result = ctx.llm.parse(
         ChecklistResult,
         messages=[
@@ -363,10 +368,12 @@ TEMPLATES: dict[str, TemplateSpec] = {
             "  }\n"
             "}\n"
         ),
+        llm_backed=True,
     ),
     "publishing-preflight": TemplateSpec(
         content=TEMPLATE_PUBLISHING_PREFLIGHT,
         filename="workflow.py",
         inputs_example='{\n  "draft": "We guarantee 200% returns forever.",\n  "audience": "general"\n}\n',
+        llm_backed=True,
     ),
 }

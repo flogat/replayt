@@ -71,6 +71,93 @@ def test_public_api_report_json_output_for_replayt() -> None:
     assert any(item["name"] == "Workflow" for item in report["exports"])
 
 
+def test_example_catalog_contract_report_for_temp_module(tmp_path: Path, monkeypatch) -> None:
+    pkg = tmp_path / "demo_examples"
+    _write(
+        pkg / "__init__.py",
+        """
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class ExampleSpec:
+            key: str
+            title: str
+            target: str
+            description: str
+            inputs_example: dict
+            llm_backed: bool = False
+
+        def list_packaged_examples():
+            return [
+                ExampleSpec(
+                    key="hello",
+                    title="Hello",
+                    target="demo_examples.hello:wf",
+                    description="A tiny example.",
+                    inputs_example={"name": "Sam"},
+                    llm_backed=False,
+                )
+            ]
+        """,
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    mod = _load_script("example_catalog_contract_tmp", "example_catalog_contract.py")
+
+    report = mod.example_catalog_contract_report("demo_examples")
+
+    assert report["schema"] == "replayt.example_catalog_contract.v1"
+    assert report["module"] == "demo_examples"
+    assert report["example_count"] == 1
+    assert report["examples"] == [
+        {
+            "key": "hello",
+            "title": "Hello",
+            "target": "demo_examples.hello:wf",
+            "description": "A tiny example.",
+            "llm_backed": False,
+            "inputs_example": {"name": "Sam"},
+        }
+    ]
+
+
+def test_example_catalog_contract_check_snapshot_round_trip(tmp_path: Path) -> None:
+    mod = _load_script("example_catalog_contract_roundtrip", "example_catalog_contract.py")
+    snapshot = tmp_path / "example_catalog.json"
+    report = mod.example_catalog_contract_report()
+    mod.write_snapshot(report, snapshot)
+
+    check = mod.check_snapshot(snapshot)
+
+    assert check["schema"] == "replayt.example_catalog_contract_check.v1"
+    assert check["ok"] is True
+    assert check["errors"] == []
+    assert check["diff"] == []
+
+
+def test_example_catalog_contract_check_flags_drift(tmp_path: Path) -> None:
+    mod = _load_script("example_catalog_contract_drift", "example_catalog_contract.py")
+    snapshot = tmp_path / "example_catalog.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema": "replayt.example_catalog_contract.v1",
+                "module": "replayt_examples",
+                "example_count": 1,
+                "examples": [],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    check = mod.check_snapshot(snapshot)
+
+    assert check["ok"] is False
+    assert check["errors"] == []
+    assert any(line.startswith("--- ") for line in check["diff"])
+
+
 def test_docs_index_report_passes_for_complete_repo_fixture(tmp_path: Path) -> None:
     _write(
         tmp_path / "README.md",
@@ -286,6 +373,54 @@ def test_maintainer_checks_tmp_pass_skipping_public_api(tmp_path: Path) -> None:
     _write(tmp_path / "docs" / "CLI.md", "# CLI\n")
     _write(tmp_path / "docs" / "SCOPE.md", "# Scope\n")
     _write(tmp_path / "docs" / "architecture.mmd", "flowchart TD\n")
+    _write(
+        tmp_path / "src" / "replayt_examples" / "__init__.py",
+        """
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class ExampleSpec:
+            key: str
+            title: str
+            target: str
+            description: str
+            inputs_example: dict
+            llm_backed: bool = False
+
+        def list_packaged_examples():
+            return [
+                ExampleSpec(
+                    key="hello",
+                    title="Hello",
+                    target="replayt_examples.hello:wf",
+                    description="A tiny example.",
+                    inputs_example={"name": "Sam"},
+                )
+            ]
+        """,
+    )
+    _write(
+        tmp_path / "docs" / "EXAMPLE_CATALOG_CONTRACT.json",
+        """
+        {
+          "example_count": 1,
+          "examples": [
+            {
+              "description": "A tiny example.",
+              "inputs_example": {
+                "name": "Sam"
+              },
+              "key": "hello",
+              "llm_backed": false,
+              "target": "replayt_examples.hello:wf",
+              "title": "Hello"
+            }
+          ],
+          "module": "replayt_examples",
+          "schema": "replayt.example_catalog_contract.v1"
+        }
+        """,
+    )
 
     mod = _load_script("maintainer_checks_tmp", "maintainer_checks.py")
     report = mod.maintainer_checks_report(tmp_path, skip_public_api=True)
@@ -295,6 +430,7 @@ def test_maintainer_checks_tmp_pass_skipping_public_api(tmp_path: Path) -> None:
     assert report["checks"]["version_consistency"]["ok"] is True
     assert report["checks"]["changelog_unreleased"]["ok"] is True
     assert report["checks"]["docs_index"]["ok"] is True
+    assert report["checks"]["example_catalog"]["ok"] is True
 
 
 def test_maintainer_checks_version_only_failure(tmp_path: Path) -> None:
@@ -317,6 +453,7 @@ def test_maintainer_checks_version_only_failure(tmp_path: Path) -> None:
         tmp_path,
         skip_changelog=True,
         skip_docs_index=True,
+        skip_example_catalog=True,
         skip_public_api=True,
     )
 
@@ -357,6 +494,7 @@ def test_maintainer_checks_changelog_nonempty_fails_on_empty_bullets(tmp_path: P
         tmp_path,
         changelog_nonempty=True,
         skip_docs_index=True,
+        skip_example_catalog=True,
         skip_public_api=True,
     )
 
@@ -372,6 +510,7 @@ def test_maintainer_checks_main_all_skips_exits_2(capsys) -> None:
             "--skip-version",
             "--skip-changelog",
             "--skip-docs-index",
+            "--skip-example-catalog",
             "--skip-public-api",
         ]
     )
@@ -388,6 +527,15 @@ def test_maintainer_checks_real_repo_full() -> None:
     mod = _load_script("maintainer_checks_replayt", "maintainer_checks.py")
     root = Path(__file__).resolve().parents[1]
     report = mod.maintainer_checks_report(root, changelog_nonempty=True)
+
+    assert report["ok"] is True, report
+
+
+def test_example_catalog_contract_real_repo_snapshot_matches() -> None:
+    mod = _load_script("example_catalog_contract_replayt", "example_catalog_contract.py")
+    root = Path(__file__).resolve().parents[1]
+
+    report = mod.check_snapshot(root / "docs" / "EXAMPLE_CATALOG_CONTRACT.json")
 
     assert report["ok"] is True, report
 

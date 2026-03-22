@@ -1,13 +1,50 @@
-"""Normalize LLM-related numeric settings from defaults, YAML, and JSON."""
+"""Normalize LLM-related settings from defaults, YAML, and JSON."""
 
 from __future__ import annotations
 
+import json
 import math
 from typing import Any
 
 # OpenAI-compatible chat APIs accept up to four stop sequences; cap string length to keep logs bounded.
 _MAX_LLM_STOP_SLOTS = 4
 _MAX_LLM_STOP_STR_CHARS = 512
+
+
+def coerce_llm_extra_body(
+    value: Any,
+    *,
+    reserved_keys: set[str] | frozenset[str] | None = None,
+) -> dict[str, Any] | None:
+    """Normalize provider-specific JSON fields for ``/chat/completions``.
+
+    ``None`` or ``{}`` means omit the extra body entirely. Keys must be non-empty strings,
+    values must be JSON-serializable, and reserved core payload fields are rejected.
+    """
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError(f"extra_body must be a dict[str, Any], got {type(value).__name__}")
+    normalized: dict[str, Any] = {}
+    reserved = set(reserved_keys or ())
+    for raw_key, raw_value in value.items():
+        if not isinstance(raw_key, str):
+            raise TypeError(f"extra_body keys must be strings, got {type(raw_key).__name__}")
+        key = raw_key.strip()
+        if not key:
+            raise ValueError("extra_body keys must be non-empty strings")
+        if key in reserved:
+            joined = ", ".join(sorted(reserved))
+            raise ValueError(f"extra_body key {key!r} conflicts with core chat fields; use one of: {joined}")
+        normalized[key] = raw_value
+    if not normalized:
+        return None
+    try:
+        # Round-trip so tuples and similar JSON values normalize to the shape we actually send/log.
+        return json.loads(json.dumps(normalized))
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"extra_body must be JSON-serializable: {exc}") from exc
 
 
 def coerce_llm_stop_sequences(value: Any) -> list[str] | None:

@@ -52,13 +52,15 @@ During release prep or API review, these repo-local scripts keep the public surf
 python scripts/maintainer_checks.py
 python scripts/maintainer_checks.py --format json --changelog-nonempty
 python scripts/public_api_report.py --format json
+python scripts/example_catalog_contract.py --check docs/EXAMPLE_CATALOG_CONTRACT.json
 python scripts/check_docs_index.py
 python scripts/changelog_unreleased.py --check-nonempty
 python scripts/version_consistency.py
 ```
 
-- `maintainer_checks.py` runs the version, Unreleased changelog, docs index, and public API surface checks above in one process (optional `--changelog-nonempty`, `--skip-*` for partial trees, `--verbose` JSON with embedded sub-reports).
+- `maintainer_checks.py` runs the version, Unreleased changelog, docs index, packaged-example catalog snapshot, and public API surface checks above in one process (optional `--changelog-nonempty`, `--skip-*` for partial trees, `--verbose` JSON with embedded sub-reports).
 - `public_api_report.py` snapshots the top-level `replayt` exports from `__all__`, including any declared-but-missing names that would make semver review or docs examples misleading.
+- `example_catalog_contract.py` snapshots the packaged `replayt try` tutorial catalog (`replayt_examples.list_packaged_examples()`), so maintainers can diff keys, targets, descriptions, and default inputs against the checked-in `docs/EXAMPLE_CATALOG_CONTRACT.json` contract before shipping a release.
 - `check_docs_index.py` verifies that `docs/README.md` still indexes every top-level docs file and that the main README documentation links resolve.
 - `changelog_unreleased.py` extracts `CHANGELOG.md` -> `## Unreleased` as text or JSON so release-note work does not depend on ad hoc markdown parsing.
 - `version_consistency.py` fails fast when `pyproject.toml` `[project].version` and `src/replayt/__init__.py` `__version__` disagree, which catches the common partial-bump footgun before a tag push.
@@ -67,7 +69,8 @@ python scripts/version_consistency.py
 
 If you want the repo's Cursor skills to drive a patch release, use `scripts/skill_release_loop.py`.
 
-- Default skill order: `createfeatures`, `improvedoc`, `deslopdoc`, `reviewcodebase`.
+- Default skill order is `DEFAULT_SKILLS` in `scripts/skill_release_loop.py`: twelve `feat_*` archetype skills (`feat_staff_engineer` through `feat_agent_harness_engineer`), then `review_design_fidelity`, `improvedoc`, `deslopdoc`, `reviewcodebase`. Invoke `/createfeatures` separately when you want a single twelve-archetype brainstorm without running the full loop.
+- Skill definitions live under `.cursor/skills/`. The loop uses `--skill-root .cursor/skills` by default and now exposes that resolved directory to backends as both `{skill_root}` and `SKILL_ROOT`. `scripts/run_codex_skill.py` forwards `--skill-root` to `codex exec`, honors `SKILL_ROOT`, and falls back to repo-local `.cursor/skills` when present. If you use standalone Codex with global skills, copy or symlink those folders into `$CODEX_HOME/skills`.
 - With the repo-local Codex install under `.replayt/tools/codex-cli`, `python scripts/skill_release_loop.py` uses the default task plus `scripts/run_codex_skill.py` automatically.
 - The script repeats that full cycle until every `--check` command passes or `--max-iterations` is hit.
 - `CHANGELOG.md` must be edited during the loop; once checks pass, the script rolls `## Unreleased` into the new version, bumps the patch version in `pyproject.toml` and `src/replayt/__init__.py`, creates an annotated `vX.Y.Z` tag, and pushes the branch plus tag.
@@ -84,7 +87,7 @@ python scripts/skill_release_loop.py \
   --check "pytest"
 ```
 
-Available placeholders for `--skill-command`: `{skill}`, `{skill_path}`, `{prompt_file}`, `{log_file}`, `{repo}`, `{iteration}`, `{max_iterations}` and quoted `*_q` variants such as `{prompt_file_q}`. The same values are also exported as environment variables (`SKILL_NAME`, `SKILL_PROMPT_FILE`, `REPO_ROOT`, and so on).
+Available placeholders for `--skill-command`: `{skill}`, `{skill_path}`, `{skill_root}`, `{prompt_file}`, `{log_file}`, `{repo}`, `{iteration}`, `{max_iterations}` and quoted `*_q` variants such as `{prompt_file_q}`. The same values are also exported as environment variables (`SKILL_NAME`, `SKILL_ROOT`, `SKILL_PROMPT_FILE`, `REPO_ROOT`, and so on).
 
 For command-heavy docs, prefer ASCII punctuation where practical (`"`, `'`, `...`, `->`) so examples stay readable in stock Windows terminals. See [`docs/STYLE.md`](docs/STYLE.md).
 

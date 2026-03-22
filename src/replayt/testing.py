@@ -180,6 +180,7 @@ class DryRunLLMClient(OpenAICompatClient):
         timeout_seconds: float | None = None,
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -194,6 +195,7 @@ class DryRunLLMClient(OpenAICompatClient):
             timeout_seconds,
             base_url,
             extra_headers,
+            extra_body,
             stop,
         )
         content = "{}"
@@ -248,6 +250,7 @@ class MockLLMClient(OpenAICompatClient):
         timeout_seconds: float | None = None,
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -263,6 +266,7 @@ class MockLLMClient(OpenAICompatClient):
             timeout_seconds,
             base_url,
             extra_headers,
+            extra_body,
             response_format,
             stop,
         )

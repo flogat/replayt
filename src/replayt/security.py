@@ -59,6 +59,17 @@ def _base_url_safe_label(url: str) -> str:
     return urlunsplit((parts.scheme, netloc, parts.path or "", "", ""))
 
 
+def sanitize_base_url_for_output(url: str | None) -> str | None:
+    """Return a log-safe base URL label that omits userinfo and query parameters."""
+
+    if url is None:
+        return None
+    raw = str(url).strip()
+    if not raw:
+        return raw
+    return _base_url_safe_label(raw)
+
+
 @dataclass(frozen=True)
 class TrustBoundaryCheck:
     name: str
@@ -122,6 +133,16 @@ def missing_actor_fields(
         if value is None or (isinstance(value, str) and not value.strip()):
             missing.append(key)
     return missing
+
+
+def approval_reason_missing(reason: str | None, *, required: bool) -> bool:
+    """Return ``True`` when a required approval reason is absent or blank."""
+
+    if not required:
+        return False
+    if reason is None:
+        return True
+    return not bool(str(reason).strip())
 
 
 def log_directory_permission_trust_checks(log_dir: Path | None) -> list[TrustBoundaryCheck]:

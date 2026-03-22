@@ -230,6 +230,7 @@ def test_runner_run_started_includes_runtime_snapshot(tmp_path: Path) -> None:
         frequency_penalty=0.1,
         presence_penalty=-0.2,
         seed=7,
+        extra_body={"reasoning": {"effort": "high"}},
     )
     store = JSONLStore(tmp_path)
     runner = Runner(wf, store, log_mode=LogMode.full, llm_client=MockLLMClient(settings=settings), max_steps=9)
@@ -241,6 +242,7 @@ def test_runner_run_started_includes_runtime_snapshot(tmp_path: Path) -> None:
     assert runtime["engine"] == {"log_mode": "full", "max_steps": 9, "redact_keys": []}
     assert runtime["store"]["class"] == "JSONLStore"
     assert runtime["hooks"] == {"before_step": False, "after_step": False}
+    assert "policy_hooks" not in runtime
     assert runtime["llm"]["provider"] == "openai"
     assert runtime["llm"]["base_url"] == "https://gateway.example/v1"
     assert runtime["llm"]["model"] == "demo-model"
@@ -249,8 +251,66 @@ def test_runner_run_started_includes_runtime_snapshot(tmp_path: Path) -> None:
     assert runtime["llm"]["presence_penalty"] == -0.2
     assert runtime["llm"]["seed"] == 7
     assert runtime["llm"]["stop"] is None
+    assert runtime["llm"]["extra_body_keys"] == ["reasoning"]
     assert runtime["llm"]["api_key_present"] is True
     assert runtime["trust_boundary"]["warnings"] == ["full log mode stores raw LLM request and response bodies on disk"]
+
+
+def test_runner_runtime_and_llm_effective_sanitize_base_url(tmp_path: Path) -> None:
+    wf = Workflow("runtime_redaction")
+    wf.set_initial("a")
+
+    @wf.step("a")
+    def a(ctx) -> None:
+        ctx.llm.complete_text(messages=[{"role": "user", "content": "x"}], temperature=0.0)
+        return None
+
+    settings = LLMSettings(
+        api_key="secret",
+        provider="openai",
+        base_url="https://user:secret@gateway.example/v1?api_key=secret",
+        model="demo-model",
+    )
+    client = MockLLMClient(settings=settings)
+    client.enqueue("ok")
+    store = JSONLStore(tmp_path)
+
+    result = Runner(wf, store, log_mode=LogMode.redacted, llm_client=client).run()
+
+    assert result.status == "completed"
+    events = store.load_events(result.run_id)
+    started = next(e for e in events if e["type"] == "run_started")
+    request = next(e for e in events if e["type"] == "llm_request")
+    assert started["payload"]["runtime"]["llm"]["base_url"] == "https://gateway.example/v1"
+    assert request["payload"]["effective"]["base_url"] == "https://gateway.example/v1"
+
+
+def test_runner_run_started_includes_policy_hook_breadcrumbs(tmp_path: Path) -> None:
+    wf = Workflow("runtime_policy")
+    wf.set_initial("a")
+
+    @wf.step("a")
+    def a(ctx) -> None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    runner = Runner(
+        wf,
+        store,
+        log_mode=LogMode.redacted,
+        policy_hooks={
+            "run": {"source": "project_config:run_hook", "argv0": "python.exe", "arg_count": 3},
+            "resume": {"source": "env:REPLAYT_RESUME_HOOK", "argv0": "gate.ps1", "arg_count": 2},
+        },
+    )
+    result = runner.run()
+    assert result.status == "completed"
+    events = store.load_events(result.run_id)
+    started = next(e for e in events if e["type"] == "run_started")
+    assert started["payload"]["runtime"]["policy_hooks"] == {
+        "run": {"source": "project_config:run_hook", "argv0": "python.exe", "arg_count": 3},
+        "resume": {"source": "env:REPLAYT_RESUME_HOOK", "argv0": "gate.ps1", "arg_count": 2},
+    }
 
 
 def test_runner_redact_keys_scrub_structured_payloads(tmp_path: Path) -> None:
@@ -398,6 +458,43 @@ def test_resolve_approval_requires_actor_keys_when_configured(tmp_path: Path) ->
             actor={"email": "a@example.com"},
             required_actor_keys=["email", "ticket_id"],
         )
+
+
+def test_resolve_approval_requires_reason_when_configured(tmp_path: Path) -> None:
+    wf = Workflow("ap_reason")
+    wf.set_initial("gate")
+
+    @wf.step("gate")
+    def gate(ctx) -> str | None:
+        ctx.request_approval("go", summary="proceed?", on_approve="done")
+
+    @wf.step("done")
+    def done(ctx) -> None:
+        return None
+
+    store = JSONLStore(tmp_path)
+    paused = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert paused.status == "paused"
+
+    with pytest.raises(ValueError, match="approval reason is required"):
+        resolve_approval_on_store(
+            store,
+            paused.run_id,
+            "go",
+            approved=True,
+            require_reason=True,
+        )
+
+    resolve_approval_on_store(
+        store,
+        paused.run_id,
+        "go",
+        approved=True,
+        reason="Approved after peer review",
+        require_reason=True,
+    )
+    resolved = [e for e in store.load_events(paused.run_id) if e["type"] == "approval_resolved"][-1]
+    assert resolved["payload"]["reason"] == "Approved after peer review"
 
 
 def test_approval_resume_skips_replaying_side_effects_with_resume_target(tmp_path: Path) -> None:

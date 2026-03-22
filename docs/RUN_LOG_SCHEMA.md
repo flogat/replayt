@@ -33,8 +33,9 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `hooks.after_step`
 - `store.class`
 - `llm.client_class`
-- non-secret LLM settings such as `provider`, `base_url`, `model`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, timeouts, and whether an API key was present
+- non-secret LLM settings such as `provider`, `base_url`, `model`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `extra_body_keys`, timeouts, and whether an API key was present
 - `trust_boundary.warnings`: soft local-policy findings such as `log_mode=full` or a risky `OPENAI_BASE_URL`
+- `policy_hooks.run` / `policy_hooks.resume` (object, optional): compact CLI policy-hook breadcrumbs with `source`, `argv0`, and `arg_count` when trusted external gate subprocesses were configured for the run lifecycle
 
 ## State flow
 
@@ -58,7 +59,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 ### `llm_request`
 
 - `state` (string)
-- `effective` (object): resolved settings for this call, including `model`, `temperature`, `top_p`, optional `frequency_penalty` / `presence_penalty` / `seed` (omitted from the HTTP payload when null), optional `stop` (array of up to four strings; omitted from the HTTP payload when unset), `max_tokens`, `timeout_seconds`, `base_url`, `extra_header_names`, optional `provider`, optional `structured_output_mode`, and optional `experiment`
+- `effective` (object): resolved settings for this call, including `model`, `temperature`, `top_p`, optional `frequency_penalty` / `presence_penalty` / `seed` (omitted from the HTTP payload when null), optional `stop` (array of up to four strings; omitted from the HTTP payload when unset), optional `extra_body` (small provider-specific JSON fields merged into the request body), `max_tokens`, `timeout_seconds`, `base_url`, `extra_header_names`, optional `provider`, optional `structured_output_mode`, and optional `experiment`
 - `messages_summary` (object): counts and roles when logging mode is not `full`
 - `messages` (array): only when logging mode is `full`
 
@@ -154,8 +155,9 @@ Failed runs emit `run_failed` first and then a final `run_completed` with `statu
 - `resolver` (string, optional): default `cli` from `replayt resume`
 - `reason` (string, optional): audit note from `replayt resume --reason`
 - `actor` (object, optional): JSON object from `replayt resume --actor-json`
+- `policy_hook` (object, optional): compact breadcrumb with `source`, `argv0`, and `arg_count` when a trusted `resume_hook` subprocess allowed this approval decision
 
-Project config `approval_actor_required_keys = [...]` or CLI `--require-actor-key` can require fixed `actor` keys before replayt writes `approval_resolved`.
+Project config `approval_actor_required_keys = [...]` or CLI `--require-actor-key` can require fixed `actor` keys before replayt writes `approval_resolved`. Project config `approval_reason_required = true` or CLI `--require-reason` can require a non-empty `reason`.
 
 ### `run_paused`
 
@@ -176,8 +178,8 @@ Optional SQLite storage mirrors the same events in `events(run_id, seq, type, pa
 
 ## Export bundle (`replayt export-run`)
 
-Not a raw JSONL file on disk: the CLI can write a `.tar.gz` containing `events.jsonl` (optionally sanitized to match `redacted`, `structured_only`, or `full` export semantics) plus `manifest.json` with `schema: "replayt.export_bundle.v1"` and `events_jsonl_sha256`. When you pass `--seal`, the archive also includes `events.seal.json` with `schema: "replayt.export_seal.v1"`, per-line SHA-256 digests, and a full-file digest for the exported `events.jsonl`.
+Not a raw JSONL file on disk: the CLI can write a `.tar.gz` containing `events.jsonl` (optionally sanitized to match `redacted`, `structured_only`, or `full` export semantics) plus `manifest.json` with `schema: "replayt.export_bundle.v1"` and `events_jsonl_sha256`. When an `export_hook` gate is active, `manifest.json` also includes a compact `policy_hook` object (`source`, `argv0`, `arg_count`). When you pass `--seal`, the archive also includes `events.seal.json` with `schema: "replayt.export_seal.v1"`, per-line SHA-256 digests, and a full-file digest for the exported `events.jsonl`.
 
 ## Seal sidecar (`replayt seal`)
 
-Not a JSONL line: the CLI can write `<run_id>.seal.json` next to `<run_id>.jsonl` with `schema: "replayt.seal.v1"`, `line_sha256` (one digest per raw line, including newlines where present), and `file_sha256` for the whole file. See [`CLI.md`](CLI.md).
+Not a JSONL line: the CLI can write `<run_id>.seal.json` next to `<run_id>.jsonl` with `schema: "replayt.seal.v1"`, `line_sha256` (one digest per raw line, including newlines where present), and `file_sha256` for the whole file. When a `seal_hook` gate is active, the seal JSON also includes a compact `policy_hook` object (`source`, `argv0`, `arg_count`). See [`CLI.md`](CLI.md).

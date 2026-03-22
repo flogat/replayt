@@ -122,6 +122,21 @@ def test_sqlite_delete_run(tmp_path: Path) -> None:
     assert "r1" not in store.list_run_ids()
 
 
+def test_sqlite_read_only_store_loads_existing_events_and_rejects_writes(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    writer = SQLiteStore(db)
+    writer.append_event("r1", ts="t1", typ="run_started", payload={})
+    writer.close()
+
+    reader = SQLiteStore(db, read_only=True)
+    try:
+        assert [event["type"] for event in reader.load_events("r1")] == ["run_started"]
+        with pytest.raises(RuntimeError, match="read-only"):
+            reader.append_event("r1", ts="t2", typ="state_entered", payload={})
+    finally:
+        reader.close()
+
+
 def test_multi_store_delete_run(tmp_path: Path) -> None:
     j = JSONLStore(tmp_path / "j")
     s = SQLiteStore(tmp_path / "db.sqlite3")

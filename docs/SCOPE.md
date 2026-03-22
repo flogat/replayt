@@ -2,7 +2,7 @@
 
 replayt keeps core scope narrow. These are common asks that **do not belong in the core library**; build them in **your** app or ops stack.
 
-For a short overview and positioning, see the [README](../README.md). This page is the long-form **maintainer contract** for scope boundaries.
+For a short overview and positioning, see the [README](../README.md). This page is the detailed scope reference for maintainers and contributors.
 
 | You might ask for... | Why we avoid it in core | Do this instead |
 | --- | --- | --- |
@@ -19,4 +19,4 @@ For a short overview and positioning, see the [README](../README.md). This page 
 | **Official Kubernetes operator, sidecar, or "always-on" replayt daemon** | replayt is not a distributed process engine. | Use **one Job Pod or task per run**, or a **queue worker** that calls `Runner.run` once per message ([`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md)). |
 | **Guaranteed bitwise replay of LLM outputs across providers** | Not achievable in general. | Use **timeline replay** (`replayt replay`) for audit; for tests, **mock** the client or freeze fixtures; pin provider + model in metadata. |
 
-For **per-call LLM settings** (model, temperature, `top_p`, `frequency_penalty`, `presence_penalty`, `seed` when supported, `stop` sequences when supported, `max_tokens`, timeout, provider/base URL, native structured-output mode, extra headers) without a fork, use `ctx.llm.with_settings(...)` so overrides are explicit and show up under `effective` on `llm_request` events.
+For **per-call LLM settings** (model, temperature, `top_p`, `frequency_penalty`, `presence_penalty`, `seed` when supported, `stop` sequences when supported, `max_tokens`, timeout, provider/base URL, native structured-output mode, extra headers, small `extra_body` gateway fields) without a fork, use `ctx.llm.with_settings(...)` so overrides are explicit and show up under `effective` on `llm_request` events.

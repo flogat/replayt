@@ -9,7 +9,7 @@ Each section covers four things:
 - **What command to run**
 - **What you should see**
 
-If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTART.md), then read the sections below **in order**. There are **14** runnable workflows here (sections 1-12, plus OpenAI and Anthropic SDK examples). They move from a two-step deterministic run to LLM-backed classification, typed tools, retries, and approval gates. By the end, you should be able to open each source file, read the state handlers, and match them to what you see in `inspect` and `replay`.
+New to replayt? Start with [`docs/QUICKSTART.md`](../../docs/QUICKSTART.md), then read the sections below **in order**. There are **14** runnable workflows here (sections 1-12, plus OpenAI and Anthropic SDK examples). They move from a two-step deterministic run to LLM-backed classification, typed tools, retries, and approval gates. After a few runs, you should be able to open each source file, read the state handlers, and match them to what you see in `inspect` and `replay`.
 
 **Patterns and recipes** (approval bridge, batch driver, async apps, dashboards, encryption sketches, and more) are in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** so this page can stay a straight-line tutorial.
 
@@ -27,7 +27,7 @@ If you are new to replayt, start with [`docs/QUICKSTART.md`](../../docs/QUICKSTA
 
 ### Optional: interactive onboarding TUIs and terminal recordings
 
-Some teams want a built-in **interactive onboarding wizard** or **asciinema** record/play commands. replayt keeps those out of core so install stays small and control flow stays explicit in your shell history. Treat **`docs/QUICKSTART.md`**, **`replayt try --list`**, **`replayt doctor`**, and the numbered sections below as your checklist. For shareable terminal demos, record with **asciinema** (or any screen recorder) in your own repo, or start from **`docs/DEMO.md`** and the checked-in cast **`docs/replayt-demo.cast`**.
+Built-in onboarding wizards and record/play helpers stay out of core so install stays small and shell history stays explicit. Use **`docs/QUICKSTART.md`**, **`replayt try --list`**, **`replayt doctor`**, and the numbered sections below as your checklist. For a shareable terminal demo, record with **asciinema** (or any screen recorder) in your own repo, or start from **`docs/DEMO.md`** and the checked-in cast **`docs/replayt-demo.cast`**.
 
 ### Install (PyPI, no clone required)
 
@@ -40,14 +40,24 @@ export OPENAI_API_KEY=...   # only for sections that call a live model
 
 Runnable tutorials ship in the **`replayt_examples`** package on PyPI (namespaced so it does not collide with a generic `examples` module in your own code).
 
-To skip reading this file front to back, run `replayt try --list`, then `replayt try --example issue-triage` (or another key) to execute a packaged sample with its default inputs. Add `--inputs-json @my-inputs.json` when you want the same example shape with your own payload. To edit the tutorial code in your repo, run `replayt try --example KEY --copy-to ./my-flow` (writes `workflow.py` and `inputs.example.json`; use `--force` to replace).
+To skip reading this file front to back, run `replayt try --list`, then `replayt try --example issue-triage` (or another key) to execute a packaged sample with its default inputs. Add `--inputs-file my-inputs.json` when you want the same example shape with your own payload. To edit the tutorial code in your repo, run `replayt try --example KEY --copy-to ./my-flow` (writes `workflow.py` and `inputs.example.json`; use `--force` to replace). The text output prints `doctor --skip-connectivity --target workflow.py`, `--dry-check`, and `--dry-run` first when the copied example uses an LLM.
+
+### Fast input overrides without a JSON blob
+
+For quick local runs, repeat **`--input key=value`** instead of writing a whole **`--inputs-json`** object. Dotted keys build nested objects, and replayt parses JSON-style scalars when it can, so **`--input priority=2 --input needs_review=false`** becomes structured input instead of raw strings. This also layers on top of packaged example defaults, which is useful when you only want to change one field in a tutorial payload.
+
+```bash
+replayt try --example issue-triage \
+  --input issue.title="Crash on save" \
+  --input issue.body="Open app, click save, white screen."
+```
 
 ### Default target for `replayt run` / `replayt ci`
 
 When you are iterating on one workflow, avoid repeating the module path on every command. Set **`REPLAYT_TARGET=my_pkg.workflow:wf`** in your environment, or add **`target = "my_pkg.workflow:wf"`** under **`[tool.replayt]`** (or in **`.replaytrc.toml`**). Then you can run:
 
 ```bash
-replayt run --dry-run --inputs-json @inputs.example.json
+replayt run --dry-run --inputs-file inputs.example.json
 ```
 
 An explicit **`TARGET` positional argument always overrides** the default. Check what applies in your shell with **`replayt config --format json`** (`run.default_target`, `run.default_target_source`). **`replayt resume`**, **`replayt validate`**, **`replayt graph`**, and **`replayt contract`** still require a target on the command line (or **`doctor --target`** for preflight only).
@@ -266,9 +276,20 @@ replayt stats --structured-schema Decision --output json
 
 Use **`replayt inspect RUN_ID --event-type structured_output`** (and repeat **`--event-type structured_output_failed`** if you need both) when you want only those lines from one run.
 
+### Finding framework breadcrumbs from `ctx.note(...)`
+
+If your sandbox step emits explicit **`ctx.note(...)`** breadcrumbs such as **`framework_summary`** or **`subrun_link`**, filter by the note kind instead of grepping JSONL:
+
+```bash
+replayt runs --note-kind framework_summary --limit 50
+replayt inspect RUN_ID --note-kind framework_summary
+```
+
+This keeps the query aligned with replayt's explicit event model: one framework-shaped breadcrumb in the log, not framework-owned control flow in the runner.
+
 ### Beyond core: graph checkpoints and model-driven multi-tool turns
 
-replayt does not import LangGraph **checkpoints** or thread blobs into the parent JSONL timeline; keep checkpoints inside the graph library and persist **one** validated exit shape to replayt context (see **Pattern: workflow composition via explicit sub-run** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** when you need a separate child **`run_id`**). The runtime also does not fan out a single model **`tool_calls` array** into parallel replayt states. That would hide scheduling order. Execute tool calls in a deterministic order inside the handler, then transition explicitly:
+replayt does not import LangGraph **checkpoints** or thread blobs into the parent JSONL timeline; keep checkpoints inside the graph library and persist **one** validated exit shape to replayt context (see **Pattern: workflow composition via explicit sub-run** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)** when you need a separate child **`run_id`**). The runtime also does not fan out a single model **`tool_calls` array** into parallel replayt states because that would hide scheduling order. Execute tool calls in a deterministic order inside the handler, then transition explicitly:
 
 ```python
 for spec in tool_calls_from_model:
@@ -751,7 +772,7 @@ If approved, the resumed run should end with `publish_status="approved"`.
 
 If rejected, the resumed run should end with `publish_status="aborted"`.
 
-This is useful in content review pipelines where an LLM prepares structured guidance and a human still makes the final decision.
+Use this when an LLM prepares structured guidance but a human still makes the final decision.
 
 ## Python file target
 
@@ -779,7 +800,7 @@ replayt graph replayt_examples.e04_tool_using_procurement:wf
 
 ## 13. OpenAI SDK integration - `replayt_examples.e10_openai_sdk_integration`
 
-A full integration example using the official `openai` Python SDK inside replayt steps: function calling with Pydantic validation, the `tools` parameter, and streaming with a structured summary pass. Transitions and approvals stay in replayt; the SDK lives inside individual step handlers. Requires `pip install openai`.
+This example uses the official `openai` Python SDK inside replayt steps: function calling with Pydantic validation, the `tools` parameter, and streaming with a structured summary pass. Transitions and approvals stay in replayt; the SDK lives inside individual step handlers. Requires `pip install openai`.
 
 ```bash
 replayt run replayt_examples.e10_openai_sdk_integration:wf \
@@ -788,7 +809,7 @@ replayt run replayt_examples.e10_openai_sdk_integration:wf \
 
 ## 14. Anthropic native SDK - `replayt_examples.e11_anthropic_native`
 
-A workaround pattern for developers who want `anthropic.Anthropic()` directly instead of an OpenAI-compatible proxy. LLM traffic from native SDKs is **not** auto-logged by replayt; validated `ctx.set` outputs are your audit surface. Requires `pip install anthropic`.
+Use this pattern when you want `anthropic.Anthropic()` directly instead of an OpenAI-compatible proxy. LLM traffic from native SDKs is **not** auto-logged by replayt; validated `ctx.set` outputs are your audit surface. Requires `pip install anthropic`.
 
 ```bash
 replayt run replayt_examples.e11_anthropic_native:wf \

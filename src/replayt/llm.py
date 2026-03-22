@@ -11,6 +11,7 @@ import httpx
 from pydantic import BaseModel
 
 from replayt.llm_coercion import (
+    coerce_llm_extra_body,
     coerce_llm_seed,
     coerce_llm_stop_sequences,
     coerce_max_tokens_for_api,
@@ -19,6 +20,7 @@ from replayt.llm_coercion import (
     coerce_timeout_seconds,
     coerce_top_p,
 )
+from replayt.security import sanitize_base_url_for_output
 from replayt.types import LogMode
 
 T = TypeVar("T", bound=BaseModel)
@@ -99,6 +101,8 @@ class LLMSettings:
     max_tokens: int | None = None
     #: Up to four stop strings forwarded to OpenAI-compatible ``/chat/completions`` when set.
     stop: tuple[str, ...] | None = None
+    #: Extra JSON body fields for OpenAI-compatible gateways (for example provider-specific knobs).
+    extra_body: dict[str, Any] = field(default_factory=dict)
     extra_headers: dict[str, str] = field(default_factory=dict)
     http_retries: int = 0
     #: Upper bound on ``LLMBridge.parse`` response text length (after ``complete_text``) before ``json.loads``.
@@ -219,6 +223,20 @@ class LLMSettings:
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _RETRY_BASE_DELAY = 1.0
 _RETRY_MAX_DELAY = 30.0
+_CHAT_COMPLETIONS_RESERVED_FIELDS = frozenset(
+    {
+        "model",
+        "messages",
+        "temperature",
+        "top_p",
+        "frequency_penalty",
+        "presence_penalty",
+        "seed",
+        "max_tokens",
+        "stop",
+        "response_format",
+    }
+)
 
 
 def _drain_stream_with_limit(response: httpx.Response, byte_limit: int) -> None:
@@ -296,6 +314,7 @@ class OpenAICompatClient:
         timeout_seconds: float | None = None,
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | None = None,
     ) -> dict[str, Any]:
@@ -320,6 +339,20 @@ class OpenAICompatClient:
             payload["stop"] = stop
         if response_format is not None:
             payload["response_format"] = response_format
+        default_extra_body = coerce_llm_extra_body(
+            self.settings.extra_body,
+            reserved_keys=_CHAT_COMPLETIONS_RESERVED_FIELDS,
+        )
+        if extra_body is not None:
+            call_extra_body = coerce_llm_extra_body(
+                extra_body,
+                reserved_keys=_CHAT_COMPLETIONS_RESERVED_FIELDS,
+            )
+            merged_extra_body = None if call_extra_body is None else {**(default_extra_body or {}), **call_extra_body}
+        else:
+            merged_extra_body = default_extra_body
+        if merged_extra_body:
+            payload.update(merged_extra_body)
         headers: dict[str, str] = {
             "Content-Type": "application/json",
             **(self.settings.extra_headers or {}),
@@ -406,6 +439,7 @@ class LLMBridge:
         provider: str | None = None,
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         native_response_format: bool | None = None,
         experiment: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
@@ -437,6 +471,17 @@ class LLMBridge:
             h = dict(merged.get("extra_headers") or {})
             h.update(extra_headers)
             merged["extra_headers"] = h
+        if extra_body is not None:
+            coerced_extra_body = coerce_llm_extra_body(
+                extra_body,
+                reserved_keys=_CHAT_COMPLETIONS_RESERVED_FIELDS,
+            )
+            if coerced_extra_body is None:
+                merged.pop("extra_body", None)
+            else:
+                body = dict(merged.get("extra_body") or {})
+                body.update(coerced_extra_body)
+                merged["extra_body"] = body
         if native_response_format is not None:
             merged["native_response_format"] = bool(native_response_format)
         if experiment is not None:
@@ -473,8 +518,9 @@ class LLMBridge:
         provider: str | None,
         base_url: str | None,
         extra_headers: dict[str, str] | None,
+        extra_body: dict[str, Any] | None,
         stop: list[str] | tuple[str, ...] | str | None,
-    ) -> tuple[dict[str, Any], dict[str, str], str]:
+    ) -> tuple[dict[str, Any], dict[str, str], str, dict[str, Any] | None]:
         d = self._defaults
         base = self._client.settings
         eff_provider_raw = provider if provider is not None else d.get("provider", base.provider)
@@ -483,6 +529,8 @@ class LLMBridge:
         if not eff_base_url:
             default_base_url = d.get("base_url")
             eff_base_url = str(default_base_url).strip() if default_base_url not in (None, "") else ""
+        if not eff_base_url:
+            eff_base_url = base.base_url
         provider_default_model: str | None = None
         if eff_provider is not None:
             provider_settings = LLMSettings.from_sources(
@@ -491,8 +539,6 @@ class LLMBridge:
             )
             eff_base_url = provider_settings.base_url
             provider_default_model = provider_settings.model
-        elif not eff_base_url:
-            eff_base_url = base.base_url
         eff_model = model if model is not None else d.get("model")
         if eff_model is None:
             eff_model = provider_default_model or base.model
@@ -536,6 +582,26 @@ class LLMBridge:
         hdrs.update(dict(base.extra_headers or {}))
         hdrs.update(dict(d.get("extra_headers") or {}))
         hdrs.update(extra_headers or {})
+        base_extra_body = coerce_llm_extra_body(
+            base.extra_body,
+            reserved_keys=_CHAT_COMPLETIONS_RESERVED_FIELDS,
+        )
+        default_extra_body = coerce_llm_extra_body(
+            d.get("extra_body"),
+            reserved_keys=_CHAT_COMPLETIONS_RESERVED_FIELDS,
+        )
+        if extra_body is not None:
+            call_extra_body = coerce_llm_extra_body(
+                extra_body,
+                reserved_keys=_CHAT_COMPLETIONS_RESERVED_FIELDS,
+            )
+            eff_extra_body = (
+                None
+                if call_extra_body is None
+                else {**(base_extra_body or {}), **(default_extra_body or {}), **call_extra_body}
+            )
+        else:
+            eff_extra_body = {**(base_extra_body or {}), **(default_extra_body or {})} or None
         if stop is not None:
             eff_stop = coerce_llm_stop_sequences(stop)
         elif "stop" in d:
@@ -544,7 +610,7 @@ class LLMBridge:
             eff_stop = coerce_llm_stop_sequences(base.stop)
         effective: dict[str, Any] = {
             "model": eff_model,
-            "base_url": eff_base_url,
+            "base_url": sanitize_base_url_for_output(eff_base_url),
             "temperature": eff_temp,
             "top_p": eff_top_p,
             "frequency_penalty": eff_freq_pen,
@@ -561,7 +627,9 @@ class LLMBridge:
             effective["experiment"] = dict(exp)
         if eff_stop:
             effective["stop"] = list(eff_stop)
-        return effective, hdrs, eff_base_url
+        if eff_extra_body:
+            effective["extra_body"] = eff_extra_body
+        return effective, hdrs, eff_base_url, eff_extra_body
 
     @staticmethod
     def _serialize_error(exc: Exception) -> dict[str, str]:
@@ -586,12 +654,13 @@ class LLMBridge:
         provider: str | None = None,
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         effective_extras: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> tuple[str, dict[str, Any]]:
         state = self._state_getter()
-        effective, hdrs, eff_base_url = self._merge_call(
+        effective, hdrs, eff_base_url, eff_extra_body = self._merge_call(
             model=model,
             temperature=temperature,
             top_p=top_p,
@@ -603,6 +672,7 @@ class LLMBridge:
             provider=provider,
             base_url=base_url,
             extra_headers=extra_headers,
+            extra_body=extra_body,
             stop=stop,
         )
         if effective_extras:
@@ -641,6 +711,7 @@ class LLMBridge:
             timeout_seconds=eff_timeout,
             base_url=eff_base_url,
             extra_headers=hdrs if hdrs else None,
+            extra_body=eff_extra_body,
             response_format=response_format,
             stop=eff_stop_list,
         )
@@ -720,6 +791,7 @@ class LLMBridge:
         provider: str | None = None,
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> str:
         text, _effective = self._request_text(
@@ -735,6 +807,7 @@ class LLMBridge:
             provider=provider,
             base_url=base_url,
             extra_headers=extra_headers,
+            extra_body=extra_body,
             stop=stop,
         )
         return text
@@ -755,6 +828,7 @@ class LLMBridge:
         provider: str | None = None,
         base_url: str | None = None,
         extra_headers: dict[str, str] | None = None,
+        extra_body: dict[str, Any] | None = None,
         native_response_format: bool | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> T:
@@ -798,6 +872,7 @@ class LLMBridge:
             provider=provider,
             base_url=base_url,
             extra_headers=extra_headers,
+            extra_body=extra_body,
             response_format=response_format,
             effective_extras={"structured_output_mode": structured_output_mode},
             stop=stop,

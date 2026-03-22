@@ -1,0 +1,87 @@
+{
+  "example_count": 6,
+  "examples": [
+    {
+      "description": "Smallest possible replayt workflow; deterministic and offline-friendly.",
+      "inputs_example": {
+        "customer_name": "Sam"
+      },
+      "key": "hello-world",
+      "llm_backed": false,
+      "target": "replayt_examples.e01_hello_world:wf",
+      "title": "Hello world"
+    },
+    {
+      "description": "Validate and normalize raw lead intake before later routing.",
+      "inputs_example": {
+        "lead": {
+          "company": "Northwind",
+          "email": "SAM@example.com ",
+          "message": "Need a demo for 40 seats",
+          "name": "  Sam Patel "
+        }
+      },
+      "key": "intake-normalization",
+      "llm_backed": false,
+      "target": "replayt_examples.e02_intake_normalization:wf",
+      "title": "Intake normalization"
+    },
+    {
+      "description": "Structured-output bug triage that can route or request missing details.",
+      "inputs_example": {
+        "issue": {
+          "body": "Open app, click save, stack trace appears, expected file write.",
+          "title": "Crash on save"
+        }
+      },
+      "key": "issue-triage",
+      "llm_backed": true,
+      "target": "replayt_examples.issue_triage:wf",
+      "title": "GitHub issue triage"
+    },
+    {
+      "description": "Structured review plus a human approval gate before shipping content.",
+      "inputs_example": {
+        "audience": "general",
+        "draft": "We guarantee 200% returns forever."
+      },
+      "key": "publishing-preflight",
+      "llm_backed": true,
+      "target": "replayt_examples.publishing_preflight:wf",
+      "title": "Publishing preflight"
+    },
+    {
+      "description": "Constrained support decision using one structured model output.",
+      "inputs_example": {
+        "order": {
+          "amount_cents": 12999,
+          "days_since_delivery": 3,
+          "delivered": true,
+          "order_id": "ORD-1001"
+        },
+        "ticket": "My order arrived damaged and I need a refund."
+      },
+      "key": "refund-policy",
+      "llm_backed": true,
+      "target": "replayt_examples.refund_policy:wf",
+      "title": "Refund policy"
+    },
+    {
+      "description": "Explicit support queue and SLA routing with no LLM dependency.",
+      "inputs_example": {
+        "ticket": {
+          "body": "Enterprise invoice card was declined during renewal.",
+          "channel": "email",
+          "customer_tier": "enterprise",
+          "subject": "Payment failed twice"
+        }
+      },
+      "key": "support-routing",
+      "llm_backed": false,
+      "target": "replayt_examples.e03_support_routing:wf",
+      "title": "Support routing"
+    }
+  ],
+  "module": "replayt_examples",
+  "schema": "replayt.example_catalog_contract.v1"
+}

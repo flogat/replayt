@@ -26,10 +26,12 @@ from replayt.cli.display import replay_html
 from replayt.cli.run_id_hints import echo_missing_run_hints
 from replayt.cli.run_support import (
     export_hook_argv,
+    export_hook_audit,
     invoke_export_hook,
     invoke_seal_hook,
     invoke_verify_seal_hook,
     seal_hook_argv,
+    seal_hook_audit,
     verify_seal_hook_argv,
 )
 from replayt.cli.stores import read_store
@@ -50,11 +52,11 @@ def _maybe_invoke_export_hook(
     seal: bool,
     event_count: int,
     report_style: str | None = None,
-) -> None:
+) -> dict[str, Any] | None:
     cfg, _, _ = get_project_config()
     hook = export_hook_argv(cfg)
     if not hook:
-        return
+        return None
     hook_timeout = export_hook_timeout_seconds(cfg)
     try:
         invoke_export_hook(
@@ -81,6 +83,7 @@ def _maybe_invoke_export_hook(
     except subprocess.CalledProcessError as exc:
         typer.echo(f"export_hook exited with code {exc.returncode}", err=True)
         raise typer.Exit(code=1) from exc
+    return export_hook_audit(cfg)
 
 
 def _maybe_invoke_seal_hook(
@@ -90,11 +93,11 @@ def _maybe_invoke_seal_hook(
     jsonl_path: Path,
     seal_out: Path,
     line_count: int,
-) -> None:
+) -> dict[str, Any] | None:
     cfg, _, _ = get_project_config()
     hook = seal_hook_argv(cfg)
     if not hook:
-        return
+        return None
     hook_timeout = seal_hook_timeout_seconds(cfg)
     try:
         invoke_seal_hook(
@@ -117,6 +120,7 @@ def _maybe_invoke_seal_hook(
     except subprocess.CalledProcessError as exc:
         typer.echo(f"seal_hook exited with code {exc.returncode}", err=True)
         raise typer.Exit(code=1) from exc
+    return seal_hook_audit(cfg)
 
 
 def _maybe_invoke_verify_seal_hook(
@@ -243,13 +247,15 @@ def cmd_seal(
     )
     out_path = out if out is not None else log_dir / f"{safe_run_id}.seal.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    _maybe_invoke_seal_hook(
+    policy_hook = _maybe_invoke_seal_hook(
         run_id=safe_run_id,
         log_dir=log_dir,
         jsonl_path=path,
         seal_out=out_path,
         line_count=int(manifest["line_count"]),
     )
+    if policy_hook is not None:
+        manifest["policy_hook"] = policy_hook
     out_path.write_text(json.dumps(manifest, indent=2), encoding="utf-8")
     if output == "json":
         typer.echo(json.dumps({**manifest, "manifest_path": str(out_path.resolve())}, indent=2))
@@ -445,11 +451,11 @@ def cmd_report_diff(
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR, "--log-dir"),
     log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, "--sqlite"),
-    out: str | None = typer.Option(None, "--out", help="Output file path (default: stdout)."),
+    out: str | None = typer.Option(None, "--out", help="Write HTML or Markdown here (default: stdout)."),
     report_format: Literal["html", "markdown"] = typer.Option(
         "html",
         "--format",
-        help="html (self-contained page) or markdown (paste into tickets / chat).",
+        help="html (self-contained page) or markdown (tickets / chat / docs).",
     ),
 ) -> None:
     """Side-by-side comparison of two runs from local JSONL (no model calls)."""
@@ -518,7 +524,7 @@ def cmd_export_run(
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
 
-    _maybe_invoke_export_hook(
+    policy_hook = _maybe_invoke_export_hook(
         run_id=run_id,
         export_kind="export_run",
         log_dir=log_dir,
@@ -541,6 +547,8 @@ def cmd_export_run(
         "events_jsonl_sha256": digest,
         "note": "Sanitized copy for sharing; not necessarily byte-identical to on-disk JSONL.",
     }
+    if policy_hook is not None:
+        manifest["policy_hook"] = policy_hook
     man_bytes = json.dumps(manifest, indent=2).encode("utf-8")
     seal_bytes: bytes | None = None
     if seal:
@@ -614,7 +622,7 @@ def cmd_bundle_export(
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
 
-    _maybe_invoke_export_hook(
+    policy_hook = _maybe_invoke_export_hook(
         run_id=run_id,
         export_kind="bundle_export",
         log_dir=log_dir,
@@ -647,6 +655,8 @@ def cmd_bundle_export(
         "events_jsonl_sha256": digest,
         "note": "Stakeholder bundle: HTML views + sanitized JSONL; not necessarily byte-identical to on-disk JSONL.",
     }
+    if policy_hook is not None:
+        manifest["policy_hook"] = policy_hook
     man_bytes = json.dumps(manifest, indent=2).encode("utf-8")
     seal_bytes: bytes | None = None
     if seal:
