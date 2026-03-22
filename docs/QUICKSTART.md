@@ -1,6 +1,6 @@
 # Five-minute quickstart
 
-This page gets you from install to **run -> inspect -> replay**. For a full tutorial with more workflows and patterns, use [`src/replayt_examples/README.md`](../src/replayt_examples/README.md).
+Go from install to **run -> inspect -> replay** on this page. For a full tutorial with more workflows and patterns, use [`src/replayt_examples/README.md`](../src/replayt_examples/README.md).
 
 ## 1. Install
 

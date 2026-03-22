@@ -84,6 +84,8 @@ replayt doctor
 |---------|-----|
 | `OPENAI_API_KEY is not set` | Export your key: `export OPENAI_API_KEY=sk-...` (or load from `.env` as above). |
 | `ModuleNotFoundError: No module named 'replayt'` | Activate your virtual environment first, then `pip install replayt` or `pip install -e ".[dev]"` from a clone. |
+| `replayt run workflow.py` fails before the run starts because a local import is missing | Activate the right venv, then install your repo editable with `pip install -e .` if `workflow.py` imports your package. replayt now names the missing module and suggests `replayt doctor --skip-connectivity --target workflow.py` after imports succeed. |
+| `replayt run workflow.py` says the file has a syntax error | Fix the reported line first. For the raw parser error outside replayt, run `python -m py_compile workflow.py`. |
 | `python: command not found` or wrong version | Use `python3` explicitly, or check `python --version` (requires Python 3.10+). |
 | `pip: command not found` | Use `python -m pip install ...` instead. |
 | `SSL: CERTIFICATE_VERIFY_FAILED` (corporate proxy) | Set `REQUESTS_CA_BUNDLE` / `SSL_CERT_FILE` to your corporate CA bundle, or `pip install pip-system-certs`. |

@@ -194,7 +194,7 @@ class Runner:
 
     **Lifecycle hooks:** Optional ``before_step`` / ``after_step`` run in the same process as the workflow
     (after context schema checks / after a successful handler return, respectively). They are for explicit
-    side effects—metrics, trace IDs, notifications—not a parallel control-flow mechanism; keep transitions
+    side effects (metrics, trace IDs, notifications), not a parallel control-flow mechanism; keep transitions
     in step code.
     """
 
@@ -253,6 +253,7 @@ class Runner:
 
     def _runtime_snapshot(self) -> dict[str, Any]:
         settings = getattr(self._llm_client, "settings", None)
+        contract = self.workflow.contract()
         llm_payload: dict[str, Any] = {"client_class": type(self._llm_client).__name__}
         trust_checks = trust_boundary_checks(base_url=None, log_mode=self.log_mode)
         if isinstance(settings, LLMSettings):
@@ -289,6 +290,10 @@ class Runner:
             },
             "store": {
                 "class": type(self.store).__name__,
+            },
+            "workflow": {
+                "contract_schema": contract["schema"],
+                "contract_sha256": contract["contract_sha256"],
             },
             "llm": llm_payload,
             "trust_boundary": {
@@ -370,6 +375,7 @@ class Runner:
 
         self.run_id = run_id or str(uuid.uuid4())
         self._approval_outcomes.clear()
+        self._current_state = None
         if resume and not run_id:
             raise ValueError("run_id is required when resume=True")
         events = self.store.load_events(self.run_id) if resume else []
@@ -451,9 +457,11 @@ class Runner:
                         f"Run exceeded max_steps={self.max_steps} "
                         f"(last state: {state!r}). Possible infinite loop."
                     )
-                    err_detail = {"type": "RunFailed", "message": err_msg}
+                    exc = RunFailed(err_msg)
+                    err_detail = _serialize_error(exc, include_traceback=self.include_tracebacks)
+                    self._emit_payload("step_error", {"state": state, "error": err_detail})
                     self._emit_payload("run_failed", {"error": err_detail, "state": state})
-                    raise RunFailed(err_msg)
+                    raise exc
                 self._current_state = state
                 handler = self.workflow.get_handler(state)
                 policy = self.workflow.retry_policy_for(state)
@@ -544,16 +552,12 @@ class Runner:
                             time.sleep(policy.backoff_seconds)
 
                 if last_err is not None and next_state is None:
-                    self._emit_payload(
-                        "run_failed",
-                        {
-                            "error": _serialize_error(
-                                last_err,
-                                include_traceback=self.include_tracebacks,
-                            ),
-                            "state": state,
-                        },
+                    err_detail = _serialize_error(
+                        last_err,
+                        include_traceback=self.include_tracebacks,
                     )
+                    self._emit_payload("step_error", {"state": state, "error": err_detail})
+                    self._emit_payload("run_failed", {"error": err_detail, "state": state})
                     raise RunFailed(str(last_err)) from last_err
 
                 if self._after_step is not None:
@@ -581,6 +585,8 @@ class Runner:
             return RunResult(self.run_id, "failed", final_state=self._current_state, error=str(e))
         except Exception as e:  # noqa: BLE001
             err_detail = _serialize_error(e, include_traceback=self.include_tracebacks)
+            if self._current_state is not None:
+                self._emit_payload("step_error", {"state": self._current_state, "error": err_detail})
             self._emit_payload("run_failed", {"error": err_detail, "state": self._current_state})
             self._emit_payload("run_completed", {"final_state": self._current_state, "status": "failed"})
             return RunResult(self.run_id, "failed", final_state=self._current_state, error=str(e))

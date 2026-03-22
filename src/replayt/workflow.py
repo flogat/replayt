@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Callable
 from typing import Any, TypeVar
 
 from replayt.types import RetryPolicy
 
 F = TypeVar("F", bound=Callable[..., Any])
+_WORKFLOW_CONTRACT_SCHEMA = "replayt.workflow_contract.v1"
 
 
 class Workflow:
@@ -87,9 +90,12 @@ class Workflow:
             return "any"
         return getattr(tp, "__name__", repr(tp))
 
-    def contract(self) -> dict[str, Any]:
-        """Return a stable, snapshot-friendly description of the workflow surface."""
+    @staticmethod
+    def _contract_sha256(payload: dict[str, Any]) -> str:
+        canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
+    def _contract_payload(self) -> dict[str, Any]:
         edges_by_source: dict[str, list[str]] = {}
         for src, dst in self._edges:
             edges_by_source.setdefault(src, []).append(dst)
@@ -120,7 +126,7 @@ class Workflow:
         visible_meta = dict(self.meta or {})
         visible_meta.pop("llm_defaults", None)
         return {
-            "schema": "replayt.workflow_contract.v1",
+            "schema": _WORKFLOW_CONTRACT_SCHEMA,
             "workflow": {
                 "name": self.name,
                 "version": self.version,
@@ -133,3 +139,15 @@ class Workflow:
             "declared_edges": [{"from_state": src, "to_state": dst} for src, dst in self._edges],
             "steps": steps,
         }
+
+    def contract_digest(self) -> str:
+        """Return a stable digest for the workflow surface used by `Workflow.contract()`."""
+
+        return self._contract_sha256(self._contract_payload())
+
+    def contract(self) -> dict[str, Any]:
+        """Return a stable, snapshot-friendly description of the workflow surface."""
+
+        payload = self._contract_payload()
+        payload["contract_sha256"] = self._contract_sha256(payload)
+        return payload

@@ -37,10 +37,23 @@ def test_log_directory_permission_trust_checks_ok_for_restrictive_mode(tmp_path:
         pytest.skip("POSIX mode bits only")
     log_dir = tmp_path / "logs"
     log_dir.mkdir()
-    log_dir.chmod(0o770)
+    log_dir.chmod(0o700)
     names = {c.name: c for c in log_directory_permission_trust_checks(log_dir)}
+    assert names["trust_log_dir_group_readable"].ok is True
+    assert names["trust_log_dir_group_writable"].ok is True
     assert names["trust_log_dir_other_readable"].ok is True
     assert names["trust_log_dir_other_writable"].ok is True
+
+
+def test_log_directory_permission_trust_checks_warns_group_accessible(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    log_dir.chmod(0o770)
+    names = {c.name: c for c in log_directory_permission_trust_checks(log_dir)}
+    assert names["trust_log_dir_group_readable"].ok is False
+    assert names["trust_log_dir_group_writable"].ok is False
 
 
 def test_log_directory_permission_trust_checks_warns_world_accessible(tmp_path: Path) -> None:
@@ -50,6 +63,8 @@ def test_log_directory_permission_trust_checks_warns_world_accessible(tmp_path: 
     log_dir.mkdir()
     log_dir.chmod(0o777)
     names = {c.name: c for c in log_directory_permission_trust_checks(log_dir)}
+    assert names["trust_log_dir_group_readable"].ok is False
+    assert names["trust_log_dir_group_writable"].ok is False
     assert names["trust_log_dir_other_readable"].ok is False
     assert names["trust_log_dir_other_writable"].ok is False
 
@@ -95,6 +110,8 @@ def test_log_directory_permission_trust_checks_warns_via_mocked_mode(
     monkeypatch.setattr(Path, "stat", lambda self: _Stat())
 
     names = {c.name: c for c in log_directory_permission_trust_checks(log_dir)}
+    assert names["trust_log_dir_group_readable"].ok is False
+    assert names["trust_log_dir_group_writable"].ok is False
     assert names["trust_log_dir_other_readable"].ok is False
     assert names["trust_log_dir_other_writable"].ok is False
 
@@ -122,8 +139,22 @@ def test_dotenv_permission_trust_checks_ok_for_restrictive_mode(tmp_path: Path) 
     env_file.write_text("K=v\n", encoding="utf-8")
     env_file.chmod(0o600)
     names = {c.name: c for c in dotenv_permission_trust_checks([env_file])}
+    assert names["trust_dotenv_group_readable"].ok is True
+    assert names["trust_dotenv_group_writable"].ok is True
     assert names["trust_dotenv_other_readable"].ok is True
     assert names["trust_dotenv_other_writable"].ok is True
+
+
+def test_dotenv_permission_trust_checks_warns_group_accessible(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    env_file = tmp_path / ".env"
+    env_file.write_text("K=v\n", encoding="utf-8")
+    env_file.chmod(0o660)
+    names = {c.name: c for c in dotenv_permission_trust_checks([env_file])}
+    assert names["trust_dotenv_group_readable"].ok is False
+    assert names["trust_dotenv_group_writable"].ok is False
+    assert str(env_file) in names["trust_dotenv_group_readable"].detail
 
 
 def test_dotenv_permission_trust_checks_warns_world_accessible(tmp_path: Path) -> None:
@@ -133,6 +164,8 @@ def test_dotenv_permission_trust_checks_warns_world_accessible(tmp_path: Path) -
     env_file.write_text("K=v\n", encoding="utf-8")
     env_file.chmod(0o666)
     names = {c.name: c for c in dotenv_permission_trust_checks([env_file])}
+    assert names["trust_dotenv_group_readable"].ok is False
+    assert names["trust_dotenv_group_writable"].ok is False
     assert names["trust_dotenv_other_readable"].ok is False
     assert names["trust_dotenv_other_writable"].ok is False
     assert str(env_file) in names["trust_dotenv_other_readable"].detail
@@ -153,6 +186,8 @@ def test_dotenv_permission_trust_checks_warns_via_mocked_mode(
     monkeypatch.setattr(Path, "stat", lambda self: _Stat())
 
     names = {c.name: c for c in dotenv_permission_trust_checks([env_file])}
+    assert names["trust_dotenv_group_readable"].ok is False
+    assert names["trust_dotenv_group_writable"].ok is False
     assert names["trust_dotenv_other_readable"].ok is False
     assert names["trust_dotenv_other_writable"].ok is False
 

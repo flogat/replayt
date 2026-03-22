@@ -17,13 +17,53 @@ def _workflow_objects(obj: Any) -> list[tuple[str, Workflow]]:
     return [(name, value) for name, value in vars(obj).items() if isinstance(value, Workflow)]
 
 
+def _python_file_import_bad_parameter(path: Path, exc: ModuleNotFoundError) -> typer.BadParameter:
+    missing = getattr(exc, "name", None)
+    inner = repr(missing) if missing else "a dependency"
+    return typer.BadParameter(
+        f"Importing Python workflow file {path} failed: {inner} is missing "
+        "(not installed or not on PYTHONPATH). "
+        "Activate the right virtual environment, install your project editable (`pip install -e .`) "
+        "if this file imports local packages, or switch to a `MODULE:VAR` target once imports work. "
+        f"After it imports, `replayt doctor --skip-connectivity --target {path}` checks the graph without executing."
+    )
+
+
+def _python_file_syntax_bad_parameter(path: Path, exc: SyntaxError) -> typer.BadParameter:
+    detail = exc.msg or "invalid syntax"
+    location = f"line {exc.lineno}"
+    if exc.offset is not None:
+        location += f", column {exc.offset}"
+    return typer.BadParameter(
+        f"Python workflow file {path} has a syntax error at {location}: {detail}. "
+        f"Fix the file, then retry. Tip: `python -m py_compile {path}` shows the same parser error directly."
+    )
+
+
+def _python_file_runtime_bad_parameter(path: Path, exc: ImportError) -> typer.BadParameter:
+    detail = str(exc).strip() or exc.__class__.__name__
+    return typer.BadParameter(
+        f"Importing Python workflow file {path} failed with {exc.__class__.__name__}: {detail}. "
+        "If this file uses package-relative imports, install your project editable (`pip install -e .`) "
+        "and prefer a `MODULE:VAR` target once imports work. "
+        f"After that, `replayt doctor --skip-connectivity --target {path}` checks the graph without executing."
+    )
+
+
 def load_python_file(path: Path) -> Any:
     module_name = f"replayt_user_{path.stem}_{abs(hash(path.resolve()))}"
     spec = importlib.util.spec_from_file_location(module_name, path)
     if spec is None or spec.loader is None:
         raise typer.BadParameter(f"Could not import Python workflow file: {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    try:
+        spec.loader.exec_module(module)
+    except ModuleNotFoundError as exc:
+        raise _python_file_import_bad_parameter(path, exc) from exc
+    except SyntaxError as exc:
+        raise _python_file_syntax_bad_parameter(path, exc) from exc
+    except ImportError as exc:
+        raise _python_file_runtime_bad_parameter(path, exc) from exc
     for attr in ("wf", "workflow"):
         if hasattr(module, attr):
             return getattr(module, attr)

@@ -6,6 +6,7 @@ import re
 import subprocess
 import sys
 import tarfile
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,15 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _strip_ansi(s: str) -> str:
     return _ANSI_RE.sub("", s)
+
+
+def _reset_project_config_cache() -> None:
+    import replayt.cli.config as cfg_mod
+
+    cfg_mod._PROJECT_CONFIG = None
+    cfg_mod._PROJECT_CONFIG_PATH = None
+    cfg_mod._PROJECT_CONFIG_UNKNOWN_KEYS = None
+    cfg_mod._PROJECT_CONFIG_CWD = None
 
 
 def test_cli_graph_smoke() -> None:
@@ -55,6 +65,8 @@ def done(ctx):
     assert result.exit_code == 0
     data = json.loads(result.stdout)
     assert data["schema"] == "replayt.workflow_contract.v1"
+    assert isinstance(data["contract_sha256"], str)
+    assert len(data["contract_sha256"]) == 64
     assert data["workflow"]["name"] == "contract_flow"
     start_step = next(step for step in data["steps"] if step["name"] == "start")
     assert start_step["retry_policy"] == {"max_attempts": 4, "backoff_seconds": 2.0}
@@ -91,6 +103,7 @@ def done(ctx):
     assert snapshot_path.is_file()
     payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
     assert payload["schema"] == "replayt.workflow_contract.v1"
+    assert isinstance(payload["contract_sha256"], str)
     assert payload["workflow"]["name"] == "contract_flow"
     assert f"wrote {snapshot_path}" in result.stdout
 
@@ -184,6 +197,43 @@ def archive(ctx):
     assert payload["snapshot_path"] == str(snapshot_path)
     assert payload["workflow"]["version"] == "4"
     assert any(line.startswith("@@") for line in payload["diff"])
+
+
+def test_cli_inspect_surfaces_workflow_contract_digest(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "digest_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("digest_flow", version="2")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    ctx.set("ok", True)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    contract = runner.invoke(app, ["contract", str(workflow_path), "--format", "json"])
+    assert contract.exit_code == 0
+    contract_payload = json.loads(contract.stdout)
+    contract_sha256 = contract_payload["contract_sha256"]
+
+    run = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    inspect_text = runner.invoke(app, ["inspect", run_id, "--log-dir", str(tmp_path)])
+    assert inspect_text.exit_code == 0
+    assert f"workflow_contract_sha256={contract_sha256}" in inspect_text.stdout
+
+    inspect_json = runner.invoke(app, ["inspect", run_id, "--log-dir", str(tmp_path), "--output", "json"])
+    assert inspect_json.exit_code == 0
+    inspect_payload = json.loads(inspect_json.stdout)
+    assert inspect_payload["summary"]["workflow_contract_sha256"] == contract_sha256
 
 
 def test_cli_inspect_unknown_run_id_shows_runs_hint(tmp_path: Path) -> None:
@@ -744,7 +794,7 @@ def start(ctx):
     assert data["workflow"] == "json_dry_run@1"
 
 
-def test_cli_init_scaffold(tmp_path: Path) -> None:
+def test_cli_init_scaffold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runner = CliRunner()
     r = runner.invoke(app, ["init", "--path", str(tmp_path)])
     assert r.exit_code == 0
@@ -753,13 +803,25 @@ def test_cli_init_scaffold(tmp_path: Path) -> None:
     inputs_file = tmp_path / "inputs.example.json"
     assert inputs_file.is_file()
     assert json.loads(inputs_file.read_text(encoding="utf-8")) == {"customer_name": "Sam"}
+    config_file = tmp_path / ".replaytrc.toml"
+    assert config_file.is_file()
+    config_text = config_file.read_text(encoding="utf-8")
+    assert 'target = "workflow.py"' in config_text
+    assert 'inputs_file = "inputs.example.json"' in config_text
     gi = tmp_path / ".gitignore"
     assert gi.is_file()
     assert ".replayt/" in gi.read_text(encoding="utf-8")
     assert "PowerShell: .\\.venv\\Scripts\\Activate.ps1" in r.stdout
     assert "replayt doctor --skip-connectivity --target workflow.py" in r.stdout
-    assert "replayt run workflow.py --dry-check --inputs-file inputs.example.json" in r.stdout
-    assert "replayt run workflow.py --inputs-file inputs.example.json" in r.stdout
+    assert "replayt run --dry-check" in r.stdout
+    assert "replayt run\n" in r.stdout or "replayt run\r\n" in r.stdout
+
+    monkeypatch.chdir(tmp_path)
+    _reset_project_config_cache()
+    run = runner.invoke(app, ["run"])
+    assert run.exit_code == 0
+    assert "workflow=my_workflow@1" in run.stdout
+
     r2 = runner.invoke(app, ["init", "--path", str(tmp_path)])
     assert r2.exit_code == 1
     r3 = runner.invoke(app, ["init", "--path", str(tmp_path), "--force"])
@@ -800,9 +862,10 @@ def test_cli_init_scaffold_richer_templates(
     inputs_file = target_dir / "inputs.example.json"
     assert wf_file.is_file()
     assert inputs_file.is_file()
+    assert (target_dir / ".replaytrc.toml").is_file()
     assert json.loads(inputs_file.read_text(encoding="utf-8")) == expected_inputs
     assert expected_snippet in wf_file.read_text(encoding="utf-8")
-    assert "replayt run workflow.py --dry-run --inputs-file inputs.example.json" in r.stdout
+    assert "replayt run --dry-run" in r.stdout
 
     dry_check = runner.invoke(
         app,
@@ -1093,23 +1156,31 @@ def test_cli_try_lists_packaged_examples() -> None:
     assert "publishing-preflight" in r.stdout
 
 
-def test_cli_try_copy_to_writes_workflow_and_inputs(tmp_path: Path) -> None:
+def test_cli_try_copy_to_writes_workflow_and_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     dest = tmp_path / "flow"
     runner = CliRunner()
     r = runner.invoke(app, ["try", "--example", "hello-world", "--copy-to", str(dest)])
     assert r.exit_code == 0
     wf = dest / "workflow.py"
     inputs_f = dest / "inputs.example.json"
+    config_file = dest / ".replaytrc.toml"
     assert wf.is_file()
     assert inputs_f.is_file()
+    assert config_file.is_file()
     assert "Workflow" in wf.read_text(encoding="utf-8")
     loaded = json.loads(inputs_f.read_text(encoding="utf-8"))
     assert loaded.get("customer_name") == "Sam"
     assert "Next steps:" in r.stdout
     assert str(wf) in r.stdout
     assert "replayt doctor --skip-connectivity --target workflow.py" in r.stdout
-    assert "replayt run workflow.py --dry-check --inputs-file inputs.example.json" in r.stdout
-    assert "replayt run workflow.py --inputs-file inputs.example.json" in r.stdout
+    assert "replayt run --dry-check" in r.stdout
+    assert "replayt run\n" in r.stdout or "replayt run\r\n" in r.stdout
+
+    monkeypatch.chdir(dest)
+    _reset_project_config_cache()
+    run = runner.invoke(app, ["run"])
+    assert run.exit_code == 0
+    assert "workflow=hello_world_tutorial@1" in run.stdout
 
 
 def test_cli_try_copy_to_json_schema(tmp_path: Path) -> None:
@@ -1126,6 +1197,7 @@ def test_cli_try_copy_to_json_schema(tmp_path: Path) -> None:
     assert payload["target"] == "replayt_examples.e01_hello_world:wf"
     assert Path(payload["workflow_py"]).is_file()
     assert Path(payload["inputs_example_json"]).is_file()
+    assert Path(payload["project_config"]).is_file()
 
 
 def test_cli_try_copy_to_refuses_overwrite_without_force(tmp_path: Path) -> None:
@@ -1143,10 +1215,12 @@ def test_cli_try_copy_to_force_overwrites(tmp_path: Path) -> None:
     dest.mkdir()
     (dest / "workflow.py").write_text("stale", encoding="utf-8")
     (dest / "inputs.example.json").write_text("{}", encoding="utf-8")
+    (dest / ".replaytrc.toml").write_text('target = "stale.py"\n', encoding="utf-8")
     runner = CliRunner()
     r = runner.invoke(app, ["try", "--copy-to", str(dest), "--force"])
     assert r.exit_code == 0
     assert "Workflow" in (dest / "workflow.py").read_text(encoding="utf-8")
+    assert 'target = "workflow.py"' in (dest / ".replaytrc.toml").read_text(encoding="utf-8")
 
 
 def test_cli_try_copy_to_llm_backed_example_suggests_dry_run(tmp_path: Path) -> None:
@@ -1154,8 +1228,8 @@ def test_cli_try_copy_to_llm_backed_example_suggests_dry_run(tmp_path: Path) -> 
     runner = CliRunner()
     r = runner.invoke(app, ["try", "--example", "issue-triage", "--copy-to", str(dest)])
     assert r.exit_code == 0
-    assert "replayt run workflow.py --dry-run --inputs-file inputs.example.json" in r.stdout
-    assert "replayt run workflow.py --inputs-file inputs.example.json" in r.stdout
+    assert "replayt run --dry-run" in r.stdout
+    assert "replayt run\n" in r.stdout or "replayt run\r\n" in r.stdout
 
 
 def test_cli_try_copy_to_rejects_live_and_inputs(tmp_path: Path) -> None:
@@ -3117,6 +3191,8 @@ def test_cli_export_run_tarball(tmp_path: Path) -> None:
             str(tar_path),
             "--export-mode",
             "redacted",
+            "--target",
+            "replayt_examples.e01_hello_world:wf",
             "--seal",
         ],
     )
@@ -3124,15 +3200,29 @@ def test_cli_export_run_tarball(tmp_path: Path) -> None:
     with tarfile.open(tar_path, "r:gz") as tf:
         names = tf.getnames()
         assert any(n.endswith("events.jsonl") for n in names)
+        assert any(n.endswith("workflow.contract.json") for n in names)
         assert any(n.endswith("events.seal.json") for n in names)
         member = [n for n in names if n.endswith("events.jsonl")][0]
         data = tf.extractfile(member).read().decode()
+        manifest_member = [n for n in names if n.endswith("manifest.json")][0]
+        manifest = json.loads(tf.extractfile(manifest_member).read().decode("utf-8"))
         seal_member = [n for n in names if n.endswith("events.seal.json")][0]
         seal_data = json.loads(tf.extractfile(seal_member).read().decode("utf-8"))
+        contract_member = [n for n in names if n.endswith("workflow.contract.json")][0]
+        contract_data = json.loads(tf.extractfile(contract_member).read().decode("utf-8"))
     first = json.loads(data.splitlines()[0])
     assert first["type"] == "run_started"
     assert first["payload"].get("inputs") == {}
     assert first["payload"].get("run_metadata") == {"experiment": "a"}
+    assert manifest["run_summary"]["workflow_name"] == "hello_world_tutorial"
+    assert manifest["run_summary"]["status"] == "completed"
+    assert manifest["run_summary"]["run_metadata"] == {"experiment": "a"}
+    assert manifest["workflow_contract_snapshot"] == {
+        "target": "replayt_examples.e01_hello_world:wf",
+        "file": "workflow.contract.json",
+        "contract_sha256": contract_data["contract_sha256"],
+        "matches_run_started": True,
+    }
     assert seal_data["schema"] == "replayt.export_seal.v1"
     assert seal_data["run_id"] == rid
     assert seal_data["jsonl_path"] == "events.jsonl"
@@ -3251,6 +3341,217 @@ def test_cli_runs_filter_status(tmp_path: Path) -> None:
     bad = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--status", "nope"])
     assert bad.exit_code != 0
     assert "Invalid --status" in (bad.stdout + (bad.stderr or ""))
+
+
+def test_cli_runs_text_surfaces_pending_approval_attention(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    paused = [
+        {
+            "ts": "2026-03-22T10:00:00+00:00",
+            "run_id": "rid-wait",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "publish", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-22T10:00:01+00:00",
+            "run_id": "rid-wait",
+            "seq": 2,
+            "type": "approval_requested",
+            "payload": {"approval_id": "ship", "state": "review", "summary": "Ship draft?"},
+        },
+        {
+            "ts": "2026-03-22T10:00:02+00:00",
+            "run_id": "rid-wait",
+            "seq": 3,
+            "type": "run_paused",
+            "payload": {"reason": "approval_required", "approval_id": "ship"},
+        },
+    ]
+    (log_dir / "rid-wait.jsonl").write_text("\n".join(json.dumps(x) for x in paused) + "\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--status", "paused"])
+    assert result.exit_code == 0
+    assert "attention=awaiting approval ship @ review" in result.stdout
+
+
+def test_cli_runs_output_json_reports_filters_and_age(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import replayt.cli.commands.inspect as inspect_cmd
+
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            base = cls.fromisoformat("2026-03-22T12:00:00+00:00")
+            return base if tz is None else base.astimezone(tz)
+
+    monkeypatch.setattr(inspect_cmd, "datetime", FrozenDateTime)
+
+    stale = [
+        {
+            "ts": "2026-03-22T09:00:00+00:00",
+            "run_id": "rid-stale",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-22T09:30:00+00:00",
+            "run_id": "rid-stale",
+            "seq": 2,
+            "type": "run_paused",
+            "payload": {"approval_id": "ship"},
+        },
+    ]
+    fresh = [
+        {
+            "ts": "2026-03-22T11:40:00+00:00",
+            "run_id": "rid-fresh",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-22T11:50:00+00:00",
+            "run_id": "rid-fresh",
+            "seq": 2,
+            "type": "run_paused",
+            "payload": {"approval_id": "ship"},
+        },
+    ]
+    for lines, name in ((stale, "rid-stale"), (fresh, "rid-fresh")):
+        (log_dir / f"{name}.jsonl").write_text(
+            "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+        )
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        [
+            "runs",
+            "--log-dir",
+            str(log_dir),
+            "--status",
+            "paused",
+            "--older-than",
+            "1h",
+            "--output",
+            "json",
+        ],
+    )
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    assert data["schema"] == "replayt.runs_report.v1"
+    assert data["count"] == 1
+    assert data["filters"]["status"] == ["paused"]
+    assert data["filters"]["older_than"] == "1h"
+    assert data["filters"]["newer_than"] is None
+    assert data["runs"][0]["run_id"] == "rid-stale"
+    assert data["runs"][0]["status"] == "paused"
+    assert data["runs"][0]["attention_kind"] == "pending_approval"
+    assert data["runs"][0]["attention_summary"] == "awaiting approval ship"
+    assert data["runs"][0]["pending_approvals"][0]["approval_id"] == "ship"
+    assert data["runs"][0]["last_event_age_seconds"] == 9000
+
+
+def test_cli_runs_output_json_includes_failure_attention_and_parse_context(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    failed = [
+        {
+            "ts": "2026-03-22T09:00:00+00:00",
+            "run_id": "rid-bad",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "support_flow", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-22T09:00:01+00:00",
+            "run_id": "rid-bad",
+            "seq": 2,
+            "type": "structured_output_failed",
+            "payload": {
+                "state": "triage",
+                "schema_name": "Decision",
+                "stage": "schema_validate",
+                "error": {"message": "confidence must be <= 1"},
+            },
+        },
+        {
+            "ts": "2026-03-22T09:00:02+00:00",
+            "run_id": "rid-bad",
+            "seq": 3,
+            "type": "run_failed",
+            "payload": {
+                "state": "triage",
+                "error": {"type": "ValueError", "message": "confidence must be <= 1"},
+            },
+        },
+        {
+            "ts": "2026-03-22T09:00:03+00:00",
+            "run_id": "rid-bad",
+            "seq": 4,
+            "type": "run_completed",
+            "payload": {"status": "failed"},
+        },
+    ]
+    (log_dir / "rid-bad.jsonl").write_text("\n".join(json.dumps(x) for x in failed) + "\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--output", "json"])
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    run = data["runs"][0]
+    assert run["run_id"] == "rid-bad"
+    assert run["attention_kind"] == "run_failed"
+    assert run["attention_summary"] == "failed in triage: ValueError: confidence must be <= 1"
+    assert run["latest_failure"]["state"] == "triage"
+    assert run["latest_structured_output_failure"]["schema_name"] == "Decision"
+    assert run["latest_structured_output_failure"]["stage"] == "schema_validate"
+
+
+def test_cli_runs_newer_than_filters_recent_runs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    import replayt.cli.commands.inspect as inspect_cmd
+
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            base = cls.fromisoformat("2026-03-22T12:00:00+00:00")
+            return base if tz is None else base.astimezone(tz)
+
+    monkeypatch.setattr(inspect_cmd, "datetime", FrozenDateTime)
+
+    for rid, ts in (("rid-old", "2026-03-22T10:00:00+00:00"), ("rid-new", "2026-03-22T11:50:00+00:00")):
+        lines = [
+            {
+                "ts": ts,
+                "run_id": rid,
+                "seq": 1,
+                "type": "run_started",
+                "payload": {"workflow_name": "w", "workflow_version": "1"},
+            },
+            {
+                "ts": ts,
+                "run_id": rid,
+                "seq": 2,
+                "type": "run_completed",
+                "payload": {"status": "completed"},
+            },
+        ]
+        (log_dir / f"{rid}.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--newer-than", "30m"])
+    assert result.exit_code == 0
+    assert "rid-new" in result.stdout
+    assert "rid-old" not in result.stdout
 
 
 def test_cli_runs_tool_filter(tmp_path: Path) -> None:
@@ -3439,6 +3740,117 @@ def test_cli_runs_and_stats_filter_by_note_kind(tmp_path: Path) -> None:
     r_stats = runner.invoke(
         app,
         ["stats", "--log-dir", str(log_dir), "--note-kind", "framework_summary", "--output", "json"],
+    )
+    assert r_stats.exit_code == 0
+    stats_payload = json.loads(r_stats.stdout)
+    assert stats_payload["schema"] == "replayt.stats_report.v1"
+    assert stats_payload["runs_included"] == 1
+
+
+def test_cli_runs_and_stats_filter_by_finish_reason(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+
+    def _run_with_finish_reasons(reasons: list[str], rid: str) -> list[dict[str, object]]:
+        lines: list[dict[str, object]] = [
+            {
+                "ts": "2026-03-01T00:00:00+00:00",
+                "run_id": rid,
+                "seq": 1,
+                "type": "run_started",
+                "payload": {"workflow_name": "w", "workflow_version": "1"},
+            }
+        ]
+        seq = 2
+        for fr in reasons:
+            lines.append(
+                {
+                    "ts": f"2026-03-01T00:00:{seq - 1:02d}+00:00",
+                    "run_id": rid,
+                    "seq": seq,
+                    "type": "llm_response",
+                    "payload": {"finish_reason": fr, "latency_ms": 10},
+                }
+            )
+            seq += 1
+        lines.append(
+            {
+                "ts": "2026-03-01T00:00:09+00:00",
+                "run_id": rid,
+                "seq": seq,
+                "type": "run_completed",
+                "payload": {"status": "completed"},
+            }
+        )
+        return lines
+
+    for lines, name in (
+        (_run_with_finish_reasons(["length"], "rid-a"), "rid-a"),
+        (_run_with_finish_reasons(["stop"], "rid-b"), "rid-b"),
+        (
+            [
+                {
+                    "ts": "2026-03-01T00:00:00+00:00",
+                    "run_id": "rid-c",
+                    "seq": 1,
+                    "type": "run_started",
+                    "payload": {"workflow_name": "w", "workflow_version": "1"},
+                },
+                {
+                    "ts": "2026-03-01T00:00:01+00:00",
+                    "run_id": "rid-c",
+                    "seq": 2,
+                    "type": "run_completed",
+                    "payload": {"status": "completed"},
+                },
+            ],
+            "rid-c",
+        ),
+    ):
+        (log_dir / f"{name}.jsonl").write_text(
+            "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+        )
+
+    runner = CliRunner()
+    inspect = runner.invoke(
+        app,
+        ["inspect", "rid-a", "--log-dir", str(log_dir), "--output", "json", "--finish-reason", "length"],
+    )
+    assert inspect.exit_code == 0
+    inspect_payload = json.loads(inspect.stdout)
+    assert inspect_payload["schema"] == "replayt.inspect_report.v1"
+    assert inspect_payload["finish_reason_filter"] == ["length"]
+    assert [e["type"] for e in inspect_payload["events"]] == ["llm_response"]
+
+    r_one = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--finish-reason", "length", "--output", "json"])
+    assert r_one.exit_code == 0
+    runs_payload = json.loads(r_one.stdout)
+    assert runs_payload["schema"] == "replayt.runs_report.v1"
+    assert runs_payload["filters"]["finish_reason"] == ["length"]
+    assert len(runs_payload["runs"]) == 1
+    assert runs_payload["runs"][0]["run_id"] == "rid-a"
+
+    r_text = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--finish-reason", "length"])
+    assert r_text.exit_code == 0
+    assert "rid-a" in r_text.stdout
+    assert "rid-b" not in r_text.stdout
+    assert "rid-c" not in r_text.stdout
+
+    r_or = runner.invoke(
+        app,
+        ["runs", "--log-dir", str(log_dir), "--finish-reason", "length", "--finish-reason", "stop"],
+    )
+    assert r_or.exit_code == 0
+    assert "rid-a" in r_or.stdout and "rid-b" in r_or.stdout
+    assert "rid-c" not in r_or.stdout
+
+    bad = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--finish-reason", ""])
+    assert bad.exit_code != 0
+    assert "Empty --finish-reason" in (bad.stdout + (bad.stderr or ""))
+
+    r_stats = runner.invoke(
+        app,
+        ["stats", "--log-dir", str(log_dir), "--finish-reason", "length", "--output", "json"],
     )
     assert r_stats.exit_code == 0
     stats_payload = json.loads(r_stats.stdout)
@@ -4803,6 +5215,61 @@ def start_two(ctx):
     assert "rename the one you want to `wf` or `workflow`" in text
 
 
+def test_cli_python_file_target_missing_dependency_shows_onboarding_hints(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "broken_import.py"
+    workflow_path.write_text(
+        """
+from missing_demo_dependency import nope
+from replayt.workflow import Workflow
+
+wf = Workflow("broken")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+
+    assert result.exit_code == 2
+    text = _strip_ansi(result.stdout + result.stderr)
+    assert "Importing Python workflow file" in text
+    assert "missing_demo_dependency" in text
+    assert "pip install -e ." in text
+    assert "MODULE:VAR" in text
+    assert "doctor --skip-connectivity --target" in text
+
+
+def test_cli_python_file_target_syntax_error_reports_location(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "broken_syntax.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("broken")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+
+    assert result.exit_code == 2
+    text = _strip_ansi(result.stdout + result.stderr)
+    assert "syntax error" in text.lower()
+    assert "line 7" in text
+    assert "python -m py_compile" in text
+
+
 def test_cli_run_invalid_metadata_and_experiment_json_report_bad_parameter(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -5174,8 +5641,14 @@ def test_cli_version_format_json() -> None:
     assert schemas["workflow_contract_check"] == "replayt.workflow_contract_check.v1"
     assert schemas["run_result"] == "replayt.run_result.v1"
     assert schemas["inspect_report"] == "replayt.inspect_report.v1"
+    assert schemas["runs_report"] == "replayt.runs_report.v1"
     assert schemas["stats_report"] == "replayt.stats_report.v1"
     assert schemas["diff_report"] == "replayt.diff_report.v1"
+    assert schemas["bundle_export"] == "replayt.bundle_export.v1"
+    assert schemas["export_bundle"] == "replayt.export_bundle.v1"
+    assert schemas["export_seal"] == "replayt.export_seal.v1"
+    assert schemas["seal"] == "replayt.seal.v1"
+    assert schemas["verify_seal_report"] == "replayt.verify_seal_report.v1"
     assert schemas["try_examples"] == "replayt.try_examples.v1"
     assert schemas["try_copy"] == "replayt.try_copy.v1"
 
@@ -5495,6 +5968,58 @@ def test_cli_bundle_export_can_include_seal(tmp_path: Path) -> None:
     assert seal_data["schema"] == "replayt.export_seal.v1"
     assert seal_data["run_id"] == run_id
     assert seal_data["jsonl_path"] == "events.jsonl"
+
+
+def test_cli_bundle_export_target_adds_contract_snapshot(tmp_path: Path) -> None:
+    runner = CliRunner()
+    target = "replayt_examples.e01_hello_world:wf"
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            target,
+            "--log-dir",
+            str(tmp_path),
+            "--inputs-json",
+            '{"customer_name":"x"}',
+        ],
+    )
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    out_tar = tmp_path / "contract-bundle.tar.gz"
+    export = runner.invoke(
+        app,
+        [
+            "bundle-export",
+            run_id,
+            "--out",
+            str(out_tar),
+            "--log-dir",
+            str(tmp_path),
+            "--target",
+            target,
+        ],
+    )
+    assert export.exit_code == 0
+
+    with tarfile.open(out_tar, "r:gz") as tf:
+        names = tf.getnames()
+        assert any(name.endswith("/workflow.contract.json") for name in names)
+        assert any(name.endswith("/workflow.mmd.txt") for name in names)
+        manifest_member = next(name for name in names if name.endswith("/manifest.json"))
+        manifest = json.loads(tf.extractfile(manifest_member).read().decode("utf-8"))
+        contract_member = next(name for name in names if name.endswith("/workflow.contract.json"))
+        contract = json.loads(tf.extractfile(contract_member).read().decode("utf-8"))
+
+    assert manifest["run_summary"]["workflow_name"] == "hello_world_tutorial"
+    assert manifest["run_summary"]["status"] == "completed"
+    assert manifest["workflow_contract_snapshot"] == {
+        "target": target,
+        "file": "workflow.contract.json",
+        "contract_sha256": contract["contract_sha256"],
+        "matches_run_started": True,
+        "mermaid_file": "workflow.mmd.txt",
+    }
 
 
 def test_cli_resume_reason_and_actor_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -6040,6 +6565,51 @@ def test_cli_config_and_doctor_sanitize_base_url_with_embedded_credentials(
     assert "query params token" in embedded["detail"].lower()
 
 
+def test_cli_config_and_doctor_warn_on_group_accessible_local_secrets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+
+    log_dir = tmp_path / ".replayt" / "runs"
+    log_dir.mkdir(parents=True)
+    log_dir.chmod(0o770)
+    env_file = tmp_path / ".env"
+    env_file.write_text("OPENAI_API_KEY=sk-test\n", encoding="utf-8")
+    env_file.chmod(0o660)
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("REPLAYT_PROVIDER", "openai")
+
+    import replayt.cli.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_UNKNOWN_KEYS", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_CWD", None)
+
+    runner = CliRunner()
+
+    config = runner.invoke(app, ["config", "--format", "json"])
+    assert config.exit_code == 0
+    config_data = json.loads(config.stdout)
+    config_checks = {check["name"]: check for check in config_data["trust_boundary"]["checks"]}
+    assert config_checks["trust_log_dir_group_readable"]["ok"] is False
+    assert config_checks["trust_log_dir_group_writable"]["ok"] is False
+    assert config_checks["trust_dotenv_group_readable"]["ok"] is False
+    assert config_checks["trust_dotenv_group_writable"]["ok"] is False
+
+    doctor = runner.invoke(app, ["doctor", "--skip-connectivity", "--format", "json"])
+    assert doctor.exit_code == 0
+    doctor_data = json.loads(doctor.stdout)
+    doctor_checks = {check["name"]: check for check in doctor_data["checks"]}
+    assert doctor_checks["trust_log_dir_group_readable"]["ok"] is False
+    assert doctor_checks["trust_log_dir_group_writable"]["ok"] is False
+    assert doctor_checks["trust_dotenv_group_readable"]["ok"] is False
+    assert doctor_checks["trust_dotenv_group_writable"]["ok"] is False
+
+
 def test_cli_run_timeout_appends_run_interrupted_to_sqlite_mirror(tmp_path: Path, monkeypatch) -> None:
     from replayt.cli.commands import run as run_cmd
     from replayt.persistence import JSONLStore, SQLiteStore
@@ -6106,6 +6676,52 @@ def test_cli_run_timeout_without_run_id_still_records_run_interrupted(tmp_path: 
     assert len(run_ids) == 1
     events = JSONLStore(tmp_path).load_events(run_ids[0])
     assert any(e["type"] == "run_interrupted" for e in events)
+
+
+def test_cli_run_timeout_logs_when_run_interrupted_append_fails(
+    tmp_path: Path, monkeypatch, caplog
+) -> None:
+    import logging
+
+    from replayt.cli.commands import run as run_cmd
+
+    def boom(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=args[0], timeout=kwargs.get("timeout", 1))
+
+    class _OpenStoreFails:
+        def __enter__(self):
+            raise OSError("simulated store open failure")
+
+        def __exit__(self, *exc: object) -> None:
+            return None
+
+    def fake_open_store(*_a, **_k):
+        return _OpenStoreFails()
+
+    monkeypatch.setattr(run_cmd.subprocess, "run", boom)
+    monkeypatch.setattr(run_cmd, "open_store", fake_open_store)
+
+    caplog.set_level(logging.WARNING)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "run",
+            "replayt_examples.e01_hello_world:wf",
+            "--log-dir",
+            str(tmp_path),
+            "--timeout",
+            "1",
+            "--run-id",
+            "append-fail1",
+            "--dry-run",
+        ],
+    )
+    assert r.exit_code == 1
+    assert any(
+        "Could not append run_interrupted after parent subprocess timeout" in rec.message
+        for rec in caplog.records
+    )
 
 
 def test_subprocess_env_child_adds_src_layout_to_pythonpath(tmp_path: Path, monkeypatch) -> None:

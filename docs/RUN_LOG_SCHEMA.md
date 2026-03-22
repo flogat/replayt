@@ -32,6 +32,8 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `hooks.before_step`
 - `hooks.after_step`
 - `store.class`
+- `workflow.contract_schema`
+- `workflow.contract_sha256`: stable SHA-256 fingerprint of `Workflow.contract()` without re-running the workflow
 - `llm.client_class`
 - non-secret LLM settings such as `provider`, `base_url`, `model`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `extra_body_keys`, timeouts, and whether an API key was present
 - `trust_boundary.warnings`: soft local-policy findings such as `log_mode=full` or a risky `OPENAI_BASE_URL`
@@ -60,6 +62,9 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 
 - `state` (string)
 - `effective` (object): resolved settings for this call, including `model`, `temperature`, `top_p`, optional `frequency_penalty` / `presence_penalty` / `seed` (omitted from the HTTP payload when null), optional `stop` (array of up to four strings; omitted from the HTTP payload when unset), optional `extra_body` (small provider-specific JSON fields merged into the request body), `max_tokens`, `timeout_seconds`, `base_url`, `extra_header_names`, optional `provider`, optional `structured_output_mode`, and optional `experiment`
+- `messages_sha256` (string): stable SHA-256 fingerprint of the exact message list sent to the provider
+- `effective_sha256` (string): stable SHA-256 fingerprint of the logged `effective` settings object
+- `schema_sha256` (string, optional): stable SHA-256 fingerprint of `model_type.model_json_schema()` for `ctx.llm.parse(...)`
 - `messages_summary` (object): counts and roles when logging mode is not `full`
 - `messages` (array): only when logging mode is `full`
 
@@ -69,6 +74,9 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `model` (string)
 - `usage` (object, optional)
 - `effective` (object): same shape as on `llm_request`
+- `messages_sha256` (string): same fingerprint as on `llm_request`
+- `effective_sha256` (string): same fingerprint as on `llm_request`
+- `schema_sha256` (string, optional): same fingerprint as on `llm_request` for structured parses
 - `finish_reason` (string or null): first choice `finish_reason` from the provider when present (for example `stop`, `length`, `content_filter`); null when the gateway omits it
 - `chat_completion_id` (string, optional): provider response `id` when the gateway returns one (useful to correlate with vendor dashboards)
 - `system_fingerprint` (string, optional): provider fingerprint when returned (OpenAI-style reproducibility hint)
@@ -80,6 +88,9 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `state` (string)
 - `schema_name` (string)
 - `data` (object): validated model dump
+- `messages_sha256` (string): same fingerprint as the triggering `llm_request`
+- `effective_sha256` (string): same fingerprint as the triggering `llm_request`
+- `schema_sha256` (string): stable SHA-256 fingerprint of the parse schema
 
 ### `structured_output_failed`
 
@@ -89,6 +100,9 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `structured_output_mode` (string): `prompt_only` or `native_json_schema`
 - `error` (object): serialized exception with `type`, `module`, and `message`
 - `effective` (object, optional): resolved LLM settings for the failed parse call
+- `messages_sha256` (string, optional): same fingerprint as the triggering `llm_request` when the provider call happened
+- `effective_sha256` (string, optional): same fingerprint as the triggering `llm_request` when the provider call happened
+- `schema_sha256` (string, optional): stable SHA-256 fingerprint of the parse schema
 - `response_chars` (int, optional): response size when the failure happened after the provider returned text
 
 ## Tool events
@@ -120,12 +134,19 @@ Use `ctx.note(...)` inside a step when you want one explicit breadcrumb about fr
 
 ## Retry and failure
 
+### `step_error`
+
+- `state` (string): workflow step where the failure was classified
+- `error` (object): serialized exception with `type`, `module`, `message`, and optional `traceback`
+
+Emitted immediately before `run_failed` when a step handler exhausts retries, when `max_steps` is exceeded, when `before_step` / `after_step` hooks raise, or when context schema expectations fail (same `error` shape as on `run_failed`).
+
 ### `retry_scheduled`
 
 - `state` (string)
 - `attempt` (int)
 - `max_attempts` (int)
-- `error` (string)
+- `error` (object): serialized exception with `type`, `module`, `message`, and optional `traceback`
 
 ### `run_failed`
 

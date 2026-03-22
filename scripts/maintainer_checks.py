@@ -48,6 +48,7 @@ def maintainer_checks_report(
     repo_root = repo_root.resolve()
     changelog_path = repo_root / "CHANGELOG.md"
     example_catalog_snapshot = repo_root / "docs" / "EXAMPLE_CATALOG_CONTRACT.json"
+    public_api_snapshot = repo_root / "docs" / "PUBLIC_API_CONTRACT.json"
 
     checks: dict[str, Any] = {}
     details: dict[str, Any] = {}
@@ -110,17 +111,23 @@ def maintainer_checks_report(
 
     if not skip_public_api:
         api = _load_script("api", "public_api_report.py")
-        ar = api.public_api_report("replayt")
-        api_ok = len(ar.get("missing_exports") or []) == 0
+        ar = api.check_snapshot(
+            public_api_snapshot,
+            module_name="replayt",
+            repo_root=repo_root,
+        )
+        api_ok = bool(ar["ok"])
         checks["public_api"] = {
             "ok": api_ok,
             "schema": ar["schema"],
+            "snapshot_path": ar["snapshot_path"],
             "missing_export_count": len(ar.get("missing_exports") or []),
+            "diff_line_count": len(ar.get("diff") or []),
         }
         if verbose:
             details["public_api"] = ar
         if not api_ok:
-            errors.append("public_api failed (__all__ lists missing symbols)")
+            errors.append("public_api failed (contract snapshot drift or missing exports)")
 
     out: dict[str, Any] = {
         "schema": SCHEMA,

@@ -52,7 +52,7 @@ def default_skill_root() -> Path:
 
 
 def resolve_skill_root(raw_path: str | None) -> Path | None:
-    candidate = (raw_path or os.environ.get("SKILL_ROOT", "")).strip()
+    candidate = (raw_path or "").strip()
     if candidate:
         path = Path(candidate).expanduser()
         if not path.is_absolute():
@@ -62,7 +62,14 @@ def resolve_skill_root(raw_path: str | None) -> Path | None:
     else:
         path = default_skill_root().resolve()
         if not path.exists():
-            return None
+            env_root = os.environ.get("SKILL_ROOT", "").strip()
+            if not env_root:
+                return None
+            path = Path(env_root).expanduser()
+            if not path.is_absolute():
+                path = (repo_root() / path).resolve()
+            else:
+                path = path.resolve()
     if not path.exists():
         raise FileNotFoundError(f"Skill root not found: {path}")
     if not path.is_dir():

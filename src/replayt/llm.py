@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -85,6 +86,26 @@ def _extract_json_object(text: str, *, max_brace_starts: int = _MAX_JSON_OBJECT_
     if not maximal:
         maximal = list(spans)
     return maximal[-1][2]
+
+
+def _stable_json_sha256(value: Any) -> str:
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _request_fingerprints(
+    *,
+    messages: list[dict[str, Any]],
+    effective: dict[str, Any],
+    schema_json: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    out = {
+        "messages_sha256": _stable_json_sha256(messages),
+        "effective_sha256": _stable_json_sha256(effective),
+    }
+    if schema_json is not None:
+        out["schema_sha256"] = _stable_json_sha256(schema_json)
+    return out
 
 
 @dataclass
@@ -657,8 +678,9 @@ class LLMBridge:
         extra_body: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         effective_extras: dict[str, Any] | None = None,
+        schema_json: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
-    ) -> tuple[str, dict[str, Any]]:
+    ) -> tuple[str, dict[str, Any], dict[str, str]]:
         state = self._state_getter()
         effective, hdrs, eff_base_url, eff_extra_body = self._merge_call(
             model=model,
@@ -677,6 +699,7 @@ class LLMBridge:
         )
         if effective_extras:
             effective = {**effective, **effective_extras}
+        fingerprints = _request_fingerprints(messages=messages, effective=effective, schema_json=schema_json)
         eff_model = str(effective["model"])
         eff_temp = float(effective["temperature"])
         eff_top_p = coerce_top_p(effective.get("top_p"))
@@ -688,6 +711,7 @@ class LLMBridge:
         eff_stop_list = list(effective["stop"]) if effective.get("stop") else None
 
         req_payload: dict[str, Any] = {"state": state, "effective": effective}
+        req_payload.update(fingerprints)
         if self._log_mode == LogMode.full:
             req_payload["messages"] = messages
         elif self._log_mode == LogMode.redacted:
@@ -729,6 +753,7 @@ class LLMBridge:
             "effective": effective,
             "finish_reason": finish_reason,
         }
+        resp_payload.update(fingerprints)
         cid = data.get("id")
         if isinstance(cid, str) and cid.strip():
             resp_payload["chat_completion_id"] = cid.strip()
@@ -740,7 +765,7 @@ class LLMBridge:
         elif self._log_mode == LogMode.redacted:
             resp_payload["content_preview"] = content[:800]
         self._emit("llm_response", resp_payload)
-        return content, effective
+        return content, effective, fingerprints
 
     def _emit_structured_output_failed(
         self,
@@ -750,6 +775,7 @@ class LLMBridge:
         structured_output_mode: str,
         error: Exception,
         effective: dict[str, Any] | None = None,
+        fingerprints: dict[str, str] | None = None,
         response_chars: int | None = None,
     ) -> None:
         payload: dict[str, Any] = {
@@ -761,6 +787,8 @@ class LLMBridge:
         }
         if effective is not None:
             payload["effective"] = effective
+        if fingerprints:
+            payload.update(fingerprints)
         if response_chars is not None:
             payload["response_chars"] = response_chars
         self._emit("structured_output_failed", payload)
@@ -794,7 +822,7 @@ class LLMBridge:
         extra_body: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> str:
-        text, _effective = self._request_text(
+        text, _effective, _fingerprints = self._request_text(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -838,7 +866,9 @@ class LLMBridge:
             else native_response_format
         )
         structured_output_mode = "native_json_schema" if use_native_response_format else "prompt_only"
-        schema_hint = json.dumps(model_type.model_json_schema(), ensure_ascii=False)
+        schema_json = model_type.model_json_schema()
+        schema_fingerprint = {"schema_sha256": _stable_json_sha256(schema_json)}
+        schema_hint = json.dumps(schema_json, ensure_ascii=False)
         cap = self._client.settings.max_schema_json_chars
         if len(schema_hint) > cap:
             exc = ValueError(
@@ -851,6 +881,7 @@ class LLMBridge:
                 stage="schema_limit",
                 structured_output_mode=structured_output_mode,
                 error=exc,
+                fingerprints=schema_fingerprint,
             )
             raise exc
         sys = (
@@ -859,7 +890,7 @@ class LLMBridge:
         )
         full_messages = [{"role": "system", "content": sys}, *messages]
         response_format = self._native_response_format(model_type) if use_native_response_format else None
-        text, effective = self._request_text(
+        text, effective, fingerprints = self._request_text(
             messages=full_messages,
             model=model,
             temperature=temperature,
@@ -875,6 +906,7 @@ class LLMBridge:
             extra_body=extra_body,
             response_format=response_format,
             effective_extras={"structured_output_mode": structured_output_mode},
+            schema_json=schema_json,
             stop=stop,
         )
         cap = self._client.settings.max_parse_response_chars
@@ -889,6 +921,7 @@ class LLMBridge:
                 structured_output_mode=structured_output_mode,
                 error=exc,
                 effective=effective,
+                fingerprints=fingerprints,
                 response_chars=len(text),
             )
             raise exc
@@ -901,6 +934,7 @@ class LLMBridge:
                 structured_output_mode=structured_output_mode,
                 error=exc,
                 effective=effective,
+                fingerprints=fingerprints,
                 response_chars=len(text),
             )
             raise
@@ -913,6 +947,7 @@ class LLMBridge:
                 structured_output_mode=structured_output_mode,
                 error=exc,
                 effective=effective,
+                fingerprints=fingerprints,
                 response_chars=len(text),
             )
             raise
@@ -925,11 +960,17 @@ class LLMBridge:
                 structured_output_mode=structured_output_mode,
                 error=exc,
                 effective=effective,
+                fingerprints=fingerprints,
                 response_chars=len(text),
             )
             raise
         self._emit(
             "structured_output",
-            {"state": self._state_getter(), "schema_name": model_type.__name__, "data": result.model_dump()},
+            {
+                "state": self._state_getter(),
+                "schema_name": model_type.__name__,
+                "data": result.model_dump(),
+                **fingerprints,
+            },
         )
         return result

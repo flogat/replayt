@@ -332,13 +332,26 @@ def cmd_doctor(
         "trust_base_url_credentials": "Move secrets out of OPENAI_BASE_URL and into headers or env vars.",
         "credential_env_extra_providers": (
             "replayt does not load these vendor env vars; unset them in this shell or document why they "
-            "remain for other tools—see README security notes and credential_env in doctor JSON."
+            "remain for other tools. See README security notes and credential_env in doctor JSON."
+        ),
+        "trust_log_dir_group_readable": (
+            "Tighten log_dir permissions or use a dedicated Unix group only when peer accounts "
+            "are allowed to read logs."
+        ),
+        "trust_log_dir_group_writable": (
+            "Remove group write on log_dir unless peer accounts are allowed to append or replace run logs."
         ),
         "trust_log_dir_other_readable": (
             "Tighten log_dir permissions so other OS accounts cannot read JSONL audit files."
         ),
         "trust_log_dir_other_writable": (
             "Tighten log_dir permissions so other OS accounts cannot append or replace run logs."
+        ),
+        "trust_dotenv_group_readable": (
+            "Restrict .env permissions (for example chmod 600) so shared Unix groups cannot read API keys."
+        ),
+        "trust_dotenv_group_writable": (
+            "Remove group write on .env so peer accounts cannot replace secrets or point the shell at a wrong tenant."
         ),
         "trust_dotenv_other_readable": (
             "Restrict .env permissions (for example chmod 600) so API keys are not readable by other OS accounts."
@@ -380,8 +393,12 @@ def cmd_doctor(
             "trust_log_mode",
             "trust_base_url_transport",
             "trust_base_url_credentials",
+            "trust_log_dir_group_readable",
+            "trust_log_dir_group_writable",
             "trust_log_dir_other_readable",
             "trust_log_dir_other_writable",
+            "trust_dotenv_group_readable",
+            "trust_dotenv_group_writable",
             "trust_dotenv_other_readable",
             "trust_dotenv_other_writable",
             "credential_env_extra_providers",

@@ -71,6 +71,69 @@ def test_public_api_report_json_output_for_replayt() -> None:
     assert any(item["name"] == "Workflow" for item in report["exports"])
 
 
+def test_public_api_report_check_snapshot_round_trip(tmp_path: Path, monkeypatch) -> None:
+    pkg = tmp_path / "demo_api"
+    _write(
+        pkg / "__init__.py",
+        """
+        __version__ = "1.2.3"
+        __all__ = ["visible"]
+
+        def visible() -> str:
+            return "ok"
+        """,
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    mod = _load_script("public_api_report_roundtrip", "public_api_report.py")
+    snapshot = tmp_path / "public_api.json"
+
+    report = mod.public_api_report("demo_api")
+    mod.write_snapshot(report, snapshot)
+    check = mod.check_snapshot(snapshot, module_name="demo_api")
+
+    assert check["schema"] == "replayt.public_api_report_check.v1"
+    assert check["ok"] is True
+    assert check["errors"] == []
+    assert check["diff"] == []
+
+
+def test_public_api_report_check_flags_drift(tmp_path: Path, monkeypatch) -> None:
+    pkg = tmp_path / "demo_api"
+    _write(
+        pkg / "__init__.py",
+        """
+        __version__ = "1.2.3"
+        __all__ = ["visible"]
+
+        def visible() -> str:
+            return "ok"
+        """,
+    )
+    monkeypatch.syspath_prepend(str(tmp_path))
+    mod = _load_script("public_api_report_drift", "public_api_report.py")
+    snapshot = tmp_path / "public_api.json"
+    snapshot.write_text(
+        json.dumps(
+            {
+                "schema": "replayt.public_api_report.v1",
+                "module": "demo_api",
+                "export_count": 0,
+                "missing_exports": [],
+                "exports": [],
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    check = mod.check_snapshot(snapshot, module_name="demo_api")
+
+    assert check["ok"] is False
+    assert check["errors"] == []
+    assert any(line.startswith("--- ") for line in check["diff"])
+
+
 def test_example_catalog_contract_report_for_temp_module(tmp_path: Path, monkeypatch) -> None:
     pkg = tmp_path / "demo_examples"
     _write(
@@ -433,6 +496,139 @@ def test_maintainer_checks_tmp_pass_skipping_public_api(tmp_path: Path) -> None:
     assert report["checks"]["example_catalog"]["ok"] is True
 
 
+def test_maintainer_checks_tmp_pass_with_public_api_snapshot(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project]
+        name = "demo"
+        version = "1.0.0"
+        """,
+    )
+    _write(
+        tmp_path / "src" / "replayt" / "__init__.py",
+        """
+        __version__ = "1.0.0"
+        __all__ = ["Workflow"]
+
+        class Workflow:
+            pass
+        """,
+    )
+    _write(
+        tmp_path / "CHANGELOG.md",
+        """
+        # Changelog
+
+        ## Unreleased
+
+        - Note one.
+
+        ## 0.1.0 - 2026-03-21
+
+        - Initial release.
+        """,
+    )
+    _write(
+        tmp_path / "README.md",
+        """
+        # demo
+
+        ## Documentation map
+
+        - [Docs index](docs/README.md)
+        - [CLI](docs/CLI.md)
+        """,
+    )
+    _write(
+        tmp_path / "docs" / "README.md",
+        """
+        # Documentation
+
+        - [CLI.md](CLI.md)
+        - [SCOPE.md](SCOPE.md)
+        - [architecture.mmd](architecture.mmd)
+        - [Root README](../README.md)
+        """,
+    )
+    _write(tmp_path / "docs" / "CLI.md", "# CLI\n")
+    _write(tmp_path / "docs" / "SCOPE.md", "# Scope\n")
+    _write(tmp_path / "docs" / "architecture.mmd", "flowchart TD\n")
+    _write(
+        tmp_path / "src" / "replayt_examples" / "__init__.py",
+        """
+        from dataclasses import dataclass
+
+        @dataclass(frozen=True)
+        class ExampleSpec:
+            key: str
+            title: str
+            target: str
+            description: str
+            inputs_example: dict
+            llm_backed: bool = False
+
+        def list_packaged_examples():
+            return [
+                ExampleSpec(
+                    key="hello",
+                    title="Hello",
+                    target="replayt_examples.hello:wf",
+                    description="A tiny example.",
+                    inputs_example={"name": "Sam"},
+                )
+            ]
+        """,
+    )
+    _write(
+        tmp_path / "docs" / "EXAMPLE_CATALOG_CONTRACT.json",
+        """
+        {
+          "example_count": 1,
+          "examples": [
+            {
+              "description": "A tiny example.",
+              "inputs_example": {
+                "name": "Sam"
+              },
+              "key": "hello",
+              "llm_backed": false,
+              "target": "replayt_examples.hello:wf",
+              "title": "Hello"
+            }
+          ],
+          "module": "replayt_examples",
+          "schema": "replayt.example_catalog_contract.v1"
+        }
+        """,
+    )
+    _write(
+        tmp_path / "docs" / "PUBLIC_API_CONTRACT.json",
+        """
+        {
+          "export_count": 1,
+          "exports": [
+            {
+              "kind": "class",
+              "name": "Workflow",
+              "source_module": "replayt",
+              "status": "present"
+            }
+          ],
+          "missing_exports": [],
+          "module": "replayt",
+          "schema": "replayt.public_api_report.v1"
+        }
+        """,
+    )
+
+    mod = _load_script("maintainer_checks_tmp_api", "maintainer_checks.py")
+    report = mod.maintainer_checks_report(tmp_path)
+
+    assert report["ok"] is True
+    assert report["checks"]["public_api"]["ok"] is True
+
+
 def test_maintainer_checks_version_only_failure(tmp_path: Path) -> None:
     _write(
         tmp_path / "pyproject.toml",
@@ -536,6 +732,15 @@ def test_example_catalog_contract_real_repo_snapshot_matches() -> None:
     root = Path(__file__).resolve().parents[1]
 
     report = mod.check_snapshot(root / "docs" / "EXAMPLE_CATALOG_CONTRACT.json")
+
+    assert report["ok"] is True, report
+
+
+def test_public_api_report_real_repo_snapshot_matches() -> None:
+    mod = _load_script("public_api_report_replayt_snapshot", "public_api_report.py")
+    root = Path(__file__).resolve().parents[1]
+
+    report = mod.check_snapshot(root / "docs" / "PUBLIC_API_CONTRACT.json")
 
     assert report["ok"] is True, report
 

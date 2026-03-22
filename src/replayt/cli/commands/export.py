@@ -22,7 +22,7 @@ from replayt.cli.config import (
     seal_hook_timeout_seconds,
     verify_seal_hook_timeout_seconds,
 )
-from replayt.cli.display import replay_html
+from replayt.cli.display import event_summary, replay_html, run_attention_summary
 from replayt.cli.run_id_hints import echo_missing_run_hints
 from replayt.cli.run_support import (
     export_hook_argv,
@@ -194,6 +194,51 @@ def _seal_manifest(
     if extra:
         manifest.update(extra)
     return manifest
+
+
+def _export_run_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Compact run context copied into export manifests for audit handoff."""
+
+    summary = event_summary(events)
+    attention = run_attention_summary(events)
+    return {
+        **summary,
+        "attention_kind": attention["attention_kind"],
+        "attention_summary": attention["attention_summary"],
+        "pending_approvals": attention["pending_approvals"],
+    }
+
+
+def _workflow_contract_snapshot(
+    *,
+    events: list[dict[str, Any]],
+    target: str | None,
+    include_mermaid: bool,
+) -> tuple[bytes | None, bytes | None, dict[str, Any] | None]:
+    """Optional workflow contract/graph artifacts for export bundles."""
+
+    if target is None:
+        return None, None, None
+    wf = load_target(target)
+    contract = wf.contract()
+    contract_bytes = (json.dumps(contract, indent=2) + "\n").encode("utf-8")
+    mermaid_bytes = None
+    if include_mermaid:
+        mermaid_bytes = (workflow_to_mermaid(wf).rstrip() + "\n").encode("utf-8")
+    recorded_sha = _export_run_summary(events).get("workflow_contract_sha256")
+    snapshot_sha = contract.get("contract_sha256")
+    matches_run_started: bool | None = None
+    if isinstance(recorded_sha, str) and recorded_sha and isinstance(snapshot_sha, str) and snapshot_sha:
+        matches_run_started = snapshot_sha == recorded_sha
+    manifest_payload: dict[str, Any] = {
+        "target": target,
+        "file": "workflow.contract.json",
+        "contract_sha256": snapshot_sha,
+        "matches_run_started": matches_run_started,
+    }
+    if mermaid_bytes is not None:
+        manifest_payload["mermaid_file"] = "workflow.mmd.txt"
+    return contract_bytes, mermaid_bytes, manifest_payload
 
 
 def cmd_seal(
@@ -506,6 +551,14 @@ def cmd_export_run(
         case_sensitive=False,
         help="Sanitize copy: redacted | full | structured_only",
     ),
+    target: str | None = typer.Option(
+        None,
+        "--target",
+        help=(
+            "Optional MODULE:wf / workflow.py to include workflow.contract.json; "
+            ".py executes code - trusted only."
+        ),
+    ),
     seal: bool = typer.Option(
         False,
         "--seal",
@@ -537,18 +590,30 @@ def cmd_export_run(
     lines = events_to_jsonl_lines(events, lm)
     bundle = b"".join(lines)
     digest = hashlib.sha256(bundle).hexdigest()
+    run_summary = _export_run_summary(events)
+    contract_bytes, _, contract_snapshot = _workflow_contract_snapshot(
+        events=events,
+        target=target,
+        include_mermaid=False,
+    )
+    files = ["events.jsonl", "manifest.json"] + (["events.seal.json"] if seal else [])
+    if contract_bytes is not None:
+        files.append("workflow.contract.json")
     manifest: dict[str, Any] = {
         "schema": "replayt.export_bundle.v1",
         "run_id": run_id,
         "export_mode": export_mode,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "line_count": len(lines),
-        "files": ["events.jsonl", "manifest.json"] + (["events.seal.json"] if seal else []),
+        "files": files,
         "events_jsonl_sha256": digest,
+        "run_summary": run_summary,
         "note": "Sanitized copy for sharing; not necessarily byte-identical to on-disk JSONL.",
     }
     if policy_hook is not None:
         manifest["policy_hook"] = policy_hook
+    if contract_snapshot is not None:
+        manifest["workflow_contract_snapshot"] = contract_snapshot
     man_bytes = json.dumps(manifest, indent=2).encode("utf-8")
     seal_bytes: bytes | None = None
     if seal:
@@ -566,10 +631,13 @@ def cmd_export_run(
         seal_bytes = json.dumps(seal_manifest, indent=2).encode("utf-8")
     out.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(out, "w:gz") as tf:
-        for name, body in (
+        export_files: list[tuple[str, bytes]] = [
             ("events.jsonl", bundle),
             ("manifest.json", man_bytes),
-        ):
+        ]
+        if contract_bytes is not None:
+            export_files.append(("workflow.contract.json", contract_bytes))
+        for name, body in export_files:
             ti = tarfile.TarInfo(name=f"{run_id}/{name}")
             ti.size = len(body)
             tf.addfile(ti, io.BytesIO(body))
@@ -600,7 +668,10 @@ def cmd_bundle_export(
     target: str | None = typer.Option(
         None,
         "--target",
-        help="Optional MODULE:wf / workflow.py for workflow.mmd.txt (Mermaid); .py executes code - trusted only.",
+        help=(
+            "Optional MODULE:wf / workflow.py for workflow.contract.json and workflow.mmd.txt; "
+            ".py executes code - trusted only."
+        ),
     ),
     seal: bool = typer.Option(
         False,
@@ -638,10 +709,19 @@ def cmd_bundle_export(
     lines = events_to_jsonl_lines(events, lm)
     bundle = b"".join(lines)
     digest = hashlib.sha256(bundle).hexdigest()
-    mermaid_txt: bytes | None = None
-    if target is not None:
-        wf = load_target(target)
-        mermaid_txt = (workflow_to_mermaid(wf).rstrip() + "\n").encode("utf-8")
+    run_summary = _export_run_summary(events)
+    contract_bytes, mermaid_txt, contract_snapshot = _workflow_contract_snapshot(
+        events=events,
+        target=target,
+        include_mermaid=True,
+    )
+    files = ["report.html", "timeline.html", "events.jsonl", "manifest.json"]
+    if seal:
+        files.append("events.seal.json")
+    if contract_bytes is not None:
+        files.append("workflow.contract.json")
+    if mermaid_txt is not None:
+        files.append("workflow.mmd.txt")
 
     manifest: dict[str, Any] = {
         "schema": "replayt.bundle_export.v1",
@@ -649,14 +729,15 @@ def cmd_bundle_export(
         "export_mode": export_mode,
         "report_style": report_style,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "files": ["report.html", "timeline.html", "events.jsonl", "manifest.json"]
-        + (["events.seal.json"] if seal else [])
-        + (["workflow.mmd.txt"] if mermaid_txt else []),
+        "files": files,
         "events_jsonl_sha256": digest,
+        "run_summary": run_summary,
         "note": "Stakeholder bundle: HTML views + sanitized JSONL; not necessarily byte-identical to on-disk JSONL.",
     }
     if policy_hook is not None:
         manifest["policy_hook"] = policy_hook
+    if contract_snapshot is not None:
+        manifest["workflow_contract_snapshot"] = contract_snapshot
     man_bytes = json.dumps(manifest, indent=2).encode("utf-8")
     seal_bytes: bytes | None = None
     if seal:
@@ -675,12 +756,15 @@ def cmd_bundle_export(
     out.parent.mkdir(parents=True, exist_ok=True)
     prefix = run_id
     with tarfile.open(out, "w:gz") as tf:
-        for name, body in (
+        export_files = [
             ("report.html", report_html.encode("utf-8")),
             ("timeline.html", timeline_html.encode("utf-8")),
             ("events.jsonl", bundle),
             ("manifest.json", man_bytes),
-        ):
+        ]
+        if contract_bytes is not None:
+            export_files.append(("workflow.contract.json", contract_bytes))
+        for name, body in export_files:
             ti = tarfile.TarInfo(name=f"{prefix}/{name}")
             ti.size = len(body)
             tf.addfile(ti, io.BytesIO(body))

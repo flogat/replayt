@@ -145,8 +145,22 @@ def approval_reason_missing(reason: str | None, *, required: bool) -> bool:
     return not bool(str(reason).strip())
 
 
+def _permission_bit_check(
+    *,
+    name: str,
+    mode: int,
+    mask: int,
+    ok_detail: str,
+    bad_detail: str,
+    hint: str,
+) -> TrustBoundaryCheck:
+    if mode & mask:
+        return TrustBoundaryCheck(name=name, ok=False, detail=bad_detail, hint=hint)
+    return TrustBoundaryCheck(name=name, ok=True, detail=ok_detail)
+
+
 def log_directory_permission_trust_checks(log_dir: Path | None) -> list[TrustBoundaryCheck]:
-    """Soft warnings when the log directory mode is world-accessible (POSIX only; best-effort)."""
+    """Soft warnings when the log directory mode is group/world-accessible (POSIX only; best-effort)."""
 
     if log_dir is None or os.name == "nt":
         return []
@@ -158,43 +172,43 @@ def log_directory_permission_trust_checks(log_dir: Path | None) -> list[TrustBou
     except OSError:
         return []
 
-    checks: list[TrustBoundaryCheck] = []
-    if mode & stat.S_IROTH:
-        checks.append(
-            TrustBoundaryCheck(
-                name="trust_log_dir_other_readable",
-                ok=False,
-                detail="log_dir is readable by users outside the owning user/group (world-readable bit)",
-                hint="Use chmod to strip other read access, or place logs on a dedicated volume with stricter ACLs.",
-            )
-        )
-    else:
-        checks.append(
-            TrustBoundaryCheck(
-                name="trust_log_dir_other_readable",
-                ok=True,
-                detail="log_dir is not world-readable",
-            )
-        )
-
-    if mode & stat.S_IWOTH:
-        checks.append(
-            TrustBoundaryCheck(
-                name="trust_log_dir_other_writable",
-                ok=False,
-                detail="log_dir is writable by users outside the owning user/group (world-writable bit)",
-                hint="Strip other write on the log directory so unrelated accounts cannot append or tamper with JSONL.",
-            )
-        )
-    else:
-        checks.append(
-            TrustBoundaryCheck(
-                name="trust_log_dir_other_writable",
-                ok=True,
-                detail="log_dir is not world-writable",
-            )
-        )
-    return checks
+    return [
+        _permission_bit_check(
+            name="trust_log_dir_group_readable",
+            mode=mode,
+            mask=stat.S_IRGRP,
+            ok_detail="log_dir is not group-readable",
+            bad_detail="log_dir is readable by the owning Unix group (group-readable bit)",
+            hint="Strip group read on the log directory unless every account in that group is allowed to read JSONL.",
+        ),
+        _permission_bit_check(
+            name="trust_log_dir_group_writable",
+            mode=mode,
+            mask=stat.S_IWGRP,
+            ok_detail="log_dir is not group-writable",
+            bad_detail="log_dir is writable by the owning Unix group (group-writable bit)",
+            hint=(
+                "Strip group write or move logs to a single-writer directory so peer accounts "
+                "cannot append or tamper."
+            ),
+        ),
+        _permission_bit_check(
+            name="trust_log_dir_other_readable",
+            mode=mode,
+            mask=stat.S_IROTH,
+            ok_detail="log_dir is not world-readable",
+            bad_detail="log_dir is readable by users outside the owning user/group (world-readable bit)",
+            hint="Use chmod to strip other read access, or place logs on a dedicated volume with stricter ACLs.",
+        ),
+        _permission_bit_check(
+            name="trust_log_dir_other_writable",
+            mode=mode,
+            mask=stat.S_IWOTH,
+            ok_detail="log_dir is not world-writable",
+            bad_detail="log_dir is writable by users outside the owning user/group (world-writable bit)",
+            hint="Strip other write on the log directory so unrelated accounts cannot append or tamper with JSONL.",
+        ),
+    ]
 
 
 def dotenv_trust_candidate_paths(
@@ -232,7 +246,7 @@ def dotenv_trust_candidate_paths(
 
 
 def dotenv_permission_trust_checks(candidate_paths: Sequence[Path]) -> list[TrustBoundaryCheck]:
-    """Soft warnings when a discovered `.env` file is world-readable or world-writable (POSIX only)."""
+    """Soft warnings when a discovered `.env` file is group/world-readable or writable (POSIX only)."""
 
     if os.name == "nt":
         return []
@@ -255,18 +269,66 @@ def dotenv_permission_trust_checks(candidate_paths: Sequence[Path]) -> list[Trus
 
     bad_read: list[str] = []
     bad_write: list[str] = []
+    bad_group_read: list[str] = []
+    bad_group_write: list[str] = []
     for p in existing:
         try:
             mode = p.stat().st_mode
         except OSError:
             continue
         label = str(p)
+        if mode & stat.S_IRGRP:
+            bad_group_read.append(label)
+        if mode & stat.S_IWGRP:
+            bad_group_write.append(label)
         if mode & stat.S_IROTH:
             bad_read.append(label)
         if mode & stat.S_IWOTH:
             bad_write.append(label)
 
     checks: list[TrustBoundaryCheck] = []
+    if bad_group_read:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_dotenv_group_readable",
+                ok=False,
+                detail="group-readable .env file(s): " + ", ".join(bad_group_read),
+                hint=(
+                    "Use chmod 600 (or tighter) on .env files that hold API keys; "
+                    "shared Unix groups should not read them unless that access is intentional."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_dotenv_group_readable",
+                ok=True,
+                detail=f"checked {len(existing)} .env file(s); none are group-readable",
+            )
+        )
+
+    if bad_group_write:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_dotenv_group_writable",
+                ok=False,
+                detail="group-writable .env file(s): " + ", ".join(bad_group_write),
+                hint=(
+                    "Strip group write on .env so peer accounts cannot swap in attacker-controlled "
+                    "or wrong-environment secrets."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_dotenv_group_writable",
+                ok=True,
+                detail=f"checked {len(existing)} .env file(s); none are group-writable",
+            )
+        )
+
     if bad_read:
         checks.append(
             TrustBoundaryCheck(

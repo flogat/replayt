@@ -4,6 +4,8 @@ import argparse
 import datetime as dt
 import importlib.util
 import json
+import os
+import shutil
 import subprocess
 import sys
 import textwrap
@@ -190,6 +192,70 @@ def test_codex_usage_limit_detection() -> None:
     assert not mod.codex_usage_limit_log_detected("some other error")
 
 
+def test_default_skill_command_uses_cursor_agent_prompt_placeholder(tmp_path: Path) -> None:
+    mod = _load_script()
+    command = mod.default_skill_command(tmp_path)
+    assert "{prompt_file_q}" in command
+    assert "composer-2" in command
+    assert command.lstrip().startswith("agent ")
+
+
+def test_skill_command_invokes_cursor_agent_cli() -> None:
+    mod = _load_script()
+    assert mod.skill_command_invokes_cursor_agent_cli('agent --model x -p "hi"')
+    assert not mod.skill_command_invokes_cursor_agent_cli("python scripts/run_codex_skill.py")
+
+
+def test_resolve_cursor_agent_executable_env_override(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    exe = tmp_path / "my-agent.exe"
+    exe.write_text("", encoding="utf-8")
+    monkeypatch.setenv("REPLAYT_CURSOR_AGENT", str(exe))
+    monkeypatch.delenv("CURSOR_AGENT", raising=False)
+    assert mod.resolve_cursor_agent_executable() == str(exe.resolve())
+
+
+def test_resolve_cursor_agent_executable_finds_local_bin(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    fake_home = tmp_path / "home"
+    name = "agent.exe" if os.name == "nt" else "agent"
+    agent_path = fake_home / ".local" / "bin" / name
+    agent_path.parent.mkdir(parents=True)
+    agent_path.write_text("", encoding="utf-8")
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls, h=fake_home: h))
+    monkeypatch.setattr(shutil, "which", lambda cmd, path=None: None)
+    monkeypatch.delenv("REPLAYT_CURSOR_AGENT", raising=False)
+    monkeypatch.delenv("CURSOR_AGENT", raising=False)
+    got = mod.resolve_cursor_agent_executable()
+    assert got == str(agent_path.resolve())
+
+
+def test_augment_env_path_for_cursor_agent_prepends_bindir() -> None:
+    mod = _load_script()
+    bindir = Path("/opt/cursor/bin")
+    agent_exe = bindir / "agent"
+    args = argparse.Namespace(
+        skill_command=mod.default_skill_command(Path(".")),
+        cursor_agent_executable=str(agent_exe),
+    )
+    env = {"PATH": "/usr/bin:/bin"}
+    mod.augment_env_path_for_cursor_agent(env, args)
+    assert env["PATH"].startswith(str(bindir.resolve()) + os.pathsep)
+    assert "/usr/bin" in env["PATH"]
+
+
+def test_codex_usage_limit_detection_uses_latest_log_attempt_only() -> None:
+    mod = _load_script()
+    log = (
+        "$ first\n\nERROR: usage limit. try again at 7:05 PM.\n### skill_release_loop: exit_code=1\n\n"
+        "--- skill_release_loop: resume ---\n$ second\n\nDer Befehl \"agent\" wurde nicht gefunden.\n"
+        "### skill_release_loop: exit_code=1\n"
+    )
+    assert mod.codex_usage_limit_log_detected(log)
+    latest = mod.last_skill_attempt_output_for_usage_scan(log)
+    assert not mod.codex_usage_limit_log_detected(latest)
+
+
 def test_parse_try_again_at_local_same_calendar_day() -> None:
     mod = _load_script()
     tz = dt.timezone(dt.timedelta(hours=-5))
@@ -237,7 +303,8 @@ def test_compute_usage_limit_delay_includes_buffer() -> None:
 
 def test_wait_on_codex_usage_limit_cli_flags() -> None:
     mod = _load_script()
-    assert mod.parse_args([]).wait_on_codex_usage_limit is True
+    assert mod.parse_args([]).wait_on_codex_usage_limit is False
+    assert mod.parse_args(["--wait-on-codex-usage-limit"]).wait_on_codex_usage_limit is True
     assert mod.parse_args(["--no-wait-on-codex-usage-limit"]).wait_on_codex_usage_limit is False
 
 
@@ -397,6 +464,12 @@ def test_dry_run_completes_without_worktree_changes(tmp_path: Path, monkeypatch)
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "initial")
     monkeypatch.chdir(repo)
+    _real_which = shutil.which
+
+    def fake_which(cmd: str, path: str | None = None) -> str | None:
+        return "/fake/agent" if cmd == "agent" else _real_which(cmd, path=path)
+
+    monkeypatch.setattr(shutil, "which", fake_which)
     rc = mod.main(
         [
             "--dry-run",
@@ -416,6 +489,19 @@ def test_dry_run_completes_without_worktree_changes(tmp_path: Path, monkeypatch)
     assert data.get("max_iterations") == 1
     status_path = Path(data["run_dir"]) / "status.json"
     assert status_path.is_file()
+
+
+def test_main_preflight_fails_when_cursor_agent_not_on_path(tmp_path: Path, monkeypatch, capsys) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    monkeypatch.chdir(repo)
+    monkeypatch.setattr(mod, "resolve_cursor_agent_executable", lambda: None)
+    rc = mod.main(["--dry-run", "--skip-push", "--max-iterations", "1", "--light"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "agent" in err.lower()
+    assert "run_codex_skill" in err
 
 
 def test_default_task_and_skill_command(tmp_path: Path, monkeypatch) -> None:
@@ -472,6 +558,17 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     env = captured["env"]
     assert isinstance(env, dict)
     assert env["SKILL_ROOT"] == str(skill_root.resolve())
+    inv_path = run_dir / "iter-01-demo.invocation.json"
+    assert inv_path.is_file()
+    inv = json.loads(inv_path.read_text(encoding="utf-8"))
+    assert inv["schema"] == mod.SKILL_INVOCATION_SCHEMA
+    assert inv["skill_name"] == "demo"
+    assert inv["skill_requested_name"] == "demo"
+    assert inv["iteration"] == 1
+    assert inv["max_iterations"] == mod.parse_args([]).max_iterations
+    assert inv["repo_root"] == str(repo.resolve())
+    assert inv["prompt_file"] == str((run_dir / "iter-01-demo.prompt.md").resolve())
+    assert inv["log_file"] == str((run_dir / "iter-01-demo.log").resolve())
 
 
 def test_preflight_rejects_dirty_worktree(tmp_path: Path) -> None:

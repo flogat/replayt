@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from contextlib import contextmanager
 from unittest.mock import patch
@@ -13,6 +14,11 @@ from replayt.types import LogMode
 
 class Answer(BaseModel):
     value: int
+
+
+def _sha256_json(value: object) -> str:
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 class _FakeStreamResp:
@@ -233,6 +239,31 @@ def test_llm_bridge_with_settings_passes_extra_body_to_client_and_effective() ->
     }
 
 
+def test_llm_bridge_complete_text_emits_stable_request_fingerprints() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="k", model="m")
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+    messages = [{"role": "user", "content": "hi"}]
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(messages=messages, temperature=0.0)
+
+    req = next(p for t, p in events if t == "llm_request")
+    resp = next(p for t, p in events if t == "llm_response")
+    assert req["messages_sha256"] == _sha256_json(messages)
+    assert req["effective_sha256"] == _sha256_json(req["effective"])
+    assert "schema_sha256" not in req
+    assert resp["messages_sha256"] == req["messages_sha256"]
+    assert resp["effective_sha256"] == req["effective_sha256"]
+    assert "schema_sha256" not in resp
+
+
 def test_llm_bridge_call_extra_body_empty_dict_clears_defaults() -> None:
     client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
     bridge = LLMBridge(
@@ -412,7 +443,7 @@ def test_llm_bridge_parse_rejects_oversized_response() -> None:
         state_getter=lambda: "parse",
     )
     huge = "x" * 101
-    with patch.object(bridge, "_request_text", return_value=(huge, {"model": "m"})):
+    with patch.object(bridge, "_request_text", return_value=(huge, {"model": "m"}, {})):
         with pytest.raises(ValueError, match="exceeds max_parse_response_chars"):
             bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
 
@@ -462,6 +493,39 @@ def test_llm_bridge_parse_with_native_response_format_logs_mode() -> None:
     assert req["effective"]["structured_output_mode"] == "native_json_schema"
 
 
+def test_llm_bridge_parse_success_emits_schema_and_request_fingerprints() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.full,
+        state_getter=lambda: "parse",
+    )
+    canned = {"choices": [{"message": {"content": '{"value": 7}'}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        out = bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
+
+    assert out.value == 7
+    req = next(p for t, p in events if t == "llm_request")
+    resp = next(p for t, p in events if t == "llm_response")
+    structured = next(p for t, p in events if t == "structured_output")
+    assert req["messages_sha256"] == _sha256_json(req["messages"])
+    assert req["effective_sha256"] == _sha256_json(req["effective"])
+    assert req["schema_sha256"] == _sha256_json(Answer.model_json_schema())
+    assert resp["messages_sha256"] == req["messages_sha256"]
+    assert resp["effective_sha256"] == req["effective_sha256"]
+    assert resp["schema_sha256"] == req["schema_sha256"]
+    assert structured["messages_sha256"] == req["messages_sha256"]
+    assert structured["effective_sha256"] == req["effective_sha256"]
+    assert structured["schema_sha256"] == req["schema_sha256"]
+
+
 def test_llm_bridge_parse_emits_structured_output_failed_on_validation_error() -> None:
     events: list[tuple[str, dict]] = []
 
@@ -482,10 +546,14 @@ def test_llm_bridge_parse_emits_structured_output_failed_on_validation_error() -
             bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
 
     failure = next(p for t, p in events if t == "structured_output_failed")
+    req = next(p for t, p in events if t == "llm_request")
     assert failure["schema_name"] == "Answer"
     assert failure["stage"] == "schema_validate"
     assert failure["structured_output_mode"] == "prompt_only"
     assert failure["response_chars"] == len(content)
+    assert failure["messages_sha256"] == req["messages_sha256"]
+    assert failure["effective_sha256"] == req["effective_sha256"]
+    assert failure["schema_sha256"] == req["schema_sha256"]
 
 
 def test_extract_json_object_empty_string() -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 import json
 import re
+from collections import defaultdict, deque
 from datetime import datetime
 from typing import Any
 
@@ -38,6 +39,7 @@ def event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "status": "unknown",
         "workflow_name": None,
         "workflow_version": None,
+        "workflow_contract_sha256": None,
         "state_count": 0,
         "transition_count": 0,
         "llm_calls": 0,
@@ -58,6 +60,12 @@ def event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
             summary["workflow_version"] = payload.get("workflow_version")
             summary["tags"] = payload.get("tags") or {}
             summary["run_metadata"] = payload.get("run_metadata") or {}
+            runtime = payload.get("runtime") or {}
+            workflow_runtime = runtime.get("workflow") if isinstance(runtime, dict) else {}
+            if isinstance(workflow_runtime, dict):
+                digest = workflow_runtime.get("contract_sha256")
+                if isinstance(digest, str) and digest:
+                    summary["workflow_contract_sha256"] = digest
             exp = payload.get("experiment")
             summary["experiment"] = exp if isinstance(exp, dict) else {}
         elif typ == "state_entered":
@@ -77,6 +85,153 @@ def event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif typ == "run_paused":
             summary["status"] = "paused"
     return summary
+
+
+def _inline_error_message(error: Any) -> str:
+    if isinstance(error, dict):
+        err_type = str(error.get("type") or "").strip()
+        err_message = str(error.get("message") or "").strip()
+        if err_type and err_message:
+            return f"{err_type}: {err_message}"
+        return err_type or err_message
+    if error is None:
+        return ""
+    return str(error).strip()
+
+
+def _truncate_inline(text: str, *, limit: int = 120) -> str:
+    compact = " ".join(text.split())
+    if len(compact) <= limit:
+        return compact
+    return compact[: limit - 3] + "..."
+
+
+def run_attention_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Summarize the current stakeholder-facing action on a run for ``replayt runs``."""
+
+    summary = event_summary(events)
+    approvals: list[dict[str, Any]] = []
+    pending_by_id: dict[str, deque[int]] = defaultdict(deque)
+    latest_failure: dict[str, Any] | None = None
+    latest_structured_output_failure: dict[str, Any] | None = None
+    latest_run_paused: dict[str, Any] | None = None
+
+    for event in events:
+        ts = event.get("ts")
+        typ = event.get("type")
+        payload = event.get("payload") or {}
+
+        if typ == "approval_requested":
+            approval_id = payload.get("approval_id")
+            if approval_id is None:
+                continue
+            approvals.append(
+                {
+                    "approval_id": str(approval_id),
+                    "state": payload.get("state"),
+                    "summary": payload.get("summary"),
+                    "requested_ts": ts,
+                    "approved": None,
+                }
+            )
+            pending_by_id[str(approval_id)].append(len(approvals) - 1)
+        elif typ == "approval_resolved":
+            approval_id = payload.get("approval_id")
+            if approval_id is None:
+                continue
+            pending = pending_by_id.get(str(approval_id))
+            if pending:
+                approvals[pending.popleft()]["approved"] = bool(payload.get("approved"))
+        elif typ == "run_failed":
+            latest_failure = {
+                "state": payload.get("state"),
+                "error": payload.get("error"),
+                "ts": ts,
+            }
+        elif typ == "structured_output_failed":
+            latest_structured_output_failure = {
+                "state": payload.get("state"),
+                "schema_name": payload.get("schema_name"),
+                "stage": payload.get("stage"),
+                "error": payload.get("error"),
+                "ts": ts,
+            }
+        elif typ == "run_paused":
+            latest_run_paused = {
+                "approval_id": payload.get("approval_id"),
+                "reason": payload.get("reason"),
+                "ts": ts,
+            }
+
+    pending_approvals = [
+        {
+            "approval_id": approval.get("approval_id"),
+            "state": approval.get("state"),
+            "summary": approval.get("summary"),
+            "requested_ts": approval.get("requested_ts"),
+        }
+        for approval in approvals
+        if approval.get("approved") is None
+    ]
+    if not pending_approvals and summary.get("status") == "paused" and latest_run_paused is not None:
+        paused_approval_id = latest_run_paused.get("approval_id")
+        if paused_approval_id not in (None, ""):
+            pending_approvals.append(
+                {
+                    "approval_id": str(paused_approval_id),
+                    "state": None,
+                    "summary": None,
+                    "requested_ts": latest_run_paused.get("ts"),
+                }
+            )
+
+    attention_kind = "none"
+    attention_summary = ""
+    status = str(summary.get("status") or "unknown")
+    if status == "paused":
+        attention_kind = "pending_approval"
+        if len(pending_approvals) == 1:
+            approval = pending_approvals[0]
+            attention_summary = f"awaiting approval {approval.get('approval_id') or 'approval'}"
+            state = approval.get("state")
+            if state not in (None, ""):
+                attention_summary += f" @ {state}"
+        elif len(pending_approvals) > 1:
+            attention_summary = f"awaiting {len(pending_approvals)} approvals"
+        else:
+            pause_reason = str(latest_run_paused.get("reason") or "").strip() if latest_run_paused else ""
+            attention_summary = f"paused: {pause_reason}" if pause_reason else "paused"
+    elif status == "failed":
+        if latest_failure is not None:
+            attention_kind = "run_failed"
+            state = str(latest_failure.get("state") or "").strip()
+            err = _inline_error_message(latest_failure.get("error"))
+            if state and err:
+                attention_summary = f"failed in {state}: {err}"
+            elif state:
+                attention_summary = f"failed in {state}"
+            elif err:
+                attention_summary = f"failed: {err}"
+            else:
+                attention_summary = "failed"
+        elif latest_structured_output_failure is not None:
+            attention_kind = "structured_output_failed"
+            schema_name = str(latest_structured_output_failure.get("schema_name") or "").strip()
+            stage = str(latest_structured_output_failure.get("stage") or "").strip()
+            if schema_name and stage:
+                attention_summary = f"parse failure {schema_name} ({stage})"
+            elif schema_name:
+                attention_summary = f"parse failure {schema_name}"
+            else:
+                attention_summary = "failed"
+
+    return {
+        "attention_kind": attention_kind,
+        "attention_summary": _truncate_inline(attention_summary) if attention_summary else "",
+        "pending_approvals": pending_approvals,
+        "latest_failure": latest_failure,
+        "latest_structured_output_failure": latest_structured_output_failure,
+    }
 
 
 def replay_timeline_lines(events: list[dict[str, Any]]) -> list[str]:
@@ -259,6 +414,35 @@ def run_matches_note_kind_filter(events: list[dict[str, Any]], wanted: frozenset
         payload = e.get("payload") or {}
         kind = payload.get("kind")
         if isinstance(kind, str) and kind in wanted:
+            return True
+    return False
+
+
+def parse_finish_reason_filters(raw: list[str] | None) -> frozenset[str] | None:
+    """Normalize repeatable `--finish-reason` values (exact match; OR across values)."""
+    if not raw:
+        return None
+    normalized: list[str] = []
+    for item in raw:
+        reason = str(item).strip()
+        if not reason:
+            raise typer.BadParameter(
+                "Empty --finish-reason is not allowed; omit the flag or pass an `llm_response` "
+                "payload `finish_reason` string (exact match; repeat for OR)."
+            )
+        normalized.append(reason)
+    return frozenset(normalized)
+
+
+def run_matches_finish_reason_filter(events: list[dict[str, Any]], wanted: frozenset[str] | None) -> bool:
+    if wanted is None:
+        return True
+    for e in events:
+        if e.get("type") != "llm_response":
+            continue
+        payload = e.get("payload") or {}
+        fr = payload.get("finish_reason")
+        if isinstance(fr, str) and fr in wanted:
             return True
     return False
 

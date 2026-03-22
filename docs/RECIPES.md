@@ -50,7 +50,7 @@ runner = Runner(
 )
 ```
 
-**Per-call** - override one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., top_p=..., timeout_seconds=..., max_tokens=..., provider=..., base_url=..., native_response_format=True, extra_headers={...}, extra_body={...}, experiment={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events (use `experiment` for prompt hashes, dataset ids, or A/B labels, not as a full eval product; see [`SCOPE.md`](SCOPE.md)).
+**Per-call** - override one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., top_p=..., timeout_seconds=..., max_tokens=..., provider=..., base_url=..., native_response_format=True, extra_headers={...}, extra_body={...}, experiment={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events, and the bridge also emits stable `messages_sha256` / `effective_sha256` fingerprints (plus `schema_sha256` for `parse(...)`) so exact prompt and schema revisions stay comparable in redacted logs. Use `experiment` for caller-owned labels such as dataset ids, cohorts, or prompt-family names, not as a full eval product; see [`SCOPE.md`](SCOPE.md).
 
 ```python
 decision = (

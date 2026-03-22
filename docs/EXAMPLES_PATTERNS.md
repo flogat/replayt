@@ -279,7 +279,7 @@ Use the broker for **retries and DLQ**, not implicit replays inside replayt.
 
 **Approach:** Call **`chain.invoke(...)`** (or equivalent) **inside a single step**. Map the framework output to **one Pydantic model**, `ctx.set("step_result", model.model_dump())`, then **`return "next_state"`** so branching stays visible in replayt. Never let the framework decide the FSM transition without your Python code expressing it.
 
-Use **`ctx.note(...)`** for explicit sub-run breadcrumbs, then narrow a run with **`replayt inspect RUN_ID --event-type step_note`** (repeat the flag for OR, e.g. **`tool_call`**) when you want framework-shaped signals without `jq`. To find local runs that validated a particular Pydantic **`schema_name`**, list with **`replayt runs --structured-schema MyModel`** (repeat for OR); **`replayt stats`** accepts the same flag.
+Use **`ctx.note(...)`** for explicit sub-run breadcrumbs, then narrow a run with **`replayt inspect RUN_ID --event-type step_note`** (repeat the flag for OR, e.g. **`tool_call`**) when you want framework-shaped signals without `jq`. To find local runs that validated a particular Pydantic **`schema_name`**, list with **`replayt runs --structured-schema MyModel`** (repeat for OR); **`replayt stats`** accepts the same flag. When a sandboxed graph hits token limits, **`llm_response`** events record the provider **`finish_reason`**; use **`replayt runs --finish-reason length`** or **`replayt inspect RUN_ID --finish-reason length`** to triage those runs without ad-hoc **`jq`**.
 
 ### Pattern: reusable workflow package
 

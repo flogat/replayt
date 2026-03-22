@@ -190,6 +190,18 @@ def test_codex_usage_limit_detection() -> None:
     assert not mod.codex_usage_limit_log_detected("some other error")
 
 
+def test_codex_usage_limit_detection_uses_latest_log_attempt_only() -> None:
+    mod = _load_script()
+    log = (
+        "$ first\n\nERROR: usage limit. try again at 7:05 PM.\n### skill_release_loop: exit_code=1\n\n"
+        "--- skill_release_loop: resume ---\n$ second\n\nDer Befehl \"agent\" wurde nicht gefunden.\n"
+        "### skill_release_loop: exit_code=1\n"
+    )
+    assert mod.codex_usage_limit_log_detected(log)
+    latest = mod.last_skill_attempt_output_for_usage_scan(log)
+    assert not mod.codex_usage_limit_log_detected(latest)
+
+
 def test_parse_try_again_at_local_same_calendar_day() -> None:
     mod = _load_script()
     tz = dt.timezone(dt.timedelta(hours=-5))
@@ -478,6 +490,17 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     env = captured["env"]
     assert isinstance(env, dict)
     assert env["SKILL_ROOT"] == str(skill_root.resolve())
+    inv_path = run_dir / "iter-01-demo.invocation.json"
+    assert inv_path.is_file()
+    inv = json.loads(inv_path.read_text(encoding="utf-8"))
+    assert inv["schema"] == mod.SKILL_INVOCATION_SCHEMA
+    assert inv["skill_name"] == "demo"
+    assert inv["skill_requested_name"] == "demo"
+    assert inv["iteration"] == 1
+    assert inv["max_iterations"] == mod.parse_args([]).max_iterations
+    assert inv["repo_root"] == str(repo.resolve())
+    assert inv["prompt_file"] == str((run_dir / "iter-01-demo.prompt.md").resolve())
+    assert inv["log_file"] == str((run_dir / "iter-01-demo.log").resolve())
 
 
 def test_preflight_rejects_dirty_worktree(tmp_path: Path) -> None:

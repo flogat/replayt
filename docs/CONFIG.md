@@ -8,6 +8,8 @@ The CLI walks up from the current working directory. At each directory it checks
 
 So you get one config file: the nearest ancestor that defines either `.replaytrc.toml` or `[tool.replayt]`. See [`src/replayt/cli/main.py`](../src/replayt/cli/main.py) for the implementation.
 
+`replayt init` and `replayt try --copy-to DIR` now create a local `.replaytrc.toml` with `target` and `inputs_file` so a freshly scaffolded directory can use plain `replayt run` / `replayt ci` without extra flags.
+
 ## Supported keys
 
 | Key | Purpose |
@@ -76,7 +78,7 @@ approval_reason_required = true
 
 Environment variables and explicit CLI flags still override these defaults when you pass them.
 
-Run `replayt config --format json` to inspect the resolved values, best-effort filesystem readiness for the effective `log_dir` / `sqlite` paths, env-driven CI artifact sinks (`REPLAYT_JUNIT_XML`, `REPLAYT_SUMMARY_JSON`, `REPLAYT_GITHUB_SUMMARY` / `GITHUB_STEP_SUMMARY`), and where each setting came from (`project_config:*`, `env:*`, or a built-in default/preset). That is the quickest way to confirm what a CI job or repo-local shell will actually use before the workflow starts writing logs. The JSON report includes **`project_config.min_replayt_version`** (when set), **`min_replayt_version_satisfied`**, and the installed package version so CI can assert the constraint without running a workflow.
+Run `replayt config --format json` to inspect the resolved values, best-effort filesystem readiness for the effective `log_dir` / `sqlite` paths, env-driven CI artifact sinks (`REPLAYT_JUNIT_XML`, `REPLAYT_SUMMARY_JSON`, `REPLAYT_GITHUB_SUMMARY` / `GITHUB_STEP_SUMMARY`), and where each setting came from (`project_config:*`, `env:*`, or a built-in default/preset). That is the quickest way to confirm what a CI job or repo-local shell will actually use before the workflow starts writing logs. The JSON report includes trust-boundary warnings for POSIX log directories and nearby `.env` files that are group- or world-readable/writable, plus **`project_config.min_replayt_version`** (when set), **`min_replayt_version_satisfied`**, and the installed package version so CI can assert the constraint without running a workflow.
 
 For path-valued config keys such as `log_dir` and `sqlite`, relative paths are interpreted relative to the config file that declared them, not the shell's current working directory. That keeps runs launched from subdirectories writing to the same project-owned locations.
 

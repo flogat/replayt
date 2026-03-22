@@ -18,6 +18,7 @@ from replayt.cli.display import (
     event_summary,
     experiment_filters_match,
     parse_duration,
+    parse_finish_reason_filters,
     parse_iso_ts,
     parse_meta_filters,
     parse_note_kind_filters,
@@ -26,7 +27,9 @@ from replayt.cli.display import (
     parse_tool_name_filters,
     replay_html,
     replay_timeline_lines,
+    run_attention_summary,
     run_diff_data,
+    run_matches_finish_reason_filter,
     run_matches_note_kind_filter,
     run_matches_structured_schema_name_filter,
     run_matches_tool_name_filter,
@@ -44,6 +47,7 @@ _RUN_STATUS_CHOICES = frozenset({"completed", "failed", "paused", "unknown"})
 _WORKFLOW_CONTRACT_SCHEMA = "replayt.workflow_contract.v1"
 _WORKFLOW_CONTRACT_CHECK_SCHEMA = "replayt.workflow_contract_check.v1"
 _INSPECT_REPORT_SCHEMA = "replayt.inspect_report.v1"
+_RUNS_REPORT_SCHEMA = "replayt.runs_report.v1"
 _STATS_REPORT_SCHEMA = "replayt.stats_report.v1"
 _DIFF_REPORT_SCHEMA = "replayt.diff_report.v1"
 
@@ -84,6 +88,28 @@ def _filter_events_by_note_kind(
             payload = event.get("payload") or {}
             kind = payload.get("kind")
             if isinstance(kind, str) and kind in filters:
+                filtered.append(event)
+            continue
+        if event_type_filters is not None and typ in event_type_filters:
+            filtered.append(event)
+    return filtered
+
+
+def _filter_events_by_finish_reason(
+    events: list[dict[str, Any]],
+    filters: frozenset[str] | None,
+    *,
+    event_type_filters: frozenset[str] | None,
+) -> list[dict[str, Any]]:
+    if filters is None:
+        return events
+    filtered: list[dict[str, Any]] = []
+    for event in events:
+        typ = event.get("type")
+        if typ == "llm_response":
+            payload = event.get("payload") or {}
+            fr = payload.get("finish_reason")
+            if isinstance(fr, str) and fr in filters:
                 filtered.append(event)
             continue
         if event_type_filters is not None and typ in event_type_filters:
@@ -154,6 +180,15 @@ def _run_status_filters(status: list[str] | None) -> frozenset[str] | None:
     return frozenset(status)
 
 
+def _duration_filter_seconds(raw: str | None, *, flag_name: str) -> int | None:
+    if raw is None:
+        return None
+    seconds = parse_duration(raw)
+    if seconds is None:
+        raise typer.BadParameter(f"Cannot parse {flag_name}: {raw!r} (expected e.g. 90d, 24h, 60m)")
+    return seconds
+
+
 def cmd_inspect(
     run_id: str = typer.Argument(...),
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR),
@@ -175,6 +210,14 @@ def cmd_inspect(
             "Without --event-type, this narrows the event list to matching notes only."
         ),
     ),
+    finish_reason: list[str] | None = typer.Option(
+        None,
+        "--finish-reason",
+        help=(
+            "Only include `llm_response` events whose payload `finish_reason` matches (repeatable; OR). "
+            "Without --event-type, this narrows the event list to matching responses only."
+        ),
+    ),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -190,6 +233,7 @@ def cmd_inspect(
     log_dir = resolve_log_dir(log_dir, log_subdir)
     type_filters = _event_type_filters(event_type)
     note_kind_filters = parse_note_kind_filters(note_kind)
+    finish_reason_filters = parse_finish_reason_filters(finish_reason)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
@@ -198,6 +242,7 @@ def cmd_inspect(
         raise typer.Exit(code=1)
     filtered = _filter_events_by_type(events, type_filters)
     filtered = _filter_events_by_note_kind(filtered, note_kind_filters, event_type_filters=type_filters)
+    filtered = _filter_events_by_finish_reason(filtered, finish_reason_filters, event_type_filters=type_filters)
     use_json = as_json or output == "json"
     if use_json:
         summary = event_summary(events)
@@ -211,14 +256,19 @@ def cmd_inspect(
             payload["event_type_filter"] = sorted(type_filters)
         if note_kind_filters is not None:
             payload["note_kind_filter"] = sorted(note_kind_filters)
+        if finish_reason_filters is not None:
+            payload["finish_reason_filter"] = sorted(finish_reason_filters)
         typer.echo(json.dumps(payload, indent=2, default=str))
         return
     summary = event_summary(events)
     typer.echo(
         f"run_id={run_id} workflow={summary['workflow_name']}@{summary['workflow_version']} status={summary['status']}"
     )
+    contract_sha256 = summary.get("workflow_contract_sha256")
+    if isinstance(contract_sha256, str) and contract_sha256:
+        typer.echo(f"workflow_contract_sha256={contract_sha256}")
     event_counts = f"events={len(events)}"
-    if type_filters is not None or note_kind_filters is not None:
+    if type_filters is not None or note_kind_filters is not None or finish_reason_filters is not None:
         event_counts += f" shown={len(filtered)}"
     typer.echo(
         (
@@ -286,7 +336,7 @@ def cmd_graph(
         metavar="TARGET",
         help=(
             "MODULE:VAR, workflow.py, or workflow.yaml. "
-            "Loading a .py file executes that file as code—use only trusted paths."
+            "Loading a .py file executes that file as code. Use only trusted paths."
         ),
     ),
 ) -> None:
@@ -300,7 +350,7 @@ def cmd_contract(
         metavar="TARGET",
         help=(
             "MODULE:VAR, workflow.py, or workflow.yaml. "
-            "Loading a .py file executes that file as code-use only trusted paths."
+            "Loading a .py file executes that file as code. Use only trusted paths."
         ),
     ),
     output: Literal["text", "json"] = typer.Option(
@@ -356,6 +406,7 @@ def cmd_contract(
         f"{meta['name']}@{meta['version']} initial={meta['initial_state']} "
         f"states={meta['state_count']} edges={meta['edge_count']}"
     )
+    typer.echo(f"contract_sha256={contract['contract_sha256']}")
     if meta["meta_keys"]:
         typer.echo("meta_keys=" + ", ".join(meta["meta_keys"]))
     if meta["llm_defaults_keys"]:
@@ -378,7 +429,7 @@ def cmd_validate(
         metavar="TARGET",
         help=(
             "MODULE:VAR, workflow.py, or workflow.yaml. "
-            "Loading a .py file executes that file as code—use only trusted paths."
+            "Loading a .py file executes that file as code. Use only trusted paths."
         ),
     ),
     strict_graph: bool = typer.Option(
@@ -389,7 +440,7 @@ def cmd_validate(
     inputs_json: str | None = typer.Option(
         None,
         "--inputs-json",
-        help="Optional JSON object — validated as parseable only (same as dry-check).",
+        help="Optional JSON object, validated as parseable only (same as dry-check).",
     ),
     inputs_file: Path | None = typer.Option(
         None,
@@ -459,6 +510,16 @@ def cmd_runs(
     log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     limit: int = typer.Option(20, min=1, max=200),
+    older_than: str | None = typer.Option(
+        None,
+        "--older-than",
+        help="Only include runs whose last event is at least this old (for example 30m, 4h, 7d).",
+    ),
+    newer_than: str | None = typer.Option(
+        None,
+        "--newer-than",
+        help="Only include runs whose last event is at most this old (for example 30m, 4h, 7d).",
+    ),
     status: list[str] | None = typer.Option(
         None,
         "--status",
@@ -493,22 +554,38 @@ def cmd_runs(
         "--note-kind",
         help="Only runs that recorded a `step_note` with this `kind` (exact match; repeatable; OR).",
     ),
+    finish_reason: list[str] | None = typer.Option(
+        None,
+        "--finish-reason",
+        help=(
+            "Only runs that recorded an `llm_response` with this payload `finish_reason` "
+            "(exact match; repeatable; OR)."
+        ),
+    ),
+    output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """List recent local runs from JSONL logs."""
 
     status_filters = _run_status_filters(status)
+    older_than_seconds = _duration_filter_seconds(older_than, flag_name="--older-than")
+    newer_than_seconds = _duration_filter_seconds(newer_than, flag_name="--newer-than")
     tag_filters = parse_tag_filters(tag)
     meta_filters = parse_meta_filters(run_meta)
     exp_filters = parse_tag_filters(experiment)
     tool_filters = parse_tool_name_filters(tool)
     schema_filters = parse_structured_schema_name_filters(structured_schema)
     note_kind_filters = parse_note_kind_filters(note_kind)
+    finish_reason_filters = parse_finish_reason_filters(finish_reason)
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    now = datetime.now(timezone.utc)
     with read_store(log_dir, sqlite) as store:
-        runs_data: list[tuple[str, dict[str, Any]]] = []
+        runs_data: list[tuple[str, dict[str, Any], dict[str, Any], int | None]] = []
         for rid in store.list_run_ids():
             events = store.load_events(rid)
             summary = event_summary(events)
+            attention = run_attention_summary(events)
+            last_ts = parse_iso_ts(summary.get("last_ts"))
+            age_seconds = int((now - last_ts).total_seconds()) if last_ts is not None else None
             if tag_filters and not tags_match(summary.get("tags") or {}, tag_filters):
                 continue
             if meta_filters and not run_meta_filters_match(summary.get("run_metadata") or {}, meta_filters):
@@ -517,27 +594,80 @@ def cmd_runs(
                 continue
             if status_filters is not None and summary.get("status") not in status_filters:
                 continue
+            if older_than_seconds is not None:
+                if age_seconds is None or age_seconds < older_than_seconds:
+                    continue
+            if newer_than_seconds is not None:
+                if age_seconds is None or age_seconds > newer_than_seconds:
+                    continue
             if not run_matches_tool_name_filter(events, tool_filters):
                 continue
             if not run_matches_structured_schema_name_filter(events, schema_filters):
                 continue
             if not run_matches_note_kind_filter(events, note_kind_filters):
                 continue
-            runs_data.append((rid, summary))
+            if not run_matches_finish_reason_filter(events, finish_reason_filters):
+                continue
+            runs_data.append((rid, summary, attention, age_seconds))
 
-    def _run_sort_key(item: tuple[str, dict]) -> tuple:
-        rid, summary = item
+    def _run_sort_key(
+        item: tuple[str, dict[str, Any], dict[str, Any], int | None]
+    ) -> tuple[bool, datetime | None, str]:
+        rid, summary, _attention, _age_seconds = item
         ts = parse_iso_ts(summary.get("last_ts"))
         return (ts is not None, ts, rid)
 
     runs_data.sort(key=_run_sort_key, reverse=True)
     runs_data = runs_data[:limit]
-    for rid, summary in runs_data:
+    if output == "json":
+        payload_runs = []
+        for rid, summary, attention, age_seconds in runs_data:
+            payload_runs.append(
+                {
+                    "run_id": rid,
+                    **summary,
+                    **attention,
+                    "last_event_age_seconds": age_seconds,
+                }
+            )
         typer.echo(
+            json.dumps(
+                {
+                    "schema": _RUNS_REPORT_SCHEMA,
+                    "generated_at": now.isoformat(),
+                    "log_dir": str(log_dir),
+                    "sqlite": str(sqlite.resolve()) if sqlite is not None else None,
+                    "limit": limit,
+                    "count": len(payload_runs),
+                    "filters": {
+                        "status": sorted(status_filters) if status_filters is not None else [],
+                        "tag": tag_filters,
+                        "run_meta": meta_filters,
+                        "experiment": exp_filters,
+                        "tool": sorted(tool_filters) if tool_filters is not None else [],
+                        "structured_schema": sorted(schema_filters) if schema_filters is not None else [],
+                        "note_kind": sorted(note_kind_filters) if note_kind_filters is not None else [],
+                        "finish_reason": sorted(finish_reason_filters) if finish_reason_filters is not None else [],
+                        "older_than": older_than,
+                        "newer_than": newer_than,
+                    },
+                    "runs": payload_runs,
+                },
+                indent=2,
+                default=str,
+            )
+        )
+        return
+    for rid, summary, attention, _age_seconds in runs_data:
+        line = (
             f"{rid}  {summary['status']}  "
             f"{summary['workflow_name']}@{summary['workflow_version']}  "
             f"{summary['last_ts']}"
         )
+        attention_summary = str(attention.get("attention_summary") or "").strip()
+        if attention_summary:
+            line += f"  attention={attention_summary}"
+        typer.echo(line)
     if not runs_data:
         typer.echo(f"No runs found in {log_dir}")
 
@@ -583,6 +713,14 @@ def cmd_stats(
         "--note-kind",
         help="Only runs that recorded a `step_note` with this `kind` (exact match; repeatable; OR).",
     ),
+    finish_reason: list[str] | None = typer.Option(
+        None,
+        "--finish-reason",
+        help=(
+            "Only runs that recorded an `llm_response` with this payload `finish_reason` "
+            "(exact match; repeatable; OR)."
+        ),
+    ),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """Summarize local run logs: counts, LLM latency averages, token usage, common failure states."""
@@ -593,6 +731,7 @@ def cmd_stats(
     tool_filters = parse_tool_name_filters(tool)
     schema_filters = parse_structured_schema_name_filters(structured_schema)
     note_kind_filters = parse_note_kind_filters(note_kind)
+    finish_reason_filters = parse_finish_reason_filters(finish_reason)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     now = datetime.now(timezone.utc)
     cutoff = None
@@ -636,6 +775,8 @@ def cmd_stats(
         if not run_matches_structured_schema_name_filter(events, schema_filters):
             continue
         if not run_matches_note_kind_filter(events, note_kind_filters):
+            continue
+        if not run_matches_finish_reason_filter(events, finish_reason_filters):
             continue
         total += 1
         st = str(summ.get("status", "unknown"))

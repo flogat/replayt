@@ -9,6 +9,7 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import threading
@@ -17,12 +18,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
-# Ralph-style pipeline: archetype ideation (×12) → design-fidelity gate → review → remediation → doc tone.
+# Ralph-style pipeline: archetype ideation (x12), then design-fidelity gate, review, remediation, doc tone.
 # Each feat_* skill voices one developer archetype; together they replace the old createfeatures
 # monolith. The shared rejection blocklist (.cursor/skills/REJECTION_BLOCKLIST.md) prevents
 # duplicate/rejected ideas from being re-proposed across runs.
 # review_design_fidelity audits new code against the 7 design principles and SCOPE.md, then fixes
-# violations — acting as a guardrail before general review and doc cleanup.
+# violations, acting as a guardrail before general review and doc cleanup.
 DEFAULT_SKILLS = (
     "feat_staff_engineer",
     "feat_junior_onboarding",
@@ -69,9 +70,12 @@ TRY_AGAIN_AT_RE = re.compile(r"try\s+again\s+at\s+([^\n.]+)", re.IGNORECASE)
 
 # Written to the end of each skill/check log so --resume can skip completed steps.
 RUN_LOG_EXIT_RE = re.compile(r"^### skill_release_loop: exit_code=(\d+)\s*$", re.MULTILINE)
+_SKILL_LOG_SHELL_CMD_RE = re.compile(r"^[$] .+$", re.MULTILINE)
 RUN_DIR_STAMP_RE = re.compile(r"^\d{8}-\d{6}$")
 LOG_BANNER_USAGE_RETRY = "--- skill_release_loop: retry after Codex usage-limit wait ---"
 LOG_BANNER_RESUME = "--- skill_release_loop: resume ---"
+# Written beside each *.prompt.md so harnesses can read the resolved contract without parsing Markdown.
+SKILL_INVOCATION_SCHEMA = "replayt.skill_invocation.v1"
 
 
 class LoopError(RuntimeError):
@@ -88,6 +92,49 @@ class SkillSpec:
 
 def _utc_iso() -> str:
     return dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat()
+
+
+def skill_invocation_json_path(prompt_path: Path) -> Path:
+    name = prompt_path.name
+    if not name.endswith(".prompt.md"):
+        raise LoopError(f"Expected a *.prompt.md path, got {prompt_path}")
+    return prompt_path.with_name(f"{name[: -len('.prompt.md')]}.invocation.json")
+
+
+def write_skill_invocation_json(
+    *,
+    prompt_path: Path,
+    repo_root: str,
+    skill_root: str,
+    skill_name: str,
+    skill_path: str,
+    log_file: str,
+    iteration: int,
+    max_iterations: int,
+    task: str,
+    skill_requested_name: str | None = None,
+) -> Path:
+    """Atomically write machine-readable metadata for one skill / fix prompt invocation."""
+    out = skill_invocation_json_path(prompt_path)
+    payload: dict[str, Any] = {
+        "schema": SKILL_INVOCATION_SCHEMA,
+        "repo_root": repo_root,
+        "skill_root": skill_root,
+        "skill_name": skill_name,
+        "skill_path": skill_path,
+        "prompt_file": str(prompt_path.resolve()),
+        "log_file": str(Path(log_file).resolve()),
+        "iteration": iteration,
+        "max_iterations": max_iterations,
+        "task": task,
+        "written_at": _utc_iso(),
+    }
+    if skill_requested_name is not None:
+        payload["skill_requested_name"] = skill_requested_name
+    tmp = out.with_suffix(out.suffix + ".tmp")
+    tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(out)
+    return out
 
 
 def _json_safe(obj: Any) -> Any:
@@ -181,15 +228,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
-            "The script is backend-agnostic. --skill-command runs once per skill and can use placeholders:\n"
+            "Default skill execution invokes Cursor's `agent` CLI (Composer). The script looks for `agent` on "
+            "PATH, then standard install locations (e.g. ~/.local/bin), or set REPLAYT_CURSOR_AGENT to the full "
+            "executable path. Pass --skill-command to use another backend (for example "
+            "`python scripts/run_codex_skill.py …` like scripts/skill_release_loop.py).\n"
+            "Codex usage-limit auto-wait is off by default here; pass --wait-on-codex-usage-limit when your "
+            "--skill-command runs OpenAI Codex.\n"
+            "--skill-command runs once per skill and can use placeholders:\n"
             "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {repo} {iteration} {max_iterations}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
             "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
             "Progress: prints configuration, a decision-tree summary, each command and log path, streamed "
             "child output (unless --quiet), and explicit decision lines after checks. Use --quiet for logs only.\n"
-            "Codex usage limits: by default, if a skill log matches a usage-limit message and includes "
-            "'try again at' with a time within --usage-limit-max-wait-seconds, the loop sleeps (status heartbeats "
-            "continue) and retries the same skill; use --no-wait-on-codex-usage-limit to fail fast.\n"
+            "Codex usage limits: with --wait-on-codex-usage-limit, if a skill log matches a Codex usage-limit message "
+            "and includes 'try again at' within --usage-limit-max-wait-seconds, the loop sleeps (status heartbeats "
+            "continue) and retries the same skill. This entry point leaves that off by default "
+            "(Cursor agent backend).\n"
             "Resume: use --resume to reuse a run directory and skip skills/checks whose logs already end with "
             "### skill_release_loop: exit_code=0. --resume with no argument picks the newest YYYYMMDD-HHMMSS folder "
             "under --log-dir that contains iter-*.log. Resume allows a dirty git worktree (same as --allow-dirty "
@@ -320,10 +374,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--wait-on-codex-usage-limit",
         dest="wait_on_codex_usage_limit",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help=(
-            "If a skill fails with a Codex usage-limit message and a parsable 'try again at' time within "
-            "--usage-limit-max-wait-seconds, sleep and retry the same skill (default: on)."
+            "Only for Codex backends (e.g. run_codex_skill.py): if a skill fails with a usage-limit message and a "
+            "parsable 'try again at' time within --usage-limit-max-wait-seconds, sleep and retry the same skill "
+            "(default: off; this script defaults to Cursor agent, not Codex)."
         ),
     )
     parser.add_argument(
@@ -418,7 +473,67 @@ def repo_ruff(repo: Path) -> str:
     return "ruff"
 
 
-def default_skill_command(repo: Path) -> str:
+def skill_command_invokes_cursor_agent_cli(template: str) -> bool:
+    """True if the template runs the Cursor ``agent`` executable (default backend for this script)."""
+    stripped = template.lstrip()
+    if not stripped:
+        return False
+    first = stripped.split(maxsplit=1)[0]
+    return first == "agent"
+
+
+def resolve_cursor_agent_executable() -> str | None:
+    """Locate the Cursor ``agent`` binary: env override, ``PATH``, then common install dirs.
+
+    Set ``REPLAYT_CURSOR_AGENT`` (or legacy ``CURSOR_AGENT``) to the full path when discovery fails.
+    On Windows, the Cursor CLI installer often places ``agent.exe`` under ``%USERPROFILE%\\.local\\bin\\``,
+    which Git Bash does not always put on ``PATH``.
+    """
+    for key in ("REPLAYT_CURSOR_AGENT", "CURSOR_AGENT"):
+        raw = (os.environ.get(key) or "").strip()
+        if not raw:
+            continue
+        p = Path(raw).expanduser()
+        if p.is_file():
+            return str(p.resolve())
+    found = shutil.which("agent")
+    if found:
+        return found
+    home = Path.home()
+    candidates: list[Path] = []
+    if os.name == "nt":
+        agent_name = "agent.exe"
+        userprofile = (os.environ.get("USERPROFILE") or "").strip()
+        profile_home = Path(userprofile).expanduser() if userprofile else home
+        candidates.extend(
+            [
+                home / ".local" / "bin" / agent_name,
+                profile_home / ".local" / "bin" / agent_name,
+            ]
+        )
+    else:
+        candidates.append(home / ".local" / "bin" / "agent")
+    for c in candidates:
+        try:
+            if c.is_file():
+                return str(c.resolve())
+        except OSError:
+            continue
+    return None
+
+
+def augment_env_path_for_cursor_agent(env: dict[str, str], args: argparse.Namespace) -> None:
+    """Prepend the directory containing ``agent`` so the default skill command resolves without global PATH."""
+    if not skill_command_invokes_cursor_agent_cli(args.skill_command):
+        return
+    exe = getattr(args, "cursor_agent_executable", None)
+    if not exe:
+        return
+    bindir = str(Path(exe).resolve().parent)
+    env["PATH"] = os.pathsep.join([bindir, env.get("PATH", "")])
+
+
+def default_skill_command(_repo: Path) -> str:
     return (
         'agent --model composer-2 -p --yolo "Please read the file at {prompt_file_q} '
         'and follow all instructions within it exactly to complete the task."'
@@ -630,6 +745,24 @@ def resolve_run_directory(repo: Path, args: argparse.Namespace, skill_names: lis
     return run_dir
 
 
+def last_skill_attempt_output_for_usage_scan(text: str) -> str:
+    """Return captured output for the last `$ …` shell block (before its exit footer).
+
+    Appended skill logs can contain multiple attempts; quota messages from an older attempt
+    must not be treated as the latest failure.
+    """
+    footers = list(RUN_LOG_EXIT_RE.finditer(text))
+    if not footers:
+        return text
+    last_footer_start = footers[-1].start()
+    block = text[:last_footer_start]
+    cmd_lines = list(_SKILL_LOG_SHELL_CMD_RE.finditer(block))
+    if not cmd_lines:
+        return text[last_footer_start:]
+    last_cmd = cmd_lines[-1]
+    return block[last_cmd.end() :].lstrip("\n")
+
+
 def codex_usage_limit_log_detected(text: str) -> bool:
     lowered = text.lower()
     if "usage limit" in lowered:
@@ -832,12 +965,24 @@ def run_skill_iteration(
         prompt_path = run_dir / f"{stem}.prompt.md"
         log_path = run_dir / f"{stem}.log"
         if resume and log_path_last_exit_code(log_path) == 0:
-            progress_line(f"Decision: resume — skip {skill.name} (prior exit_code=0): {log_path}")
+            progress_line(f"Decision: resume; skip {skill.name} (prior exit_code=0): {log_path}")
             continue
         prompt_path.write_text(build_prompt(skill, args.task, repo, iteration, args.max_iterations), encoding="utf-8")
         env = os.environ.copy()
         repo_resolved = str(repo.resolve())
         skill_root_resolved = str((repo / args.skill_root).resolve())
+        write_skill_invocation_json(
+            prompt_path=prompt_path,
+            repo_root=repo_resolved,
+            skill_root=skill_root_resolved,
+            skill_name=skill.name,
+            skill_path=str(skill.path),
+            log_file=str(log_path),
+            iteration=iteration,
+            max_iterations=args.max_iterations,
+            task=args.task,
+            skill_requested_name=skill.requested_name,
+        )
         # Inject safe.directory so child processes (e.g. Codex sandbox running as a
         # different OS user) can run git commands against the repo without
         # "dubious ownership" errors.  GIT_CONFIG_COUNT + KEY/VALUE is the
@@ -857,6 +1002,7 @@ def run_skill_iteration(
                 "SKILL_TASK": args.task,
             }
         )
+        augment_env_path_for_cursor_agent(env, args)
         command = render_command(
             args.skill_command,
             {
@@ -905,15 +1051,16 @@ def run_skill_iteration(
             if completed.returncode == 0:
                 break
             log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            latest_attempt_log = last_skill_attempt_output_for_usage_scan(log_text)
             if (
                 args.dry_run
                 or not args.wait_on_codex_usage_limit
-                or not codex_usage_limit_log_detected(log_text)
+                or not codex_usage_limit_log_detected(latest_attempt_log)
             ):
                 raise LoopError(
                     f"Command failed with exit code {completed.returncode}: {command}\nSee {log_path}"
                 )
-            resume_at = parse_try_again_at_local(log_text)
+            resume_at = parse_try_again_at_local(latest_attempt_log)
             if resume_at is None:
                 raise LoopError(
                     "Codex usage limit detected but no parsable 'try again at' time; "
@@ -995,7 +1142,7 @@ def run_checks(
     for index, template in enumerate(args.checks, start=1):
         log_path = run_dir / f"iter-{iteration:02d}-check-{index:02d}.log"
         if resume and log_path_last_exit_code(log_path) == 0:
-            progress_line(f"Decision: resume — skip check {index} (prior exit_code=0): {log_path}")
+            progress_line(f"Decision: resume; skip check {index} (prior exit_code=0): {log_path}")
             continue
         env = os.environ.copy()
         env["REPO_ROOT"] = str(repo)
@@ -1080,6 +1227,17 @@ def run_checks(
                 "Apply repository changes directly in the working tree. Do not commit, tag, or push."
             )
             fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
+            write_skill_invocation_json(
+                prompt_path=fix_prompt_path,
+                repo_root=str(repo.resolve()),
+                skill_root=str((repo / args.skill_root).resolve()),
+                skill_name="fix_check",
+                skill_path="fix_check",
+                log_file=str(fix_log_path),
+                iteration=iteration,
+                max_iterations=args.max_iterations,
+                task="Fix the failing check.",
+            )
 
             fix_command = render_command(
                 args.skill_command,
@@ -1109,6 +1267,7 @@ def run_checks(
                     "SKILL_TASK": "Fix the failing check.",
                 }
             )
+            augment_env_path_for_cursor_agent(fix_env, args)
 
             if tracker is not None:
                 tracker.update(
@@ -1451,6 +1610,17 @@ def run_pre_tag_github_ci_with_fixes(
             "Apply repository changes directly in the working tree. Do not commit, tag, or push."
         )
         fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
+        write_skill_invocation_json(
+            prompt_path=fix_prompt_path,
+            repo_root=str(repo.resolve()),
+            skill_root=str((repo / args.skill_root).resolve()),
+            skill_name="fix_pre_tag_ci",
+            skill_path="fix_pre_tag_ci",
+            log_file=str(fix_log_path),
+            iteration=passed_iteration,
+            max_iterations=args.max_iterations,
+            task="Fix the failure so pre-tag GitHub Actions verification passes.",
+        )
 
         fix_command = render_command(
             args.skill_command,
@@ -1480,6 +1650,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "SKILL_TASK": "Fix the failure so pre-tag GitHub Actions verification passes.",
             }
         )
+        augment_env_path_for_cursor_agent(fix_env, args)
 
         if tracker is not None:
             tracker.update(
@@ -1523,6 +1694,22 @@ def main(argv: list[str] | None = None) -> int:
     skill_root = (repo / args.skill_root).resolve()
     if args.skill_command is None:
         args.skill_command = default_skill_command(repo)
+    if skill_command_invokes_cursor_agent_cli(args.skill_command):
+        resolved_agent = resolve_cursor_agent_executable()
+        if resolved_agent is None:
+            print(
+                "skill_release_loop: Default skill command runs `agent` (Cursor Composer CLI), but `agent` was not "
+                "found (PATH, %USERPROFILE%\\.local\\bin\\agent.exe on Windows, or ~/.local/bin/agent elsewhere). "
+                "Install the Cursor CLI, add that bin directory to PATH, or set REPLAYT_CURSOR_AGENT to the full path "
+                "to the agent executable. Alternatively pass --skill-command (for example the Codex wrapper: "
+                "python scripts/run_codex_skill.py --prompt-file {prompt_file_q} --skill-root {skill_root_q}). "
+                "When using Codex, add --wait-on-codex-usage-limit to restore usage-quota auto-retry.",
+                file=sys.stderr,
+            )
+            return 1
+        setattr(args, "cursor_agent_executable", resolved_agent)
+    else:
+        setattr(args, "cursor_agent_executable", None)
     if args.checks is None:
         args.checks = default_check_commands(repo)
     skills = [load_skill(skill_root, name) for name in args.skills]
@@ -1696,7 +1883,7 @@ def _main_run(
                     "(on --resume: add at least one bullet under ## Unreleased, or edit CHANGELOG.md)."
                 )
             progress_line(
-                f"Gate 2: resume — CHANGELOG.md unchanged vs HEAD; ## Unreleased has {ur_count} bullet item(s) -> OK"
+                f"Gate 2: resume; CHANGELOG.md unchanged vs HEAD; ## Unreleased has {ur_count} bullet item(s) -> OK"
             )
         else:
             raise LoopError("CHANGELOG.md must be updated during the skill loop before a release can be cut")

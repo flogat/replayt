@@ -519,9 +519,9 @@ def _legacy_build_report_diff_html(
         rows.append('<p class="rp-muted">No structured_output events in either run.</p>')
 
     ar, br = ctx_a["approval_requests"], ctx_b["approval_requests"]
-    appr = "A approvals: " + str(len(ar)) + " — B approvals: " + str(len(br))
+    appr = "A approvals: " + str(len(ar)) + "; B approvals: " + str(len(br))
     if ar != br:
-        appr += " (counts or ids differ — open single-run reports for detail)"
+        appr += " (counts or ids differ; open single-run reports for detail)"
 
     return REPORT_DIFF_HTML.format(
         run_a=html.escape(run_a),
@@ -669,9 +669,9 @@ def _legacy_build_run_report_html(
             if rt or vt:
                 timing_block = (
                     "<p><span class=\"rp-label\">Timeline:</span> "
-                    f"requested <code class=\"rp-code\">{html.escape(rt or '—')}</code>"
+                    f"requested <code class=\"rp-code\">{html.escape(rt or '-')}</code>"
                     " → "
-                    f"resolved <code class=\"rp-code\">{html.escape(vt or '—')}</code></p>"
+                    f"resolved <code class=\"rp-code\">{html.escape(vt or '-')}</code></p>"
                 )
             else:
                 timing_block = ""
@@ -1688,7 +1688,7 @@ def build_run_report_markdown(
     lines.append("")
     if states:
         for state_meta in states:
-            lines.append(f"- **{state_meta['state']}** — `{state_meta['ts']}`")
+            lines.append(f"- **{state_meta['state']}**: `{state_meta['ts']}`")
     else:
         lines.append("_No states recorded._")
     lines.append("")

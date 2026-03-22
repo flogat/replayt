@@ -83,6 +83,23 @@ def test_multi_store_close_closes_sqlite_mirror(tmp_path: Path) -> None:
         s._cx.execute("SELECT 1")
 
 
+def test_multi_store_close_calls_primary_close_when_present(tmp_path: Path) -> None:
+    closed: list[str] = []
+
+    class _PrimaryWithClose(JSONLStore):
+        def close(self) -> None:
+            closed.append("primary")
+
+    primary = _PrimaryWithClose(tmp_path / "jp")
+    mirror = SQLiteStore(tmp_path / "db.sqlite3")
+    m = MultiStore(primary, mirror)
+    m.append_event("r1", ts="t", typ="run_started", payload={})
+    m.close()
+    assert closed == ["primary"]
+    with pytest.raises(sqlite3.ProgrammingError):
+        mirror._cx.execute("SELECT 1")
+
+
 def test_sqlite_load_events_corrupt_payload_includes_seq(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite3"
     store = SQLiteStore(db)

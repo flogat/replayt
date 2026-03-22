@@ -40,11 +40,11 @@ export OPENAI_API_KEY=...   # only for sections that call a live model
 
 Runnable tutorials ship in the **`replayt_examples`** package on PyPI (namespaced so it does not collide with a generic `examples` module in your own code).
 
-To skip reading this file front to back, run `replayt try --list`, then `replayt try --example issue-triage` (or another key) to execute a packaged sample with its default inputs. Add `--inputs-file my-inputs.json` when you want the same example shape with your own payload. To edit the tutorial code in your repo, run `replayt try --example KEY --copy-to ./my-flow` (writes `workflow.py` and `inputs.example.json`; use `--force` to replace). The text output prints `doctor --skip-connectivity --target workflow.py`, `--dry-check`, and `--dry-run` first when the copied example uses an LLM.
+To skip reading this file front to back, run `replayt try --list`, then `replayt try --example issue-triage` (or another key) to execute a packaged sample with its default inputs. Add `--inputs-file my-inputs.json` when you want the same example shape with your own payload. To edit the tutorial code in your repo, run `replayt try --example KEY --copy-to ./my-flow` (writes `workflow.py`, `inputs.example.json`, and `.replaytrc.toml`; use `--force` to replace). The text output prints `doctor --skip-connectivity --target workflow.py`, then bare `replayt run --dry-check` / `replayt run`, with `--dry-run` first when the copied example uses an LLM.
 
 ### Fast input overrides without a JSON blob
 
-For quick local runs, repeat **`--input key=value`** instead of writing a whole **`--inputs-json`** object. Dotted keys build nested objects, and replayt parses JSON-style scalars when it can, so **`--input priority=2 --input needs_review=false`** becomes structured input instead of raw strings. This also layers on top of packaged example defaults, which is useful when you only want to change one field in a tutorial payload.
+For quick local runs, repeat **`--input key=value`** instead of writing a whole **`--inputs-json`** object. Dotted keys build nested objects, and replayt parses JSON-style scalars when it can, so **`--input priority=2 --input needs_review=false`** becomes structured input instead of raw strings. This also layers on top of packaged example defaults when you change just one field in a tutorial payload.
 
 ```bash
 replayt try --example issue-triage \
@@ -54,7 +54,7 @@ replayt try --example issue-triage \
 
 ### Default target for `replayt run` / `replayt ci`
 
-When you are iterating on one workflow, avoid repeating the module path on every command. Set **`REPLAYT_TARGET=my_pkg.workflow:wf`** in your environment, or add **`target = "my_pkg.workflow:wf"`** under **`[tool.replayt]`** (or in **`.replaytrc.toml`**). Then you can run:
+When you are iterating on one workflow, avoid repeating the module path on every command. Set **`REPLAYT_TARGET=my_pkg.workflow:wf`** in your environment, or add **`target = "my_pkg.workflow:wf"`** under **`[tool.replayt]`** (or in **`.replaytrc.toml`**). `replayt init` and `replayt try --copy-to` already do this for the scaffolded local `workflow.py`. Then you can run:
 
 ```bash
 replayt run --dry-run --inputs-file inputs.example.json
@@ -64,7 +64,7 @@ An explicit **`TARGET` positional argument always overrides** the default. Check
 
 ### Default inputs file for `replayt run` / `replayt ci` / `validate`
 
-When you always pass the same **`inputs.example.json`**, set **`REPLAYT_INPUTS_FILE=inputs.example.json`** (or an absolute path) in your environment, or add **`inputs_file = "inputs.example.json"`** under **`[tool.replayt]`**. Then you can shorten:
+When you always pass the same **`inputs.example.json`**, set **`REPLAYT_INPUTS_FILE=inputs.example.json`** (or an absolute path) in your environment, or add **`inputs_file = "inputs.example.json"`** under **`[tool.replayt]`**. `replayt init` and `replayt try --copy-to` already wire this into the generated `.replaytrc.toml`. Then you can shorten:
 
 ```bash
 replayt run --dry-run
@@ -139,6 +139,34 @@ Some maintainers want **`replayt doctor`** to run **`pip-audit`**, **`safety`**,
 python scripts/changelog_unreleased.py --check-nonempty
 pip-audit -r requirements.txt  # example; use your org's scanner and inputs
 ```
+
+### Beyond core: MCP servers wrap the CLI
+
+**Model Context Protocol** hosts expect stable tool contracts, explicit argv, and parseable errors. replayt stays a **CLI + library**, not an MCP runtime: implement tools in **your** server that call **`replayt`** as a subprocess with a fixed allowlist (for example only **`inspect`**, **`runs`**, **`verify-seal`** in production). Use **`--output json`** / **`--format json`** and map **`schema`** fields to the ids advertised under **`cli_machine_readable_schemas`** from **`replayt version --format json`**. Respect exit codes: **`0`** success, **`1`** user or verification errors on read-only commands, **`2`** approval pause on **`replayt run`** / **`replayt ci`** only.
+
+```bash
+replayt version --format json | python -c "import json,sys; print(json.load(sys.stdin)['cli_machine_readable_schemas']['verify_seal_report'])"
+```
+
+```python
+import json
+import subprocess
+
+def tool_inspect_run(run_id: str) -> dict:
+    proc = subprocess.run(
+        ["replayt", "inspect", run_id, "--output", "json"],
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
+    data = json.loads(proc.stdout)
+    assert data.get("schema") == "replayt.inspect_report.v1"
+    return data
+```
+
+For raw JSONL reads (no subprocess), open **`.replayt/runs/<run_id>.jsonl`** read-only and parse line-delimited JSON; see **Pattern: approval bridge** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md).
 
 ## Beyond core: streaming, hooks, approvals, and logs
 
@@ -275,6 +303,17 @@ replayt stats --structured-schema Decision --output json
 ```
 
 Use **`replayt inspect RUN_ID --event-type structured_output`** (and repeat **`--event-type structured_output_failed`** if you need both) when you want only those lines from one run.
+
+### Finding runs by LLM `finish_reason`
+
+OpenAI-compatible **`llm_response`** lines include **`finish_reason`** (for example **`stop`** vs **`length`**). That is the quickest signal when an agent-style step keeps running out of tokens. List recent runs or narrow one timeline the same way as **`--tool`** (repeat the flag for OR):
+
+```bash
+replayt runs --finish-reason length --limit 50
+replayt inspect RUN_ID --finish-reason length --output json
+```
+
+Pair with **`--event-type llm_response`** when you want matching responses alongside other event types (same rules as **`--note-kind`**).
 
 ### Finding framework breadcrumbs from `ctx.note(...)`
 

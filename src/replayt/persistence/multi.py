@@ -16,7 +16,7 @@ class MultiStore:
 
     **Consistency:** Events are always appended to the *primary* first, then to each
     mirror via ``append``. If a mirror fails and ``strict_mirror`` is false, the primary
-    log still contains the event but the mirror may be missing rows—queries against SQLite
+    log still contains the event but the mirror may be missing rows; queries against SQLite
     (or a second JSONL file) can then diverge until repaired. Use ``strict_mirror=True``
     when the mirror must stay byte-for-byte consistent with the primary or the run should
     fail. The CLI defaults to strict mirroring whenever ``--sqlite`` is used unless
@@ -45,9 +45,13 @@ class MultiStore:
         self.mirror_error_count: int = 0
 
     def close(self) -> None:
-        """Close mirror stores that expose ``close`` (e.g. :class:`~replayt.persistence.sqlite.SQLiteStore`)."""
+        """Close any store that exposes ``close`` (primary first, then mirrors).
 
-        for store in self._mirror:
+        The JSONL primary usually has no ``close``; SQLite mirrors (and any DB-backed primary)
+        still release handles without leaking connections across composite layouts.
+        """
+
+        for store in self._all:
             closer = getattr(store, "close", None)
             if callable(closer):
                 closer()

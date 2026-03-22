@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,11 @@ from replayt.testing import MockLLMClient
 from replayt.types import LogMode, RetryPolicy
 from replayt.workflow import Workflow
 from replayt.yaml_workflow import workflow_from_spec
+
+
+def _sha256_json(value: object) -> str:
+    canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
 def test_workflow_llm_defaults_merge_into_effective(tmp_path: Path) -> None:
@@ -149,6 +156,9 @@ def test_runner_before_step_hook_failure_emits_terminal_events(tmp_path: Path) -
     completed = next(e for e in events if e["type"] == "run_completed")
     assert failed["payload"]["error"]["type"] == "ValueError"
     assert completed["payload"]["status"] == "failed"
+    step_errors = [e for e in events if e["type"] == "step_error"]
+    assert len(step_errors) == 1
+    assert step_errors[0]["payload"]["state"] == "a"
 
 
 def test_runner_after_step_hook_failure_emits_terminal_events(tmp_path: Path) -> None:
@@ -171,6 +181,9 @@ def test_runner_after_step_hook_failure_emits_terminal_events(tmp_path: Path) ->
     completed = next(e for e in events if e["type"] == "run_completed")
     assert failed["payload"]["error"]["type"] == "ValueError"
     assert completed["payload"]["status"] == "failed"
+    step_errors = [e for e in events if e["type"] == "step_error"]
+    assert len(step_errors) == 1
+    assert step_errors[0]["payload"]["state"] == "a"
 
 
 def test_workflow_meta_in_run_started(tmp_path: Path) -> None:
@@ -204,6 +217,8 @@ def test_workflow_contract_describes_steps_edges_and_expectations() -> None:
 
     contract = wf.contract()
     assert contract["schema"] == "replayt.workflow_contract.v1"
+    assert contract["contract_sha256"] == wf.contract_digest()
+    assert len(contract["contract_sha256"]) == 64
     assert contract["workflow"]["name"] == "contract_demo"
     assert contract["workflow"]["llm_defaults_keys"] == ["experiment"]
     assert contract["declared_edges"] == [{"from_state": "start", "to_state": "done"}]
@@ -242,6 +257,10 @@ def test_runner_run_started_includes_runtime_snapshot(tmp_path: Path) -> None:
     assert runtime["engine"] == {"log_mode": "full", "max_steps": 9, "redact_keys": []}
     assert runtime["store"]["class"] == "JSONLStore"
     assert runtime["hooks"] == {"before_step": False, "after_step": False}
+    assert runtime["workflow"] == {
+        "contract_schema": "replayt.workflow_contract.v1",
+        "contract_sha256": wf.contract_digest(),
+    }
     assert "policy_hooks" not in runtime
     assert runtime["llm"]["provider"] == "openai"
     assert runtime["llm"]["base_url"] == "https://gateway.example/v1"
@@ -283,6 +302,39 @@ def test_runner_runtime_and_llm_effective_sanitize_base_url(tmp_path: Path) -> N
     request = next(e for e in events if e["type"] == "llm_request")
     assert started["payload"]["runtime"]["llm"]["base_url"] == "https://gateway.example/v1"
     assert request["payload"]["effective"]["base_url"] == "https://gateway.example/v1"
+
+
+def test_runner_persists_llm_request_schema_fingerprints(tmp_path: Path) -> None:
+    class Decision(BaseModel):
+        value: int
+
+    wf = Workflow("fingerprints")
+    wf.set_initial("parse")
+
+    @wf.step("parse")
+    def parse(ctx) -> None:
+        ctx.llm.parse(Decision, messages=[{"role": "user", "content": "Return JSON."}])
+        return None
+
+    client = MockLLMClient()
+    client.enqueue('{"value": 7}')
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.full, llm_client=client).run()
+
+    assert result.status == "completed"
+    events = store.load_events(result.run_id)
+    request = next(e["payload"] for e in events if e["type"] == "llm_request")
+    response = next(e["payload"] for e in events if e["type"] == "llm_response")
+    structured = next(e["payload"] for e in events if e["type"] == "structured_output")
+    assert request["messages_sha256"] == _sha256_json(request["messages"])
+    assert request["effective_sha256"] == _sha256_json(request["effective"])
+    assert request["schema_sha256"] == _sha256_json(Decision.model_json_schema())
+    assert response["messages_sha256"] == request["messages_sha256"]
+    assert response["effective_sha256"] == request["effective_sha256"]
+    assert response["schema_sha256"] == request["schema_sha256"]
+    assert structured["messages_sha256"] == request["messages_sha256"]
+    assert structured["effective_sha256"] == request["effective_sha256"]
+    assert structured["schema_sha256"] == request["schema_sha256"]
 
 
 def test_runner_run_started_includes_policy_hook_breadcrumbs(tmp_path: Path) -> None:
@@ -793,6 +845,30 @@ def test_max_steps_prevents_infinite_loop(tmp_path: Path) -> None:
     result = Runner(wf, store, log_mode=LogMode.redacted, max_steps=5).run()
     assert result.status == "failed"
     assert "max_steps" in str(result.error)
+    events = store.load_events(result.run_id)
+    step_errors = [e for e in events if e["type"] == "step_error"]
+    assert len(step_errors) == 1
+    assert step_errors[0]["payload"]["state"] == "spin"
+    assert step_errors[0]["payload"]["error"]["type"] == "RunFailed"
+
+
+def test_step_handler_exception_emits_step_error_event(tmp_path: Path) -> None:
+    wf = Workflow("handler_fail")
+    wf.set_initial("boom")
+    wf.note_transition("boom", None)
+
+    @wf.step("boom")
+    def boom(ctx) -> None:
+        raise RuntimeError("step exploded")
+
+    store = JSONLStore(tmp_path)
+    result = Runner(wf, store, log_mode=LogMode.redacted).run()
+    assert result.status == "failed"
+    events = store.load_events(result.run_id)
+    step_errors = [e for e in events if e["type"] == "step_error"]
+    assert len(step_errors) == 1
+    assert step_errors[0]["payload"]["state"] == "boom"
+    assert step_errors[0]["payload"]["error"]["type"] == "RuntimeError"
 
 
 def test_expects_rejects_none_when_typed(tmp_path: Path) -> None:

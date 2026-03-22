@@ -6,16 +6,24 @@ working tree (including edits from the skill loop) is restored. A naive
 ``checkout main`` + ``reset --soft`` sequence drops those edits and can rewind the
 wrong commit.
 
-Requirements: git, gh (authenticated). ``ci.yml`` should include ``workflow_dispatch``.
+Requirements: git. For remote workflow verification, ``gh`` must be on PATH (authenticated);
+if it is missing, the script skips and exits 0 unless ``--require-gh`` is set. ``ci.yml``
+should include ``workflow_dispatch``.
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
+
+
+def resolve_gh_executable() -> str | None:
+    """Return a path to ``gh`` suitable for ``subprocess``, or None if not on PATH."""
+    return shutil.which("gh")
 
 
 def run(cmd: list[str], *, check: bool = True, capture: bool = False) -> subprocess.CompletedProcess:
@@ -36,7 +44,24 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--remote", default="origin", help="Git remote (default: origin).")
     parser.add_argument("--poll-interval", type=float, default=20.0, help="Poll interval seconds (default: 20).")
     parser.add_argument("--timeout", type=float, default=1800.0, help="Max wait seconds (default: 1800).")
+    parser.add_argument(
+        "--require-gh",
+        action="store_true",
+        help="Exit with code 1 if the GitHub CLI (gh) is not on PATH (default: skip verification and exit 0).",
+    )
     args = parser.parse_args(argv)
+
+    gh_exe = resolve_gh_executable()
+    if gh_exe is None:
+        msg = (
+            "[verify_github_action] GitHub CLI (gh) not found on PATH; cannot trigger or poll workflow runs. "
+            "Install https://cli.github.com/ or add gh to PATH."
+        )
+        if args.require_gh:
+            print(msg, file=sys.stderr)
+            return 1
+        print(f"{msg} Skipping verification (exit 0). Use --require-gh to fail instead.")
+        return 0
 
     original_branch = run_out(["git", "rev-parse", "--abbrev-ref", "HEAD"])
     timestamp = int(time.time())
@@ -77,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[verify_github_action] Pushed temp branch {temp_branch} to {args.remote}.")
 
         result = run(
-            ["gh", "workflow", "run", args.workflow, "--ref", temp_branch],
+            [gh_exe, "workflow", "run", args.workflow, "--ref", temp_branch],
             check=False,
             capture=True,
         )
@@ -93,7 +118,7 @@ def main(argv: list[str] | None = None) -> int:
             time.sleep(args.poll_interval)
             list_result = run(
                 [
-                    "gh",
+                    gh_exe,
                     "run",
                     "list",
                     "--workflow",
@@ -128,7 +153,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if not ci_passed and run_id:
             print("[verify_github_action] CI FAILED. Fetching failed-job logs...")
-            run(["gh", "run", "view", run_id, "--log-failed"], check=False)
+            run([gh_exe, "run", "view", run_id, "--log-failed"], check=False)
         elif ci_passed:
             print("[verify_github_action] CI PASSED.")
 

@@ -6,4 +6,4 @@
 [0.58, "o", "\r\n$ replayt inspect <run_id>\r\n"]
 [0.72, "o", "(summary + events)\r\n"]
 [0.88, "o", "\r\n$ replayt replay <run_id>\r\n"]
-[1.02, "o", "(human-readable timeline — no API calls)\r\n"]
+[1.02, "o", "(human-readable timeline; no API calls)\r\n"]
