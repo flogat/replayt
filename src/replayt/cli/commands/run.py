@@ -22,11 +22,13 @@ from replayt.cli.ci_artifacts import (
 )
 from replayt.cli.config import (
     DEFAULT_LOG_DIR,
+    enforce_forbid_log_mode_full_cli,
     get_project_config,
     parse_log_mode,
     resolve_approval_actor_required_keys,
     resolve_approval_reason_required,
     resolve_cli_target,
+    resolve_forbid_log_mode_full,
     resolve_llm_settings,
     resolve_log_dir,
     resolve_log_mode_setting,
@@ -264,7 +266,8 @@ def cmd_run(
         None,
         "--inputs-json",
         help=(
-            "Optional JSON object merged into the run context. Use @path/to/inputs.json to read from a file. "
+            "Optional JSON object merged into the run context. Use @path/to/inputs.json to read from a file, "
+            "or @- to read a UTF-8 JSON object from stdin. "
             "When omitted, inputs may come from REPLAYT_INPUTS_FILE or [tool.replayt] inputs_file (see CONFIG.md)."
         ),
     ),
@@ -272,7 +275,7 @@ def cmd_run(
         None,
         "--inputs-file",
         help=(
-            "Read inputs JSON object from this file (mutually exclusive with --inputs-json). "
+            "Read inputs JSON object from this file; use `-` for stdin (mutually exclusive with --inputs-json). "
             "When omitted, inputs may come from REPLAYT_INPUTS_FILE or [tool.replayt] inputs_file."
         ),
     ),
@@ -372,6 +375,10 @@ def cmd_run(
     sqlite, _sqlite_source = resolve_sqlite_path(sqlite, cfg, config_path=cfg_path)
     strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite)
     log_mode, _log_mode_source = resolve_log_mode_setting(log_mode, cfg)
+    forbid_full, forbid_full_source = resolve_forbid_log_mode_full(cfg)
+    enforce_forbid_log_mode_full_cli(
+        forbid=forbid_full, forbid_source=forbid_full_source, resolved_log_mode=log_mode
+    )
     redact_keys, _redact_keys_source = resolve_redact_keys(redact_key, cfg)
     timeout, _timeout_source = resolve_timeout_setting(timeout, cfg, in_child=in_child)
     llm_settings, llm_report = resolve_llm_settings(cfg)
@@ -527,6 +534,7 @@ def cmd_run(
     experiment: dict[str, Any] | None = None
     if experiment_json is not None:
         experiment = parse_json_object_option(experiment_json, label="--experiment-json")
+    workflow_contract = wf.contract()
     hook = run_hook_argv(cfg)
     if hook:
         hook_timeout = run_hook_timeout_seconds(cfg)
@@ -540,6 +548,7 @@ def cmd_run(
                 dry_run=dry_run,
                 resume=resume,
                 sqlite=sqlite,
+                workflow_contract=workflow_contract,
                 inputs_json=inputs_resolved,
                 tags_json=json.dumps(tags_dict, sort_keys=True) if tags_dict is not None else None,
                 metadata_json=json.dumps(run_meta, sort_keys=True) if run_meta is not None else None,
@@ -672,12 +681,18 @@ def cmd_try(
     inputs_json: str | None = typer.Option(
         None,
         "--inputs-json",
-        help="Optional JSON object override for the packaged example. Use @path/to/inputs.json to read a file.",
+        help=(
+            "Optional JSON object override for the packaged example. Use @path/to/inputs.json to read a file, "
+            "or @- for stdin."
+        ),
     ),
     inputs_file: Path | None = typer.Option(
         None,
         "--inputs-file",
-        help="Read packaged-example inputs JSON from this file (mutually exclusive with --inputs-json).",
+        help=(
+            "Read packaged-example inputs JSON from this file or `-` for stdin "
+            "(mutually exclusive with --inputs-json)."
+        ),
     ),
     input_value: list[str] | None = typer.Option(
         None,
@@ -835,7 +850,8 @@ def cmd_ci(
         None,
         "--inputs-json",
         help=(
-            "Optional JSON object merged into the run context. Use @path/to/inputs.json to read from a file. "
+            "Optional JSON object merged into the run context. Use @path/to/inputs.json to read from a file, "
+            "or @- to read a UTF-8 JSON object from stdin. "
             "When omitted, inputs may come from REPLAYT_INPUTS_FILE or [tool.replayt] inputs_file."
         ),
     ),
@@ -843,7 +859,7 @@ def cmd_ci(
         None,
         "--inputs-file",
         help=(
-            "Read inputs JSON object from this file (mutually exclusive with --inputs-json). "
+            "Read inputs JSON object from this file; use `-` for stdin (mutually exclusive with --inputs-json). "
             "When omitted, inputs may come from REPLAYT_INPUTS_FILE or [tool.replayt] inputs_file."
         ),
     ),
@@ -1001,12 +1017,16 @@ def cmd_resume(
         sqlite = resolve_project_path(cfg["sqlite"], config_path=cfg_path)
     strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite)
     log_dir = resolve_log_dir(log_dir, log_subdir)
-    if log_mode == "redacted" and cfg.get("log_mode"):
-        log_mode = cfg["log_mode"]
+    log_mode, _log_mode_source = resolve_log_mode_setting(log_mode, cfg)
+    forbid_full, forbid_full_source = resolve_forbid_log_mode_full(cfg)
+    enforce_forbid_log_mode_full_cli(
+        forbid=forbid_full, forbid_source=forbid_full_source, resolved_log_mode=log_mode
+    )
     redact_keys, _redact_keys_source = resolve_redact_keys(redact_key, cfg)
     required_actor_keys, _required_actor_keys_source = resolve_approval_actor_required_keys(require_actor_key, cfg)
     require_reason, _required_reason_source = resolve_approval_reason_required(require_reason, cfg)
     wf = load_target(target)
+    workflow_contract = wf.contract()
     lm = parse_log_mode(log_mode)
     hook = resume_hook_argv(cfg)
     resume_policy_hook = resume_hook_audit(cfg) if hook else None
@@ -1019,6 +1039,7 @@ def cmd_resume(
                 run_id=run_id,
                 approval_id=approval_id,
                 reject=reject,
+                workflow_contract=workflow_contract,
                 timeout_seconds=hook_timeout,
             )
         except subprocess.TimeoutExpired as exc:

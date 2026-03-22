@@ -234,13 +234,99 @@ def run_attention_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _md_inline_code(text: str) -> str:
+    safe = str(text).replace("`", "'")
+    return f"`{safe}`"
+
+
+def inspect_stakeholder_markdown(run_id: str, events: list[dict[str, Any]]) -> str:
+    """Short Markdown blurb for PM/support paste (full run; not filtered event lists)."""
+
+    summary = event_summary(events)
+    attention = run_attention_summary(events)
+    lines: list[str] = [f"## replayt run `{run_id}`", ""]
+    wf = f"{summary.get('workflow_name')}@{summary.get('workflow_version')}"
+    lines.append(f"- **Workflow:** {_md_inline_code(wf)}")
+    lines.append(f"- **Status:** {_md_inline_code(str(summary.get('status') or 'unknown'))}")
+    contract_sha256 = summary.get("workflow_contract_sha256")
+    if isinstance(contract_sha256, str) and contract_sha256.strip():
+        lines.append(f"- **Contract digest:** `{contract_sha256.strip()}`")
+    last_ts = summary.get("last_ts")
+    if last_ts not in (None, ""):
+        lines.append(f"- **Last event time:** {_md_inline_code(str(last_ts))}")
+    kind = str(attention.get("attention_kind") or "none")
+    asum = str(attention.get("attention_summary") or "").strip()
+    if kind != "none" and asum:
+        lines.append(f"- **Needs attention:** {_md_inline_code(asum)}")
+    elif kind != "none":
+        lines.append(f"- **Needs attention:** {_md_inline_code(kind)}")
+    lines.extend(["", "### Suggested next steps", ""])
+    lines.append(
+        f"- Stakeholder-facing report: `replayt report {run_id} --format markdown --style stakeholder` "
+        "(repeat `--log-dir`, `--log-subdir`, or `--sqlite` if you used them here)."
+    )
+    status = str(summary.get("status") or "")
+    pending = attention.get("pending_approvals") or []
+    if status == "paused":
+        if len(pending) == 1:
+            aid = pending[0].get("approval_id")
+            if aid not in (None, ""):
+                lines.append(
+                    f"- After approval: `replayt resume TARGET {run_id} --approval {aid}` "
+                    "(replace `TARGET` with your `MODULE:wf` or workflow path)."
+                )
+            else:
+                lines.append(
+                    f"- After approval: `replayt resume TARGET {run_id} --approval <approval_id>` "
+                    "(replace `TARGET` with your `MODULE:wf` or workflow path)."
+                )
+        elif len(pending) > 1:
+            ids = [
+                str(p.get("approval_id") or "").strip()
+                for p in pending
+                if str(p.get("approval_id") or "").strip()
+            ]
+            if ids:
+                quoted = ", ".join(_md_inline_code(i) for i in ids)
+                lines.append(
+                    f"- After approvals: `replayt resume TARGET {run_id} --approval <approval_id>` "
+                    f"(replace `TARGET`; pending ids: {quoted})."
+                )
+            else:
+                lines.append(
+                    f"- After approvals: `replayt resume TARGET {run_id} --approval <approval_id>` "
+                    "(replace `TARGET` with your `MODULE:wf` or workflow path)."
+                )
+        else:
+            lines.append(
+                f"- After approval: `replayt resume TARGET {run_id} --approval <approval_id>` "
+                f"(replace `TARGET`; see `replayt inspect {run_id} --output json` for details)."
+            )
+    return "\n".join(lines) + "\n"
+
+
+def format_timeline_seq(seq: Any) -> str:
+    """Format event ``seq`` for timeline text; tolerates missing or non-integer JSONL."""
+
+    if seq is None:
+        return "----"
+    try:
+        n = int(seq)
+    except (TypeError, ValueError):
+        s = str(seq).strip()
+        return s if s else "----"
+    if n < 0:
+        return str(n)
+    return f"{n:04d}"
+
+
 def replay_timeline_lines(events: list[dict[str, Any]]) -> list[str]:
     lines: list[str] = []
     for e in events:
         typ = e.get("type")
-        seq = e.get("seq")
         payload = e.get("payload") or {}
-        line = f"{seq:04d}  {typ}"
+        seq_s = format_timeline_seq(e.get("seq"))
+        line = f"{seq_s}  {typ}"
         if typ in {
             "state_entered",
             "state_exited",

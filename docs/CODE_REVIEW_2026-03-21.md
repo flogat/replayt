@@ -53,7 +53,7 @@ None.
 
 ## Missing tests
 
-- Add a `doctor` connectivity-failure regression that ensures HTTP exception text does not reintroduce raw credential-bearing URLs.
+- Add a `doctor` connectivity-failure regression so HTTP exception text never echoes raw credential-bearing URLs.
 - Add a filesystem-level SQLite read-only smoke test, if a portable fixture is available, so the `mode=ro` path is exercised beyond constructor-level behavior.
 
 ## Refactoring opportunities
@@ -63,4 +63,4 @@ None.
 
 ## Verdict
 
-This codebase looks ready for production within its stated scope, but this pass did expose three real issues in places that matter operationally: secret handling, gateway correctness, and read-only storage behavior. The fixes are narrow, the regressions are targeted, and nothing in this pass points to deeper architectural instability.
+Within its stated scope, the tree is fine to ship. This pass still found three operational problems: secret handling, gateway correctness, and read-only SQLite from the CLI. Fixes are small and covered by focused regressions; nothing here suggests a larger redesign.

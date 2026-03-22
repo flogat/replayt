@@ -20,6 +20,7 @@ from replayt.cli.config import (
     preview_default_inputs_file,
     resolve_approval_actor_required_keys,
     resolve_approval_reason_required,
+    resolve_forbid_log_mode_full,
     resolve_llm_settings,
     resolve_log_dir,
     resolve_log_mode_setting,
@@ -61,6 +62,7 @@ def _config_report(
     resolved_log_dir = resolve_log_dir(log_dir, log_subdir)
     sqlite_path, sqlite_source = resolve_sqlite_path(sqlite, cfg, config_path=cfg_path)
     resolved_log_mode, log_mode_source = resolve_log_mode_setting(log_mode, cfg)
+    forbid_lm_full, forbid_lm_full_source = resolve_forbid_log_mode_full(cfg)
     redact_keys, redact_keys_source = resolve_redact_keys(None, cfg)
     resolved_timeout, timeout_source = resolve_timeout_setting(timeout, cfg, in_child=False)
     strict_mirror = resolve_strict_mirror(cfg, sqlite=sqlite_path)
@@ -206,6 +208,8 @@ def _config_report(
         "runtime_defaults": {
             "log_mode": resolved_log_mode,
             "log_mode_source": log_mode_source,
+            "log_mode_full_forbidden": forbid_lm_full,
+            "log_mode_full_forbidden_source": forbid_lm_full_source,
             "redact_keys": list(redact_keys),
             "redact_keys_source": redact_keys_source,
             "timeout_seconds": resolved_timeout,
@@ -334,6 +338,10 @@ def cmd_config(
     typer.echo(f"log_subdir={paths['log_subdir'] or '(none)'}")
     typer.echo(f"sqlite={paths['sqlite'] or '(none)'} ({paths['sqlite_source']})")
     typer.echo(f"log_mode={runtime['log_mode']} ({runtime['log_mode_source']})")
+    typer.echo(
+        f"log_mode_full_forbidden={runtime['log_mode_full_forbidden']} "
+        f"({runtime['log_mode_full_forbidden_source']})"
+    )
     typer.echo(f"redact_keys={runtime['redact_keys'] or '(none)'} ({runtime['redact_keys_source']})")
     typer.echo(f"timeout_seconds={runtime['timeout_seconds']} ({runtime['timeout_source']})")
     typer.echo(f"strict_mirror={runtime['strict_mirror']} ({runtime['strict_mirror_source']})")

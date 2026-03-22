@@ -104,6 +104,9 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `effective_sha256` (string, optional): same fingerprint as the triggering `llm_request` when the provider call happened
 - `schema_sha256` (string, optional): stable SHA-256 fingerprint of the parse schema
 - `response_chars` (int, optional): response size when the failure happened after the provider returned text
+- `validation_issues` (array, optional): when `stage` is `schema_validate` and the exception is Pydantic `ValidationError`, up to 32 entries with `type` (string or null), `loc` (array of string or integer path segments), and `msg` (string)
+- `validation_issue_count` (int, optional): total Pydantic error count when `validation_issues` is present (may exceed the length of `validation_issues`)
+- `validation_issues_truncated` (bool, optional): true when `validation_issue_count` is greater than the number of logged `validation_issues`
 
 ## Tool events
 

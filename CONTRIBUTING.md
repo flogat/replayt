@@ -65,6 +65,7 @@ python scripts/version_consistency.py
 - `check_docs_index.py` verifies that `docs/README.md` still indexes every top-level docs file and that the main README documentation links resolve.
 - `changelog_unreleased.py` extracts `CHANGELOG.md` -> `## Unreleased` as text or JSON so release-note work does not depend on ad hoc markdown parsing.
 - `version_consistency.py` fails fast when `pyproject.toml` `[project].version` and `src/replayt/__init__.py` `__version__` disagree, which catches the common partial-bump footgun before a tag push.
+- `replayt version --format json` includes **`maintainer_script_schemas`**, listing the stable **`schema`** ids for those script JSON payloads (plus skill-loop **`replayt.skill_invocation.v1`** sidecars) so fork CI can compare `python scripts/changelog_unreleased.py --format json` (and the other helpers) against the installed wheel without opening `scripts/*.py`.
 
 ### Automated skill-loop release
 
@@ -88,9 +89,15 @@ python scripts/skill_release_loop.py \
   --check "pytest"
 ```
 
-Available placeholders for `--skill-command`: `{skill}`, `{skill_path}`, `{skill_root}`, `{prompt_file}`, `{log_file}`, `{repo}`, `{iteration}`, `{max_iterations}` and quoted `*_q` variants such as `{prompt_file_q}`. The same values are also exported as environment variables (`SKILL_NAME`, `SKILL_ROOT`, `SKILL_PROMPT_FILE`, `REPO_ROOT`, and so on).
+Available placeholders for `--skill-command`: `{skill}`, `{skill_path}`, `{skill_root}`, `{prompt_file}`, `{log_file}`, `{run_dir}`, `{repo}`, `{iteration}`, `{max_iterations}` and quoted `*_q` variants such as `{prompt_file_q}`. The same values are also exported as environment variables (`SKILL_NAME`, `SKILL_ROOT`, `SKILL_PROMPT_FILE`, `SKILL_RUN_DIR`, `REPO_ROOT`, and so on).
 
-Each run directory also gets a sidecar **`*.invocation.json`** next to every **`*.prompt.md`** (stable schema id **`replayt.skill_invocation.v1`**) with the resolved paths and iteration metadata so harnesses can read a JSON contract instead of parsing the Markdown prompt.
+Each run directory also gets a sidecar **`*.invocation.json`** next to every **`*.prompt.md`** (stable schema id **`replayt.skill_invocation.v1`**) with the resolved paths, sorted **`injected_env_keys`** (names the loop sets alongside optional `GIT_CONFIG_*` for git safe.directory), **`run_dir`**, iteration metadata, and task text so harnesses can read a JSON contract instead of parsing the Markdown prompt.
+
+To build one JSON array of every invocation under a finished run directory (for dashboards or CI artifacts), keep the atomic per-prompt sidecars and merge them in your layer, for example:
+
+```bash
+jq -s '.' .replayt/skill-release/20260322-120000/*.invocation.json
+```
 
 For command-heavy docs, prefer ASCII punctuation where practical (`"`, `'`, `...`, `->`) so examples stay readable in stock Windows terminals. See [`docs/STYLE.md`](docs/STYLE.md).
 

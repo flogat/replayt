@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import Any, ClassVar, Protocol, TypeVar
 
 import httpx
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from replayt.llm_coercion import (
     coerce_llm_extra_body,
@@ -35,6 +35,12 @@ class _HTTPStreamClient(Protocol):
 
 # Cap `{` probes so pathological multi-megabyte text cannot burn CPU in raw_decode attempts.
 _MAX_JSON_OBJECT_BRACE_STARTS = 50_000
+
+# Cap Pydantic issues on ``structured_output_failed`` so one pathological model payload cannot bloat JSONL.
+_MAX_STRUCTURED_VALIDATION_ISSUES = 32
+
+# ``complete_text(..., response_format=...)`` uses this sentinel so ``None`` can mean "omit from HTTP".
+_RF_UNSET = object()
 
 
 def _extract_json_object(text: str, *, max_brace_starts: int = _MAX_JSON_OBJECT_BRACE_STARTS) -> str:
@@ -91,6 +97,37 @@ def _extract_json_object(text: str, *, max_brace_starts: int = _MAX_JSON_OBJECT_
 def _stable_json_sha256(value: Any) -> str:
     canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _pydantic_validation_issues_for_log(exc: BaseException) -> tuple[list[dict[str, Any]], int] | None:
+    """Return a bounded list of Pydantic v2 validation errors plus the full error count, or None."""
+
+    if not isinstance(exc, ValidationError):
+        return None
+    raw = exc.errors()
+    total = len(raw)
+    if total == 0:
+        return None
+    clipped = raw[:_MAX_STRUCTURED_VALIDATION_ISSUES]
+    issues: list[dict[str, Any]] = []
+    for err in clipped:
+        loc = err.get("loc")
+        loc_out: list[Any] = []
+        if isinstance(loc, tuple):
+            for part in loc:
+                if isinstance(part, (str, int)):
+                    loc_out.append(part)
+                else:
+                    loc_out.append(str(part))
+        et = err.get("type")
+        issues.append(
+            {
+                "type": str(et) if et is not None else None,
+                "loc": loc_out,
+                "msg": str(err.get("msg", "")),
+            }
+        )
+    return issues, total
 
 
 def _request_fingerprints(
@@ -463,6 +500,7 @@ class LLMBridge:
         extra_body: dict[str, Any] | None = None,
         native_response_format: bool | None = None,
         experiment: dict[str, Any] | None = None,
+        response_format: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> LLMBridge:
         """Return a new bridge with merged per-call defaults (logged on each request as ``effective``)."""
@@ -777,6 +815,8 @@ class LLMBridge:
         effective: dict[str, Any] | None = None,
         fingerprints: dict[str, str] | None = None,
         response_chars: int | None = None,
+        validation_issues: list[dict[str, Any]] | None = None,
+        validation_issue_count: int | None = None,
     ) -> None:
         payload: dict[str, Any] = {
             "state": self._state_getter(),
@@ -791,6 +831,16 @@ class LLMBridge:
             payload.update(fingerprints)
         if response_chars is not None:
             payload["response_chars"] = response_chars
+        if validation_issues is not None:
+            payload["validation_issues"] = validation_issues
+        if validation_issue_count is not None:
+            payload["validation_issue_count"] = validation_issue_count
+        if (
+            validation_issues is not None
+            and validation_issue_count is not None
+            and validation_issue_count > len(validation_issues)
+        ):
+            payload["validation_issues_truncated"] = True
         self._emit("structured_output_failed", payload)
 
     @staticmethod
@@ -954,6 +1004,11 @@ class LLMBridge:
         try:
             result = model_type.model_validate(obj)
         except Exception as exc:  # noqa: BLE001
+            val_log = _pydantic_validation_issues_for_log(exc)
+            v_issues: list[dict[str, Any]] | None = None
+            v_count: int | None = None
+            if val_log is not None:
+                v_issues, v_count = val_log
             self._emit_structured_output_failed(
                 schema_name=model_type.__name__,
                 stage="schema_validate",
@@ -962,6 +1017,8 @@ class LLMBridge:
                 effective=effective,
                 fingerprints=fingerprints,
                 response_chars=len(text),
+                validation_issues=v_issues,
+                validation_issue_count=v_count,
             )
             raise
         self._emit(

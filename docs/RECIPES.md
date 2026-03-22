@@ -65,7 +65,7 @@ decision = (
 )
 ```
 
-If parsing still fails, replayt now emits `structured_output_failed` with a stage such as `json_extract` or `schema_validate` so the JSONL tells you whether the miss was malformed JSON, an oversized response, or a schema mismatch.
+If parsing still fails, replayt emits `structured_output_failed` with a stage such as `json_extract` or `schema_validate` so the JSONL tells you whether the miss was malformed JSON, an oversized response, or a schema mismatch. For Pydantic rejections at `schema_validate`, the event also includes bounded `validation_issues` (field path and message) plus `validation_issue_count` when many fields fail at once.
 
 For timeouts, retries, or betas exposed only through the official `openai` SDK, keep replayt's graph and approvals as-is and call the SDK **inside a single step** (see **Pattern: OpenAI Python SDK inside a step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md)).
 
@@ -110,7 +110,7 @@ replayt ci mypkg.workflow:wf --summary-json .replayt/ci-summary.json
 # jq '.ci_metadata' .replayt/ci-summary.json
 ```
 
-For one-command preflight before the real job, **`replayt doctor --skip-connectivity --target TARGET --strict-graph`** now loads the workflow, validates its graph/input flags, and checks that the resolved log / SQLite destinations are usable without executing the run. If the shell also sets **`REPLAYT_JUNIT_XML`**, **`REPLAYT_SUMMARY_JSON`**, or **`REPLAYT_GITHUB_SUMMARY=1`**, the same doctor report now preflights those artifact sinks too, including a missing **`GITHUB_STEP_SUMMARY`** export.
+For one-command preflight before the real job, **`replayt doctor --skip-connectivity --target TARGET --strict-graph`** now loads the workflow, validates its graph/input flags, and checks that the resolved log / SQLite destinations are usable without executing the run. If the shell also sets **`REPLAYT_JUNIT_XML`**, **`REPLAYT_SUMMARY_JSON`**, or **`REPLAYT_GITHUB_SUMMARY=1`**, the same doctor report now preflights those artifact sinks too, including a missing markdown sink when neither **`GITHUB_STEP_SUMMARY`** nor **`REPLAYT_STEP_SUMMARY`** is set.
 
 ### GitHub Actions and exit code `2`
 

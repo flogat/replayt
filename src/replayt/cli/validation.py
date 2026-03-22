@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -23,9 +24,24 @@ def _read_json_text_file(path: Path, *, label: str) -> str:
     return raw.strip() or "{}"
 
 
+def _read_json_from_stdin(*, label: str) -> str:
+    try:
+        raw = sys.stdin.read()
+    except OSError as e:
+        raise typer.BadParameter(f"{label}: could not read stdin ({e})") from e
+    return raw.strip() or "{}"
+
+
+def _is_stdin_inputs_path(path: Path) -> bool:
+    return path == Path("-")
+
+
 def _json_parse_hint(label: str) -> str:
     if label == "inputs":
-        return "; tip: use --inputs-file inputs.json or --inputs-json @inputs.json to avoid shell quoting"
+        return (
+            "; tip: use --inputs-file PATH, --inputs-file - (stdin), "
+            "or --inputs-json @PATH / @- (stdin) to avoid shell quoting"
+        )
     return ""
 
 
@@ -38,12 +54,18 @@ def inputs_json_from_options(
         raise typer.BadParameter("Use only one of --inputs-json or --inputs-file")
     base_raw: str | None = None
     if inputs_file is not None:
-        base_raw = _read_json_text_file(inputs_file, label="--inputs-file")
+        if _is_stdin_inputs_path(inputs_file):
+            base_raw = _read_json_from_stdin(label="--inputs-file")
+        else:
+            base_raw = _read_json_text_file(inputs_file, label="--inputs-file")
     elif inputs_json is not None and inputs_json.startswith("@"):
         file_ref = inputs_json[1:].strip()
         if not file_ref:
             raise typer.BadParameter("--inputs-json @path form requires a file path, e.g. --inputs-json @inputs.json")
-        base_raw = _read_json_text_file(Path(file_ref), label="--inputs-json @path")
+        if file_ref == "-":
+            base_raw = _read_json_from_stdin(label="--inputs-json @-")
+        else:
+            base_raw = _read_json_text_file(Path(file_ref), label="--inputs-json @path")
     else:
         base_raw = inputs_json
     if not input_value:

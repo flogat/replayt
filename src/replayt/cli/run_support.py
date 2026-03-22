@@ -17,6 +17,18 @@ from replayt.workflow import Workflow
 RUN_RESULT_SCHEMA = "replayt.run_result.v1"
 
 
+def _workflow_contract_hook_env(contract: dict[str, Any]) -> dict[str, str]:
+    """Env vars shared by run_hook and resume_hook for workflow-surface policy checks."""
+
+    wf = contract.get("workflow") if isinstance(contract.get("workflow"), dict) else {}
+    sha = contract.get("contract_sha256")
+    return {
+        "REPLAYT_WORKFLOW_CONTRACT_SHA256": str(sha) if sha is not None else "",
+        "REPLAYT_WORKFLOW_NAME": str(wf.get("name", "")),
+        "REPLAYT_WORKFLOW_VERSION": str(wf.get("version", "")),
+    }
+
+
 def dry_check_suggested_command(
     *,
     target: str,
@@ -168,6 +180,7 @@ def invoke_run_hook(
     dry_run: bool,
     resume: bool,
     sqlite: Path | None,
+    workflow_contract: dict[str, Any],
     inputs_json: str | None,
     tags_json: str | None,
     metadata_json: str | None,
@@ -183,6 +196,7 @@ def invoke_run_hook(
         "REPLAYT_LOG_DIR": str(log_dir.resolve()),
         "REPLAYT_LOG_MODE": log_mode,
         "REPLAYT_DRY_RUN": "1" if dry_run else "0",
+        **_workflow_contract_hook_env(workflow_contract),
     }
     if sqlite is not None:
         extra_env["REPLAYT_SQLITE"] = str(sqlite.resolve())
@@ -204,6 +218,7 @@ def invoke_resume_hook(
     run_id: str,
     approval_id: str,
     reject: bool,
+    workflow_contract: dict[str, Any],
     timeout_seconds: float | None,
 ) -> None:
     """Run *argv* with extra ``REPLAYT_*`` env vars; *argv* must come from trusted config."""
@@ -215,6 +230,7 @@ def invoke_resume_hook(
             "REPLAYT_RUN_ID": run_id,
             "REPLAYT_APPROVAL_ID": approval_id,
             "REPLAYT_REJECT": "1" if reject else "0",
+            **_workflow_contract_hook_env(workflow_contract),
         },
         timeout_seconds=timeout_seconds,
     )
@@ -304,6 +320,99 @@ def invoke_verify_seal_hook(
         },
         timeout_seconds=timeout_seconds,
     )
+
+
+def build_policy_hook_env_catalog() -> dict[str, Any]:
+    """Stable machine-readable contract for trusted policy-hook subprocesses (CI / MCP wrappers)."""
+
+    hooks: dict[str, dict[str, Any]] = {
+        "run_hook": {
+            "argv_env": "REPLAYT_RUN_HOOK",
+            "argv_config_key": "run_hook",
+            "injected_env_vars": sorted(
+                {
+                    "REPLAYT_DRY_RUN",
+                    "REPLAYT_LOG_DIR",
+                    "REPLAYT_LOG_MODE",
+                    "REPLAYT_RUN_EXPERIMENT_JSON",
+                    "REPLAYT_RUN_ID",
+                    "REPLAYT_RUN_INPUTS_JSON",
+                    "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_MODE",
+                    "REPLAYT_RUN_TAGS_JSON",
+                    "REPLAYT_SQLITE",
+                    "REPLAYT_TARGET",
+                    "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_NAME",
+                    "REPLAYT_WORKFLOW_VERSION",
+                }
+            ),
+        },
+        "resume_hook": {
+            "argv_env": "REPLAYT_RESUME_HOOK",
+            "argv_config_key": "resume_hook",
+            "injected_env_vars": sorted(
+                {
+                    "REPLAYT_APPROVAL_ID",
+                    "REPLAYT_REJECT",
+                    "REPLAYT_RUN_ID",
+                    "REPLAYT_TARGET",
+                    "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_NAME",
+                    "REPLAYT_WORKFLOW_VERSION",
+                }
+            ),
+        },
+        "export_hook": {
+            "argv_env": "REPLAYT_EXPORT_HOOK",
+            "argv_config_key": "export_hook",
+            "injected_env_vars": sorted(
+                {
+                    "REPLAYT_BUNDLE_REPORT_STYLE",
+                    "REPLAYT_EXPORT_EVENT_COUNT",
+                    "REPLAYT_EXPORT_KIND",
+                    "REPLAYT_EXPORT_MODE",
+                    "REPLAYT_EXPORT_OUT",
+                    "REPLAYT_EXPORT_SEAL",
+                    "REPLAYT_LOG_DIR",
+                    "REPLAYT_RUN_ID",
+                    "REPLAYT_SQLITE",
+                }
+            ),
+        },
+        "seal_hook": {
+            "argv_env": "REPLAYT_SEAL_HOOK",
+            "argv_config_key": "seal_hook",
+            "injected_env_vars": sorted(
+                {
+                    "REPLAYT_LOG_DIR",
+                    "REPLAYT_RUN_ID",
+                    "REPLAYT_SEAL_JSONL",
+                    "REPLAYT_SEAL_LINE_COUNT",
+                    "REPLAYT_SEAL_OUT",
+                }
+            ),
+        },
+        "verify_seal_hook": {
+            "argv_env": "REPLAYT_VERIFY_SEAL_HOOK",
+            "argv_config_key": "verify_seal_hook",
+            "injected_env_vars": sorted(
+                {
+                    "REPLAYT_LOG_DIR",
+                    "REPLAYT_RUN_ID",
+                    "REPLAYT_VERIFY_SEAL_FILE_SHA256",
+                    "REPLAYT_VERIFY_SEAL_JSONL",
+                    "REPLAYT_VERIFY_SEAL_LINE_COUNT",
+                    "REPLAYT_VERIFY_SEAL_MANIFEST",
+                    "REPLAYT_VERIFY_SEAL_SCHEMA",
+                }
+            ),
+        },
+    }
+    return {
+        "subprocess_stdin": "devnull",
+        "hooks": {name: hooks[name] for name in sorted(hooks)},
+    }
 
 
 def build_internal_run_argv(

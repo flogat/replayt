@@ -206,6 +206,19 @@ def test_skill_command_invokes_cursor_agent_cli() -> None:
     assert not mod.skill_command_invokes_cursor_agent_cli("python scripts/run_codex_skill.py")
 
 
+def test_github_ci_verify_command_require_gh(tmp_path: Path) -> None:
+    mod = _load_script()
+    assert "--require-gh" in mod.github_ci_verify_command(tmp_path, require_gh=True)
+    assert "--require-gh" not in mod.github_ci_verify_command(tmp_path, require_gh=False)
+
+
+def test_parse_args_github_ci_verify_require_gh_flags() -> None:
+    mod = _load_script()
+    assert mod.parse_args([]).github_ci_verify_require_gh is True
+    assert mod.parse_args(["--no-github-ci-verify-require-gh"]).github_ci_verify_require_gh is False
+    assert mod.parse_args(["--github-ci-verify-require-gh"]).github_ci_verify_require_gh is True
+
+
 def test_resolve_cursor_agent_executable_env_override(tmp_path: Path, monkeypatch) -> None:
     mod = _load_script()
     exe = tmp_path / "my-agent.exe"
@@ -558,6 +571,7 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     env = captured["env"]
     assert isinstance(env, dict)
     assert env["SKILL_ROOT"] == str(skill_root.resolve())
+    assert env["SKILL_RUN_DIR"] == str(run_dir.resolve())
     inv_path = run_dir / "iter-01-demo.invocation.json"
     assert inv_path.is_file()
     inv = json.loads(inv_path.read_text(encoding="utf-8"))
@@ -567,6 +581,8 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert inv["iteration"] == 1
     assert inv["max_iterations"] == mod.parse_args([]).max_iterations
     assert inv["repo_root"] == str(repo.resolve())
+    assert inv["run_dir"] == str(run_dir.resolve())
+    assert inv["injected_env_keys"] == sorted(mod.SKILL_LOOP_MAIN_INJECTED_ENV_KEYS)
     assert inv["prompt_file"] == str((run_dir / "iter-01-demo.prompt.md").resolve())
     assert inv["log_file"] == str((run_dir / "iter-01-demo.log").resolve())
 

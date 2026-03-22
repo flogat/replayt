@@ -15,7 +15,9 @@ from replayt.cli.config import (
     DEFAULT_LOG_DIR,
     get_project_config,
     min_replayt_version_report,
+    parse_log_mode,
     resolve_approval_reason_required,
+    resolve_forbid_log_mode_full,
     resolve_llm_settings,
     resolve_log_dir,
     resolve_log_mode_setting,
@@ -34,6 +36,7 @@ from replayt.security import (
     log_directory_permission_trust_checks,
     trust_boundary_checks,
 )
+from replayt.types import LogMode
 
 
 def cmd_doctor(
@@ -56,12 +59,12 @@ def cmd_doctor(
     inputs_json: str | None = typer.Option(
         None,
         "--inputs-json",
-        help="Optional JSON object for --target preflight (same parse rules as replayt validate).",
+        help="Optional JSON object for --target preflight (same parse rules as replayt validate; @- reads stdin).",
     ),
     inputs_file: Path | None = typer.Option(
         None,
         "--inputs-file",
-        help="Optional JSON file for --target preflight (same parse rules as replayt validate).",
+        help="Optional JSON file for --target preflight (`-` or @- rules match replayt validate).",
     ),
     input_value: list[str] | None = typer.Option(
         None,
@@ -227,6 +230,30 @@ def cmd_doctor(
     trust_base_url = settings.base_url if settings is not None else os.environ.get("OPENAI_BASE_URL")
     for check in trust_boundary_checks(base_url=trust_base_url, log_mode=resolved_log_mode):
         checks.append((check.name, check.ok, check.detail))
+    forbid_lm_full, forbid_lm_src = resolve_forbid_log_mode_full(cfg)
+    try:
+        doctor_lm = parse_log_mode(resolved_log_mode)
+    except typer.BadParameter as exc:
+        checks.append(("log_mode_full_forbidden", False, f"invalid resolved log_mode ({exc})"))
+    else:
+        if forbid_lm_full and doctor_lm == LogMode.full:
+            checks.append(
+                (
+                    "log_mode_full_forbidden",
+                    False,
+                    f"replayt run/ci/resume will reject log_mode=full ({forbid_lm_src})",
+                )
+            )
+        elif forbid_lm_full:
+            checks.append(
+                (
+                    "log_mode_full_forbidden",
+                    True,
+                    f"policy active ({forbid_lm_src}); default log_mode={resolved_log_mode}",
+                )
+            )
+        else:
+            checks.append(("log_mode_full_forbidden", True, "forbid_log_mode_full unset"))
     if required_reason:
         checks.append(
             (
@@ -368,7 +395,8 @@ def cmd_doctor(
             "Fix REPLAYT_SUMMARY_JSON (or pass --summary-json) so the parent directory exists and is writable."
         ),
         "ci_github_summary_ready": (
-            "If you set REPLAYT_GITHUB_SUMMARY=1, make sure GITHUB_STEP_SUMMARY is exported by the CI runner."
+            "If you set REPLAYT_GITHUB_SUMMARY=1 (or pass --github-summary), export GITHUB_STEP_SUMMARY "
+            "from the runner or set REPLAYT_STEP_SUMMARY to a writable file path (non-GitHub CI)."
         ),
         "target_validation": (
             "Use replayt validate TARGET or replayt doctor --target TARGET --strict-graph "
@@ -377,6 +405,10 @@ def cmd_doctor(
         "approval_reason_policy": (
             "Set approval_reason_required = true in project config or pass --require-reason on replayt resume "
             "when approval decisions need a written audit note."
+        ),
+        "log_mode_full_forbidden": (
+            "Set forbid_log_mode_full = true or export REPLAYT_FORBID_LOG_MODE_FULL=1 in CI so regulated pipelines "
+            "cannot run with log_mode=full; use redacted or structured_only, or clear the policy for local debugging."
         ),
         "policy_hooks_external_code": (
             "Prefer typed in-process hooks or outer wrappers when possible. If you keep CLI policy hooks, "

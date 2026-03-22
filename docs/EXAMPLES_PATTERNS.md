@@ -97,6 +97,17 @@ replayt ci "$TARGET" --metadata-json "{\"deployment_tier\":\"prod\",\"change_tic
 
 In Python, the same shape is `Runner.run(..., run_metadata={"deployment_tier": "prod", "change_ticket": "CHG-12345"})`. Keep secrets out of metadata; use ticket ids and deployment labels instead of raw tokens.
 
+### Pattern: workflow contract allowlist in policy hooks
+
+**Scenario:** Compliance wants only CI-approved workflow digests to run or resume in production, without replayt hosting RBAC or reading your IdP.
+
+**Approach:** Pin contracts with **`replayt contract TARGET --check path/to/workflow.contract.json`** in CI. At runtime, read **`REPLAYT_WORKFLOW_CONTRACT_SHA256`** (and optional name/version) inside **`run_hook`** / **`resume_hook`** and compare to your allowlist file or CMDB query; exit non-zero to block before new JSONL events. To detect drift against the original run, parse the first **`run_started`** line in the run's JSONL and compare its **`runtime.workflow.contract_sha256`** to the hook env (or to your allowlist).
+
+```bash
+# CI: fail when the live workflow drifts from the checked-in contract snapshot
+replayt contract "$TARGET" --check policies/workflow.contract.json
+```
+
 ### Pattern: OpenAI Python SDK inside a step
 
 **Scenario:** You want `openai` package features (custom retries, streaming, vision, assistants betas) without waiting for replayt to wrap everything.
@@ -279,7 +290,7 @@ Use the broker for **retries and DLQ**, not implicit replays inside replayt.
 
 **Approach:** Call **`chain.invoke(...)`** (or equivalent) **inside a single step**. Map the framework output to **one Pydantic model**, `ctx.set("step_result", model.model_dump())`, then **`return "next_state"`** so branching stays visible in replayt. Never let the framework decide the FSM transition without your Python code expressing it.
 
-Use **`ctx.note(...)`** for explicit sub-run breadcrumbs, then narrow a run with **`replayt inspect RUN_ID --event-type step_note`** (repeat the flag for OR, e.g. **`tool_call`**) when you want framework-shaped signals without `jq`. To find local runs that validated a particular Pydantic **`schema_name`**, list with **`replayt runs --structured-schema MyModel`** (repeat for OR); **`replayt stats`** accepts the same flag. When a sandboxed graph hits token limits, **`llm_response`** events record the provider **`finish_reason`**; use **`replayt runs --finish-reason length`** or **`replayt inspect RUN_ID --finish-reason length`** to triage those runs without ad-hoc **`jq`**.
+Use **`ctx.note(...)`** for explicit sub-run breadcrumbs, then narrow a run with **`replayt inspect RUN_ID --event-type step_note`** (repeat the flag for OR) when you want framework-shaped signals without `jq`. For **`tool_call`** lines, use **`replayt inspect RUN_ID --tool TOOL_NAME`** (same OR rules as **`replayt runs --tool`**) or **`--event-type tool_call`** when you need every invocation. To find local runs that validated a particular Pydantic **`schema_name`**, list with **`replayt runs --structured-schema MyModel`** (repeat for OR); **`replayt stats`** accepts the same flag. When a sandboxed graph hits token limits, **`llm_response`** events record the provider **`finish_reason`**; use **`replayt runs --finish-reason length`** or **`replayt inspect RUN_ID --finish-reason length`** to triage those runs without ad-hoc **`jq`**.
 
 ### Pattern: reusable workflow package
 

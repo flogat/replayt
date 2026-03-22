@@ -87,8 +87,8 @@ def write_junit_xml(path: Path, *, wf: Workflow, result: RunResult) -> None:
     path.write_text(doc, encoding="utf-8")
 
 
-def _resolve_step_summary_path() -> Path | None:
-    """Where to append markdown when ``--github-summary`` / ``REPLAYT_GITHUB_SUMMARY`` is on.
+def _step_summary_path_and_source() -> tuple[Path | None, str]:
+    """Resolve the markdown step-summary sink and which env var supplied it.
 
     GitHub Actions sets ``GITHUB_STEP_SUMMARY``; for other CI systems set ``REPLAYT_STEP_SUMMARY``
     to a writable file path. When both are set, ``GITHUB_STEP_SUMMARY`` wins.
@@ -96,9 +96,18 @@ def _resolve_step_summary_path() -> Path | None:
 
     gh = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
     if gh:
-        return Path(gh)
+        return Path(gh), "env:GITHUB_STEP_SUMMARY"
     rt = os.environ.get("REPLAYT_STEP_SUMMARY", "").strip()
-    return Path(rt) if rt else None
+    if rt:
+        return Path(rt), "env:REPLAYT_STEP_SUMMARY"
+    return None, "unset"
+
+
+def _resolve_step_summary_path() -> Path | None:
+    """Where to append markdown when ``--github-summary`` / ``REPLAYT_GITHUB_SUMMARY`` is on."""
+
+    path, _src = _step_summary_path_and_source()
+    return path
 
 
 def append_github_step_summary(
@@ -198,7 +207,7 @@ def resolve_ci_artifacts(
     env_junit = os.environ.get("REPLAYT_JUNIT_XML", "").strip()
     env_summary = os.environ.get("REPLAYT_SUMMARY_JSON", "").strip()
     env_github_toggle = os.environ.get("REPLAYT_GITHUB_SUMMARY", "").strip()
-    env_github_step_summary = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
+    step_path, step_source = _step_summary_path_and_source()
 
     return ResolvedCIArtifacts(
         junit_xml=resolve_ci_junit_path(explicit_junit_xml),
@@ -221,8 +230,8 @@ def resolve_ci_artifacts(
             if env_github_toggle == "1"
             else "unset"
         ),
-        github_step_summary=Path(env_github_step_summary) if env_github_step_summary else None,
-        github_step_summary_source="env:GITHUB_STEP_SUMMARY" if env_github_step_summary else "unset",
+        github_step_summary=step_path,
+        github_step_summary_source=step_source,
     )
 
 

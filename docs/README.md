@@ -18,7 +18,7 @@
 
 ## Maintainer docs
 
-- [`CODE_REVIEW_2026-03-21.md`](CODE_REVIEW_2026-03-21.md): standing standalone review record with findings, mitigations, and verification notes from the current repo pass.
+- [`CODE_REVIEW_2026-03-21.md`](CODE_REVIEW_2026-03-21.md): dated review write-up with findings, fixes, and how they were checked on this repo.
 - [`RELEASE_INVENTORY.md`](RELEASE_INVENTORY.md): commit-level rollup since git tag **`v0.2.0`** for release-note work.
 - [`ARCHETYPE_FEATURE_BRAINSTORM.md`](ARCHETYPE_FEATURE_BRAINSTORM.md): ten backlog ideas from ten developer archetypes, each marked as in-core or composition.
 - [`PUBLIC_API_CONTRACT.json`](PUBLIC_API_CONTRACT.json): checked-in top-level `replayt` API snapshot for semver review via `python scripts/public_api_report.py --check docs/PUBLIC_API_CONTRACT.json`.

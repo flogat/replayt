@@ -6,7 +6,7 @@ from contextlib import contextmanager
 from unittest.mock import patch
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, create_model
 
 from replayt.llm import LLMBridge, LLMSettings, OpenAICompatClient
 from replayt.types import LogMode
@@ -554,6 +554,41 @@ def test_llm_bridge_parse_emits_structured_output_failed_on_validation_error() -
     assert failure["messages_sha256"] == req["messages_sha256"]
     assert failure["effective_sha256"] == req["effective_sha256"]
     assert failure["schema_sha256"] == req["schema_sha256"]
+    assert failure["validation_issue_count"] == 1
+    assert "validation_issues_truncated" not in failure
+    issues = failure["validation_issues"]
+    assert len(issues) == 1
+    assert issues[0]["loc"] == ["value"]
+    assert "validation" in issues[0]["msg"].lower() or "int" in issues[0]["msg"].lower()
+
+
+def test_llm_bridge_parse_validation_issues_truncated_when_many_fields_fail() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    Big = create_model("WideRow", **{f"f{i}": (int, ...) for i in range(40)})
+    payload_obj = {f"f{i}": "nope" for i in range(40)}
+    content = json.dumps(payload_obj)
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "parse",
+    )
+
+    with patch.object(client, "chat_completions", return_value={"choices": [{"message": {"content": content}}]}):
+        with pytest.raises(Exception):
+            bridge.parse(Big, messages=[{"role": "user", "content": "hi"}])
+
+    failure = next(p for t, p in events if t == "structured_output_failed")
+    assert failure["stage"] == "schema_validate"
+    assert failure["validation_issue_count"] == 40
+    assert len(failure["validation_issues"]) == 32
+    assert failure["validation_issues_truncated"] is True
 
 
 def test_extract_json_object_empty_string() -> None:

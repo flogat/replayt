@@ -9,9 +9,21 @@ from typing import Literal
 import typer
 
 import replayt
-from replayt.cli.run_support import RUN_RESULT_SCHEMA
+from replayt.cli.config import SUPPORTED_CONFIG_KEYS
+from replayt.cli.run_support import RUN_RESULT_SCHEMA, build_policy_hook_env_catalog
 
 VERSION_REPORT_SCHEMA = "replayt.version_report.v1"
+
+# Stable schema ids emitted by repo-local scripts under scripts/ (maintainer_checks loads these).
+MAINTAINER_SCRIPT_SCHEMAS: dict[str, str] = {
+    "unreleased_changelog": "replayt.unreleased_changelog.v1",
+    "docs_index_report": "replayt.docs_index_report.v1",
+    "version_consistency": "replayt.version_consistency.v1",
+    "example_catalog_contract": "replayt.example_catalog_contract.v1",
+    "public_api_report": "replayt.public_api_report.v1",
+    "maintainer_checks": "replayt.maintainer_checks.v1",
+    "skill_invocation": "replayt.skill_invocation.v1",
+}
 
 
 def build_version_report() -> dict[str, object]:
@@ -28,6 +40,9 @@ def build_version_report() -> dict[str, object]:
             "serial": vi.serial,
         },
         "platform": sys.platform,
+        "supported_project_config_keys": sorted(SUPPORTED_CONFIG_KEYS),
+        "maintainer_script_schemas": dict(sorted(MAINTAINER_SCRIPT_SCHEMAS.items())),
+        "policy_hook_env_catalog": build_policy_hook_env_catalog(),
         "cli_machine_readable_schemas": {
             "version_report": VERSION_REPORT_SCHEMA,
             "workflow_contract": "replayt.workflow_contract.v1",

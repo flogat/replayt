@@ -37,6 +37,7 @@ SUPPORTED_CONFIG_KEYS = frozenset(
         "min_replayt_version",
         "inputs_file",
         "approval_reason_required",
+        "forbid_log_mode_full",
     }
 )
 
@@ -49,6 +50,7 @@ DEFAULT_LOG_DIR = Path(".replayt/runs")
 
 REPLAYT_TARGET_ENV = "REPLAYT_TARGET"
 REPLAYT_INPUTS_FILE_ENV = "REPLAYT_INPUTS_FILE"
+REPLAYT_FORBID_LOG_MODE_FULL_ENV = "REPLAYT_FORBID_LOG_MODE_FULL"
 
 
 def resolve_cli_target(explicit: str | None, *, cfg: dict[str, Any]) -> str:
@@ -86,6 +88,8 @@ def preview_default_inputs_file(cfg: dict[str, Any], *, config_path: str | None)
 
     env_raw = os.environ.get(REPLAYT_INPUTS_FILE_ENV, "").strip()
     if env_raw:
+        if env_raw == "-":
+            return "-", f"env:{REPLAYT_INPUTS_FILE_ENV} (stdin)"
         return str(Path(env_raw).expanduser().resolve()), f"env:{REPLAYT_INPUTS_FILE_ENV}"
     cfg_raw = cfg.get("inputs_file")
     if isinstance(cfg_raw, str) and cfg_raw.strip():
@@ -114,11 +118,12 @@ def resolve_run_inputs_json(
     if inputs_json is not None or inputs_file is not None:
         resolved = inputs_json_from_options(inputs_json, inputs_file, input_value)
         if inputs_file is not None:
-            src = "cli:--inputs-file"
+            src = "cli:--inputs-file (stdin)" if inputs_file == Path("-") else "cli:--inputs-file"
         elif inputs_json is not None:
             sj = inputs_json.strip()
             if sj.startswith("@"):
-                src = "cli:--inputs-json @path"
+                ref = sj[1:].strip()
+                src = "cli:--inputs-json @- (stdin)" if ref == "-" else "cli:--inputs-json @path"
             else:
                 src = "cli:--inputs-json"
         else:
@@ -127,6 +132,9 @@ def resolve_run_inputs_json(
 
     env_raw = os.environ.get(REPLAYT_INPUTS_FILE_ENV, "").strip()
     if env_raw:
+        if env_raw == "-":
+            resolved = inputs_json_from_options(None, Path("-"), input_value)
+            return resolved, f"env:{REPLAYT_INPUTS_FILE_ENV} (stdin)"
         p = Path(env_raw).expanduser()
         resolved = inputs_json_from_options(None, p, input_value)
         return resolved, f"env:{REPLAYT_INPUTS_FILE_ENV}"
@@ -255,6 +263,37 @@ def resolve_log_mode_setting(cli_log_mode: str, cfg: dict[str, Any]) -> tuple[st
     if cli_log_mode == "redacted" and cfg.get("log_mode"):
         return str(cfg["log_mode"]), "project_config:log_mode"
     return cli_log_mode, "cli:--log-mode" if cli_log_mode != "redacted" else "default:redacted"
+
+
+def resolve_forbid_log_mode_full(cfg: dict[str, Any]) -> tuple[bool, str]:
+    """Whether ``log_mode=full`` must be rejected on run/ci/resume (env overrides project config)."""
+
+    raw = os.environ.get(REPLAYT_FORBID_LOG_MODE_FULL_ENV)
+    if raw is not None:
+        key = str(raw).strip().lower()
+        if key in {"0", "false", "no", "off"}:
+            return False, f"env:{REPLAYT_FORBID_LOG_MODE_FULL_ENV}"
+        if key:
+            return True, f"env:{REPLAYT_FORBID_LOG_MODE_FULL_ENV}"
+    if bool(cfg.get("forbid_log_mode_full")):
+        return True, "project_config:forbid_log_mode_full"
+    return False, "unset"
+
+
+def enforce_forbid_log_mode_full_cli(*, forbid: bool, forbid_source: str, resolved_log_mode: str) -> None:
+    """Fail CLI entrypoints when policy forbids ``LogMode.full``."""
+
+    if not forbid:
+        return
+    lm = parse_log_mode(resolved_log_mode)
+    if lm == LogMode.full:
+        raise typer.BadParameter(
+            "log_mode=full is forbidden by "
+            f"{forbid_source}. "
+            "Use --log-mode redacted or structured_only, clear "
+            f"{REPLAYT_FORBID_LOG_MODE_FULL_ENV}, or remove forbid_log_mode_full from project config "
+            "(see docs/CONFIG.md)."
+        )
 
 
 def resolve_redact_keys(cli_redact_keys: list[str] | None, cfg: dict[str, Any]) -> tuple[tuple[str, ...], str]:

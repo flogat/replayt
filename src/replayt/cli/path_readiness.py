@@ -182,7 +182,10 @@ def ci_artifact_readiness_checks(
             PathReadinessCheck(
                 name="ci_github_summary_ready",
                 ok=False,
-                detail="GitHub step summary requested but GITHUB_STEP_SUMMARY is unset",
+                detail=(
+                    "GitHub step summary requested but neither GITHUB_STEP_SUMMARY nor "
+                    "REPLAYT_STEP_SUMMARY is set"
+                ),
                 path=None,
             )
         )

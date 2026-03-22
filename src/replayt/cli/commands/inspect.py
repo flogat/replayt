@@ -17,6 +17,8 @@ from replayt.cli.config import DEFAULT_LOG_DIR, get_project_config, resolve_log_
 from replayt.cli.display import (
     event_summary,
     experiment_filters_match,
+    format_timeline_seq,
+    inspect_stakeholder_markdown,
     parse_duration,
     parse_finish_reason_filters,
     parse_iso_ts,
@@ -110,6 +112,28 @@ def _filter_events_by_finish_reason(
             payload = event.get("payload") or {}
             fr = payload.get("finish_reason")
             if isinstance(fr, str) and fr in filters:
+                filtered.append(event)
+            continue
+        if event_type_filters is not None and typ in event_type_filters:
+            filtered.append(event)
+    return filtered
+
+
+def _filter_events_by_tool_name(
+    events: list[dict[str, Any]],
+    filters: frozenset[str] | None,
+    *,
+    event_type_filters: frozenset[str] | None,
+) -> list[dict[str, Any]]:
+    if filters is None:
+        return events
+    filtered: list[dict[str, Any]] = []
+    for event in events:
+        typ = event.get("type")
+        if typ == "tool_call":
+            payload = event.get("payload") or {}
+            name = payload.get("name")
+            if isinstance(name, str) and name in filters:
                 filtered.append(event)
             continue
         if event_type_filters is not None and typ in event_type_filters:
@@ -218,15 +242,23 @@ def cmd_inspect(
             "Without --event-type, this narrows the event list to matching responses only."
         ),
     ),
+    tool: list[str] | None = typer.Option(
+        None,
+        "--tool",
+        help=(
+            "Only include `tool_call` events whose payload `name` matches (repeatable; OR). "
+            "Without --event-type, this narrows the event list to matching tool calls only."
+        ),
+    ),
     as_json: bool = typer.Option(
         False,
         "--json",
         help="Same as --output json (summary + events).",
     ),
-    output: Literal["text", "json"] = typer.Option(
+    output: Literal["text", "json", "markdown"] = typer.Option(
         "text",
         "--output",
-        help="text (default) or json.",
+        help="text (default), json (machine-readable), or markdown (paste-friendly stakeholder summary).",
     ),
 ) -> None:
     cli_log_dir = log_dir
@@ -234,16 +266,31 @@ def cmd_inspect(
     type_filters = _event_type_filters(event_type)
     note_kind_filters = parse_note_kind_filters(note_kind)
     finish_reason_filters = parse_finish_reason_filters(finish_reason)
+    tool_name_filters = parse_tool_name_filters(tool)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r} in {log_dir}", err=True)
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
+    use_json = as_json or output == "json"
+    if output == "markdown":
+        if (
+            type_filters is not None
+            or note_kind_filters is not None
+            or finish_reason_filters is not None
+            or tool_name_filters is not None
+        ):
+            raise typer.BadParameter(
+                "--output markdown summarizes the full run; omit --event-type, --note-kind, "
+                "--finish-reason, and --tool."
+            )
+        typer.echo(inspect_stakeholder_markdown(run_id, events))
+        return
     filtered = _filter_events_by_type(events, type_filters)
     filtered = _filter_events_by_note_kind(filtered, note_kind_filters, event_type_filters=type_filters)
     filtered = _filter_events_by_finish_reason(filtered, finish_reason_filters, event_type_filters=type_filters)
-    use_json = as_json or output == "json"
+    filtered = _filter_events_by_tool_name(filtered, tool_name_filters, event_type_filters=type_filters)
     if use_json:
         summary = event_summary(events)
         payload: dict[str, Any] = {
@@ -258,6 +305,8 @@ def cmd_inspect(
             payload["note_kind_filter"] = sorted(note_kind_filters)
         if finish_reason_filters is not None:
             payload["finish_reason_filter"] = sorted(finish_reason_filters)
+        if tool_name_filters is not None:
+            payload["tool_name_filter"] = sorted(tool_name_filters)
         typer.echo(json.dumps(payload, indent=2, default=str))
         return
     summary = event_summary(events)
@@ -268,7 +317,12 @@ def cmd_inspect(
     if isinstance(contract_sha256, str) and contract_sha256:
         typer.echo(f"workflow_contract_sha256={contract_sha256}")
     event_counts = f"events={len(events)}"
-    if type_filters is not None or note_kind_filters is not None or finish_reason_filters is not None:
+    if (
+        type_filters is not None
+        or note_kind_filters is not None
+        or finish_reason_filters is not None
+        or tool_name_filters is not None
+    ):
         event_counts += f" shown={len(filtered)}"
     typer.echo(
         (
@@ -287,7 +341,7 @@ def cmd_inspect(
     for e in filtered:
         typ = e.get("type")
         seq = e.get("seq")
-        typer.echo(f"{seq:04d}  {typ}")
+        typer.echo(f"{format_timeline_seq(seq)}  {typ}")
 
 
 def cmd_replay(
@@ -440,12 +494,12 @@ def cmd_validate(
     inputs_json: str | None = typer.Option(
         None,
         "--inputs-json",
-        help="Optional JSON object, validated as parseable only (same as dry-check).",
+        help="Optional JSON object, validated as parseable only (same as dry-check; @- reads stdin).",
     ),
     inputs_file: Path | None = typer.Option(
         None,
         "--inputs-file",
-        help="Inputs JSON file (mutually exclusive with --inputs-json).",
+        help="Inputs JSON file or `-` for stdin (mutually exclusive with --inputs-json).",
     ),
     input_value: list[str] | None = typer.Option(
         None,

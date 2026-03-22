@@ -18,12 +18,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
-# Ralph-style pipeline: archetype ideation (x12), then design-fidelity gate, review, remediation, doc tone.
-# Each feat_* skill voices one developer archetype; together they replace the old createfeatures
-# monolith. The shared rejection blocklist (.cursor/skills/REJECTION_BLOCKLIST.md) prevents
-# duplicate/rejected ideas from being re-proposed across runs.
-# review_design_fidelity audits new code against the 7 design principles and SCOPE.md, then fixes
-# violations, acting as a guardrail before general review and doc cleanup.
+# Default order: twelve feat_* skills, then review_design_fidelity, improvedoc, deslopdoc, reviewcodebase.
+# Each feat_* skill takes one developer archetype; together they replace the old createfeatures monolith.
+# .cursor/skills/REJECTION_BLOCKLIST.md records rejected ideas so skills do not repeat them.
+# review_design_fidelity checks new code against the seven design principles and SCOPE.md and fixes drift
+# before the broader review and doc passes.
 DEFAULT_SKILLS = (
     "feat_staff_engineer",
     "feat_junior_onboarding",
@@ -50,7 +49,7 @@ DEFAULT_TASK = (
     "feat_agent_harness_engineer), then review_design_fidelity (audit "
     "new code against the 7 design principles and SCOPE.md, fix violations), then improvedoc "
     "(docs and repo improvements), deslopdoc (de-AI / humanize documentation), reviewcodebase "
-    "(comprehensive review plus apply fixes in-repo). Each feat_* skill reads "
+    "(full repo review with fixes applied in-tree). Each feat_* skill reads "
     ".cursor/skills/REJECTION_BLOCKLIST.md to avoid re-proposing rejected ideas. Apply changes "
     "directly in the working tree, keep CHANGELOG.md updated under Unreleased, and leave the "
     "workspace ready for the outer release loop to bump the patch version, create the tag, and "
@@ -76,6 +75,31 @@ LOG_BANNER_USAGE_RETRY = "--- skill_release_loop: retry after Codex usage-limit 
 LOG_BANNER_RESUME = "--- skill_release_loop: resume ---"
 # Written beside each *.prompt.md so harnesses can read the resolved contract without parsing Markdown.
 SKILL_INVOCATION_SCHEMA = "replayt.skill_invocation.v1"
+
+SKILL_LOOP_MAIN_INJECTED_ENV_KEYS: tuple[str, ...] = (
+    "REPO_ROOT",
+    "SKILL_ITERATION",
+    "SKILL_LOG_FILE",
+    "SKILL_MAX_ITERATIONS",
+    "SKILL_NAME",
+    "SKILL_PATH",
+    "SKILL_PROMPT_FILE",
+    "SKILL_REQUESTED_NAME",
+    "SKILL_ROOT",
+    "SKILL_RUN_DIR",
+    "SKILL_TASK",
+)
+SKILL_LOOP_FIX_INJECTED_ENV_KEYS: tuple[str, ...] = (
+    "REPO_ROOT",
+    "SKILL_ITERATION",
+    "SKILL_LOG_FILE",
+    "SKILL_MAX_ITERATIONS",
+    "SKILL_NAME",
+    "SKILL_PROMPT_FILE",
+    "SKILL_ROOT",
+    "SKILL_RUN_DIR",
+    "SKILL_TASK",
+)
 
 
 class LoopError(RuntimeError):
@@ -109,6 +133,8 @@ def write_skill_invocation_json(
     skill_name: str,
     skill_path: str,
     log_file: str,
+    run_dir: str,
+    injected_env_keys: tuple[str, ...],
     iteration: int,
     max_iterations: int,
     task: str,
@@ -124,6 +150,8 @@ def write_skill_invocation_json(
         "skill_path": skill_path,
         "prompt_file": str(prompt_path.resolve()),
         "log_file": str(Path(log_file).resolve()),
+        "run_dir": run_dir,
+        "injected_env_keys": sorted(injected_env_keys),
         "iteration": iteration,
         "max_iterations": max_iterations,
         "task": task,
@@ -235,7 +263,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Codex usage-limit auto-wait is off by default here; pass --wait-on-codex-usage-limit when your "
             "--skill-command runs OpenAI Codex.\n"
             "--skill-command runs once per skill and can use placeholders:\n"
-            "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {repo} {iteration} {max_iterations}\n"
+            "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {run_dir}\n"
+            "  {repo} {iteration} {max_iterations}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
             "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
             "Progress: prints configuration, a decision-tree summary, each command and log path, streamed "
@@ -250,8 +279,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "for preflight only). "
             "Logs from older runs without that footer are not skipped (re-run) unless you append "
             "`### skill_release_loop: exit_code=0` to finished skill logs manually.\n"
-            "Pre-tag CI: after the release commit, verify_github_action may run with fix/retry rounds "
-            "(see --pre-tag-github-ci-max-fix-attempts).\n"
+            "Default check #3 and pre-tag both run verify_github_action.py with --require-gh unless you pass "
+            "--no-github-ci-verify-require-gh (so missing gh fails instead of skipping remote CI). "
+            "Pre-tag failures run --skill-command fix/amend rounds (see --pre-tag-github-ci-max-fix-attempts).\n"
             "External monitor: updates .replayt/skill-release/current.json and <run-dir>/status.json (heartbeat "
             "while subprocesses run; see --status-interval)."
         ),
@@ -349,6 +379,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             "If pre-tag GitHub Actions verification fails after the release commit, run --skill-command to fix "
             "and amend that commit, then retry (default: 3). Use 0 to fail on the first verification failure."
+        ),
+    )
+    parser.add_argument(
+        "--github-ci-verify-require-gh",
+        dest="github_ci_verify_require_gh",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help=(
+            "For default verify_github_action.py commands (check pipeline and pre-tag gate), pass --require-gh so a "
+            "missing GitHub CLI fails the step instead of exiting 0 without running remote CI (default: on). "
+            "Use --no-github-ci-verify-require-gh when gh is unavailable."
         ),
     )
     parser.add_argument(
@@ -540,19 +581,21 @@ def default_skill_command(_repo: Path) -> str:
     )
 
 
-def default_pre_tag_github_ci_command(repo: Path) -> str:
+def github_ci_verify_command(repo: Path, *, require_gh: bool) -> str:
     python_exe = quote_for_shell(str(repo_python(repo)))
     verify_script = quote_for_shell(str(repo / "scripts" / "verify_github_action.py"))
+    if require_gh:
+        return f"{python_exe} {verify_script} --require-gh"
     return f"{python_exe} {verify_script}"
 
 
-def default_check_commands(repo: Path) -> list[str]:
+def default_check_commands(repo: Path, *, github_ci_require_gh: bool) -> list[str]:
     python_exe = quote_for_shell(str(repo_python(repo)))
     ruff_exe = repo_ruff(repo)
     return [
         f"{ruff_exe} check src tests scripts",
         f"{python_exe} -m pytest",
-        default_pre_tag_github_ci_command(repo),
+        github_ci_verify_command(repo, require_gh=github_ci_require_gh),
     ]
 
 
@@ -640,6 +683,7 @@ def describe_skill_env_snippet(env: dict[str, str], *, task_max: int = 160) -> s
         "SKILL_ITERATION",
         "SKILL_PROMPT_FILE",
         "SKILL_LOG_FILE",
+        "SKILL_RUN_DIR",
     )
     lines = [f"{k}={env.get(k, '')}" for k in keys]
     task = env.get("SKILL_TASK", "")
@@ -971,6 +1015,7 @@ def run_skill_iteration(
         env = os.environ.copy()
         repo_resolved = str(repo.resolve())
         skill_root_resolved = str((repo / args.skill_root).resolve())
+        run_dir_resolved = str(run_dir.resolve())
         write_skill_invocation_json(
             prompt_path=prompt_path,
             repo_root=repo_resolved,
@@ -978,6 +1023,8 @@ def run_skill_iteration(
             skill_name=skill.name,
             skill_path=str(skill.path),
             log_file=str(log_path),
+            run_dir=run_dir_resolved,
+            injected_env_keys=SKILL_LOOP_MAIN_INJECTED_ENV_KEYS,
             iteration=iteration,
             max_iterations=args.max_iterations,
             task=args.task,
@@ -1000,6 +1047,7 @@ def run_skill_iteration(
                 "SKILL_ITERATION": str(iteration),
                 "SKILL_MAX_ITERATIONS": str(args.max_iterations),
                 "SKILL_TASK": args.task,
+                "SKILL_RUN_DIR": run_dir_resolved,
             }
         )
         augment_env_path_for_cursor_agent(env, args)
@@ -1011,6 +1059,7 @@ def run_skill_iteration(
                 "skill_root": skill_root_resolved,
                 "prompt_file": str(prompt_path),
                 "log_file": str(log_path),
+                "run_dir": run_dir_resolved,
                 "repo": str(repo),
                 "iteration": str(iteration),
                 "max_iterations": str(args.max_iterations),
@@ -1227,6 +1276,7 @@ def run_checks(
                 "Apply repository changes directly in the working tree. Do not commit, tag, or push."
             )
             fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
+            run_dir_resolved = str(run_dir.resolve())
             write_skill_invocation_json(
                 prompt_path=fix_prompt_path,
                 repo_root=str(repo.resolve()),
@@ -1234,6 +1284,8 @@ def run_checks(
                 skill_name="fix_check",
                 skill_path="fix_check",
                 log_file=str(fix_log_path),
+                run_dir=run_dir_resolved,
+                injected_env_keys=SKILL_LOOP_FIX_INJECTED_ENV_KEYS,
                 iteration=iteration,
                 max_iterations=args.max_iterations,
                 task="Fix the failing check.",
@@ -1247,6 +1299,7 @@ def run_checks(
                     "skill_root": str((repo / args.skill_root).resolve()),
                     "prompt_file": str(fix_prompt_path),
                     "log_file": str(fix_log_path),
+                    "run_dir": run_dir_resolved,
                     "repo": str(repo),
                     "iteration": str(iteration),
                     "max_iterations": str(args.max_iterations),
@@ -1265,6 +1318,7 @@ def run_checks(
                     "SKILL_ITERATION": str(iteration),
                     "SKILL_MAX_ITERATIONS": str(args.max_iterations),
                     "SKILL_TASK": "Fix the failing check.",
+                    "SKILL_RUN_DIR": run_dir_resolved,
                 }
             )
             augment_env_path_for_cursor_agent(fix_env, args)
@@ -1610,6 +1664,7 @@ def run_pre_tag_github_ci_with_fixes(
             "Apply repository changes directly in the working tree. Do not commit, tag, or push."
         )
         fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
+        run_dir_resolved = str(run_dir.resolve())
         write_skill_invocation_json(
             prompt_path=fix_prompt_path,
             repo_root=str(repo.resolve()),
@@ -1617,6 +1672,8 @@ def run_pre_tag_github_ci_with_fixes(
             skill_name="fix_pre_tag_ci",
             skill_path="fix_pre_tag_ci",
             log_file=str(fix_log_path),
+            run_dir=run_dir_resolved,
+            injected_env_keys=SKILL_LOOP_FIX_INJECTED_ENV_KEYS,
             iteration=passed_iteration,
             max_iterations=args.max_iterations,
             task="Fix the failure so pre-tag GitHub Actions verification passes.",
@@ -1630,6 +1687,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "skill_root": str((repo / args.skill_root).resolve()),
                 "prompt_file": str(fix_prompt_path),
                 "log_file": str(fix_log_path),
+                "run_dir": run_dir_resolved,
                 "repo": str(repo),
                 "iteration": str(passed_iteration),
                 "max_iterations": str(args.max_iterations),
@@ -1648,6 +1706,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "SKILL_ITERATION": str(passed_iteration),
                 "SKILL_MAX_ITERATIONS": str(args.max_iterations),
                 "SKILL_TASK": "Fix the failure so pre-tag GitHub Actions verification passes.",
+                "SKILL_RUN_DIR": run_dir_resolved,
             }
         )
         augment_env_path_for_cursor_agent(fix_env, args)
@@ -1711,7 +1770,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         setattr(args, "cursor_agent_executable", None)
     if args.checks is None:
-        args.checks = default_check_commands(repo)
+        args.checks = default_check_commands(repo, github_ci_require_gh=args.github_ci_verify_require_gh)
     skills = [load_skill(skill_root, name) for name in args.skills]
     skill_names = [s.name for s in skills]
 
@@ -1787,6 +1846,7 @@ def _main_run(
         f"max waits per skill: {args.usage_limit_max_waits_per_skill}"
     )
     progress_line(f"Skill command template:\n  {args.skill_command}")
+    progress_line(f"Default GitHub Actions verify passes --require-gh: {args.github_ci_verify_require_gh}")
     for i, check_cmd in enumerate(args.checks, start=1):
         progress_line(f"Check {i} template:\n  {check_cmd}")
 
@@ -1820,6 +1880,7 @@ def _main_run(
         usage_limit_sleep_buffer_seconds=args.usage_limit_sleep_buffer_seconds,
         usage_limit_max_waits_per_skill=args.usage_limit_max_waits_per_skill,
         resume=args.resume is not None,
+        github_ci_verify_require_gh=args.github_ci_verify_require_gh,
     )
 
     progress_banner("Skill/check loop")
@@ -1921,12 +1982,13 @@ def _main_run(
         progress_banner("Pre-tag GitHub Actions CI")
         pre_tag_log = run_dir / f"pre-tag-iter-{passed_iteration:02d}-github-ci.log"
         verify_cmd = render_command(
-            default_pre_tag_github_ci_command(repo),
+            github_ci_verify_command(repo, require_gh=args.github_ci_verify_require_gh),
             {"repo": str(repo), "iteration": str(passed_iteration)},
         )
         gate_env = os.environ.copy()
         _inject_git_safe_directory(gate_env, str(repo))
         gate_env["REPO_ROOT"] = str(repo)
+        augment_env_path_for_cursor_agent(gate_env, args)
         run_pre_tag_github_ci_with_fixes(
             repo, args, run_dir, passed_iteration, tracker, verify_cmd, pre_tag_log, gate_env
         )

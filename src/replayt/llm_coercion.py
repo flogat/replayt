@@ -205,3 +205,28 @@ def coerce_max_tokens_for_api(value: Any) -> int | None:
             raise ValueError("max_tokens must be a finite number")
         return max(0, int(round(x)))
     raise TypeError(f"max_tokens must be numeric or numeric string, got {type(value).__name__}")
+
+
+def coerce_llm_response_format(value: Any, *, max_json_chars: int = 250_000) -> dict[str, Any] | None:
+    """Normalize OpenAI-style ``response_format`` for ``/chat/completions``.
+
+    ``None`` or ``{}`` after normalization means omit the field. Values must be JSON-serializable.
+    Serialized size is capped (same order of magnitude as embedded parse schemas) so logs stay bounded.
+    """
+
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise TypeError(f"response_format must be a dict[str, Any], got {type(value).__name__}")
+    try:
+        normalized: dict[str, Any] = json.loads(json.dumps(value, default=str))
+    except (TypeError, ValueError) as exc:
+        raise TypeError(f"response_format must be JSON-serializable: {exc}") from exc
+    if not normalized:
+        return None
+    canonical = json.dumps(normalized, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
+    if len(canonical) > max_json_chars:
+        raise ValueError(
+            f"response_format JSON serializes to {len(canonical)} characters, above max_json_chars ({max_json_chars})"
+        )
+    return normalized

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import re
 from pathlib import Path
 from typing import Any
 
@@ -15,6 +16,61 @@ from replayt.yaml_workflow import load_workflow_yaml, workflow_from_spec
 
 def _workflow_objects(obj: Any) -> list[tuple[str, Workflow]]:
     return [(name, value) for name, value in vars(obj).items() if isinstance(value, Workflow)]
+
+
+# Dotted Python module path without ":" — common first-hour mistake (MODULE:VAR).
+_DOTTED_MODULEISH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
+
+
+def _looks_like_dotted_module_target(target: str) -> bool:
+    if not target or "/" in target or "\\" in target:
+        return False
+    return _DOTTED_MODULEISH.fullmatch(target) is not None
+
+
+def _is_windows_drive_path_target(target: str) -> bool:
+    """True for ``C:\\...`` / ``C:/...`` so the drive letter colon is not treated as MODULE:VAR."""
+
+    if len(target) < 3:
+        return False
+    return target[0].isalpha() and target[1] == ":" and target[2] in "/\\"
+
+
+def _target_path_not_found_message(target: str, path: Path) -> str:
+    """Explain missing targets with copy-paste fixes (junior onboarding)."""
+
+    base = (
+        f"Expected a MODULE:VAR target, a `.py` / `.yaml` workflow path, or `replayt try` to copy an example; "
+        f"nothing exists at {path!r}."
+    )
+    if _looks_like_dotted_module_target(target):
+        return (
+            f"{base} If you meant a Python module, put a colon before the workflow variable "
+            f"(for example: `replayt run {target}:wf`). "
+            f"Run `replayt doctor --skip-connectivity --target {target}:wf` after imports work."
+        )
+    # Only append extensions when *target* has no pathlib-style suffix, otherwise
+    # `replayt_examples.e01_hello_world` would wrongly become `replayt_examples.py`.
+    if not path.suffix:
+        py_sibling = path.parent / f"{path.name}.py"
+        yml_sibling = path.parent / f"{path.name}.yml"
+        yaml_sibling = path.parent / f"{path.name}.yaml"
+        if py_sibling.is_file():
+            return (
+                f"{base} `{py_sibling.name}` exists here — pass that path "
+                f"(for example: `replayt run {py_sibling}`) or set `target` in `.replaytrc.toml`."
+            )
+        if yml_sibling.is_file():
+            return (
+                f"{base} `{yml_sibling.name}` exists here — pass that path "
+                f"(for example: `replayt run {yml_sibling}`) or set `target` in `.replaytrc.toml`."
+            )
+        if yaml_sibling.is_file():
+            return (
+                f"{base} `{yaml_sibling.name}` exists here — pass that path "
+                f"(for example: `replayt run {yaml_sibling}`) or set `target` in `.replaytrc.toml`."
+            )
+    return base
 
 
 def _python_file_import_bad_parameter(path: Path, exc: ModuleNotFoundError) -> typer.BadParameter:
@@ -120,7 +176,7 @@ def load_target(target: str) -> Workflow:
             obj = load_python_file(path)
         else:
             obj = workflow_from_spec(load_workflow_yaml(path))
-    elif ":" in target:
+    elif ":" in target and not _is_windows_drive_path_target(target):
         mod_name, attr = target.split(":", 1)
         try:
             mod = importlib.import_module(mod_name)
@@ -139,10 +195,16 @@ def load_target(target: str) -> Workflow:
         obj = getattr(mod, attr)
     else:
         if not path.exists():
+            raise typer.BadParameter(_target_path_not_found_message(target, path))
+        if path.is_dir():
             raise typer.BadParameter(
-                f"Expected MODULE:VAR, workflow.py, or workflow.yaml target; path was not found: {path}"
+                f"Target {path!r} is a directory. Pass a `.py` or `.yaml` workflow file, "
+                "or a MODULE:VAR target such as `my_pkg.workflow:wf`."
             )
-        raise typer.BadParameter("Target must be MODULE:VAR, .py, .yaml, or .yml")
+        raise typer.BadParameter(
+            f"Target {path!r} is not a supported workflow file. "
+            "Use a `.py` or `.yaml` / `.yml` path, or MODULE:VAR (for example `replayt_examples.e01_hello_world:wf`)."
+        )
     if not isinstance(obj, Workflow):
         raise typer.BadParameter(f"{target} did not resolve to a replayt.workflow.Workflow")
     return obj

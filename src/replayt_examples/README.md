@@ -62,6 +62,14 @@ replayt run --dry-run --inputs-file inputs.example.json
 
 An explicit **`TARGET` positional argument always overrides** the default. Check what applies in your shell with **`replayt config --format json`** (`run.default_target`, `run.default_target_source`). **`replayt resume`**, **`replayt validate`**, **`replayt graph`**, and **`replayt contract`** still require a target on the command line (or **`doctor --target`** for preflight only).
 
+### Common `TARGET` mistakes (first hour)
+
+`replayt run` accepts **`module:variable`**, a trusted **`.py` / `.yaml`** path, or a default from **`REPLAYT_TARGET`** / project config. A dotted import path without a colon is not a valid target: use **`replayt_examples.e01_hello_world:wf`**, not the module alone. If you meant a local file, include the extension when **`workflow.py`** exists beside you. On Windows, absolute paths like **`C:\path\to\workflow.py`** stay filesystem paths (the drive-letter colon is not read as **`MODULE:VAR`**). replayt does not download workflow code from arbitrary URLs or fuzzy-guess misspelled module names; vendor or pin workflows as normal Python packages or checked-in files, use shell or IDE completion, and discover packaged keys with **`replayt try --list`**.
+
+```bash
+replayt doctor --skip-connectivity --target replayt_examples.e01_hello_world:wf
+```
+
 ### Default inputs file for `replayt run` / `replayt ci` / `validate`
 
 When you always pass the same **`inputs.example.json`**, set **`REPLAYT_INPUTS_FILE=inputs.example.json`** (or an absolute path) in your environment, or add **`inputs_file = "inputs.example.json"`** under **`[tool.replayt]`**. `replayt init` and `replayt try --copy-to` already wire this into the generated `.replaytrc.toml`. Then you can shorten:
@@ -119,6 +127,16 @@ Some teams ask for **`replayt config --strict`** that exits non-zero when **`[to
 replayt config --format json | python -c "import json,sys; d=json.load(sys.stdin)['project_config']; u=d.get('unknown_keys') or []; m=d.get('min_replayt_version'); sat=d.get('min_replayt_version_satisfied', True); bad=bool(u) or (m is not None and not sat); sys.exit(1 if bad else 0)"
 ```
 
+### Beyond core: immutable log volumes (WORM-style retention)
+
+Some compliance programs want **write-once** run logs: OS immutable bits, S3 Object Lock, GCS retention policies, or air-gapped tape. replayt does **not** toggle **`chattr`**, object-lock legal holds, or cloud retention APIs from **`Runner.run`**: the right enforcement depends on your filesystem, cloud account, and records program. Treat JSONL as normal files under **`.replayt/runs`**, then **seal** and **ship** to storage your legal team blesses. Use **`forbid_log_mode_full = true`** or **`REPLAYT_FORBID_LOG_MODE_FULL=1`** when archives must not contain raw LLM bodies (see [`docs/CONFIG.md`](../../docs/CONFIG.md)).
+
+```bash
+replayt seal "$RUN_ID" --log-dir .replayt/runs --out "runs/${RUN_ID}.seal.json"
+replayt verify-seal "$RUN_ID" --log-dir .replayt/runs
+# Then upload runs/ to your WORM bucket or vault with your org's tooling.
+```
+
 ### Beyond core: enforce `.env` permissions in CI
 
 replayt inspects **`.env`** mode bits (never file contents) for **`trust_dotenv_other_readable`** / **`trust_dotenv_other_writable`** in **`replayt doctor`** and **`replayt config --format json`** on POSIX. Core does **not** refuse to run when a file is too permissive; teams with shared checkouts or loose umask values would churn. Treat weak modes as a **release gate** instead: fail CI when those doctor checks are not ok, or assert mode bits with `stat` / `ls -l` in your pipeline. Loading **`.env`** stays **your** responsibility. Do not expect **`Runner.run`** to call **python-dotenv** implicitly.
@@ -142,10 +160,14 @@ pip-audit -r requirements.txt  # example; use your org's scanner and inputs
 
 ### Beyond core: MCP servers wrap the CLI
 
-**Model Context Protocol** hosts expect stable tool contracts, explicit argv, and parseable errors. replayt stays a **CLI + library**, not an MCP runtime: implement tools in **your** server that call **`replayt`** as a subprocess with a fixed allowlist (for example only **`inspect`**, **`runs`**, **`verify-seal`** in production). Use **`--output json`** / **`--format json`** and map **`schema`** fields to the ids advertised under **`cli_machine_readable_schemas`** from **`replayt version --format json`**. Respect exit codes: **`0`** success, **`1`** user or verification errors on read-only commands, **`2`** approval pause on **`replayt run`** / **`replayt ci`** only.
+**Model Context Protocol** hosts expect stable tool contracts, explicit argv, and parseable errors. replayt stays a **CLI + library**, not an MCP runtime: implement tools in **your** server that call **`replayt`** as a subprocess with a fixed allowlist (for example only **`inspect`**, **`runs`**, **`verify-seal`** in production). Use **`--output json`** / **`--format json`** and map **`schema`** fields to the ids advertised under **`cli_machine_readable_schemas`** from **`replayt version --format json`**. When you implement **`run_hook`**, **`resume_hook`**, or export/seal/verify hooks yourself, read **`policy_hook_env_catalog`** from the same JSON so your wrapper asserts the full set of injected **`REPLAYT_*`** names (optional keys may be absent on a given invocation) and matches **`subprocess_stdin`**: **`devnull`**. Respect exit codes: **`0`** success, **`1`** user or verification errors on read-only commands, **`2`** approval pause on **`replayt run`** / **`replayt ci`** only.
 
 ```bash
 replayt version --format json | python -c "import json,sys; print(json.load(sys.stdin)['cli_machine_readable_schemas']['verify_seal_report'])"
+```
+
+```bash
+replayt version --format json | python -c "import json,sys; d=json.load(sys.stdin)['policy_hook_env_catalog']['hooks']['run_hook']; print(d['argv_env'], len(d['injected_env_vars']))"
 ```
 
 ```python
@@ -195,6 +217,14 @@ def sdk_extras(ctx):
 ```
 
 See **Pattern: OpenAI Python SDK inside a step** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md) for the full shape.
+
+### Beyond core: logit_bias, schema codegen, and parse contracts
+
+**`logit_bias`** and other token-index maps are the same boundary as logprobs: keep **`LLMBridge`** on the shared OpenAI-compat surface. When your proxy accepts them, attach a small JSON object via **`ctx.llm.with_settings(..., extra_body={"logit_bias": {...}})`** so the values still appear under **`effective`**; otherwise call the vendor SDK inside one step (**Beyond core: logprobs and vendor-only chat fields** above). For structured outputs, replayt does **not** infer schemas from arbitrary example JSON inside **`parse`**; ship an explicit **`class Out(BaseModel): ...`** (hand-written or generated once) so reviewers can diff contracts in git. A common one-off is to generate models from JSON Schema you already trust:
+
+```bash
+datamodel-codegen --input schema.json --output mymodels.py
+```
 
 **Composition patterns** (copy the names into EXAMPLES_PATTERNS search):
 
@@ -291,7 +321,7 @@ Each **`ctx.tools.call(...)`** still emits normal **`tool_call`** / **`tool_resu
 replayt runs --tool search_repo --tool fetch_url --limit 50
 ```
 
-Pair with **`replayt inspect RUN_ID --event-type tool_call`** when you only want those events from one run.
+Use **`replayt inspect RUN_ID --tool search_repo`** (repeat for OR) to list only matching **`tool_call`** lines from one run, or **`--event-type tool_call`** when you want every tool invocation regardless of name.
 
 ### Finding runs that logged a structured output schema
 
@@ -387,7 +417,7 @@ The workflow has three stages, but only two state handlers do real work:
 - `normalize` trims whitespace, title-cases the name, lowercases the email, compresses message spacing, and derives a `segment`.
 - `done` ends the run.
 
-replayt is not only for LLM calls: deterministic steps you want to inspect later use the same model.
+Deterministic steps you want to inspect later do not need an LLM; they use the same run log and replay model.
 
 ### What to run
 Validate a raw lead payload, normalize formatting, and derive an internal segment.
