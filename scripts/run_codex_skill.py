@@ -103,6 +103,7 @@ def ensure_codex_installed() -> Path:
         ["npm", "install", "--prefix", str(install_root), "@openai/codex"],
         check=True,
         cwd=repo_root(),
+        stdin=subprocess.DEVNULL,
     )
     if not binary.exists():
         raise RuntimeError(f"Codex CLI install completed but binary was not found at {binary}")

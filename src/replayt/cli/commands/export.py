@@ -51,6 +51,8 @@ def _maybe_invoke_export_hook(
     out: Path,
     seal: bool,
     event_count: int,
+    events: list[dict[str, Any]],
+    cli_target: str | None = None,
     report_style: str | None = None,
 ) -> dict[str, Any] | None:
     cfg, _, _ = get_project_config()
@@ -70,6 +72,8 @@ def _maybe_invoke_export_hook(
             seal=seal,
             event_count=event_count,
             report_style=report_style,
+            workflow_contract=_policy_workflow_contract_from_events(events),
+            cli_target=cli_target,
             timeout_seconds=hook_timeout,
         )
     except subprocess.TimeoutExpired as exc:
@@ -99,6 +103,7 @@ def _maybe_invoke_seal_hook(
     if not hook:
         return None
     hook_timeout = seal_hook_timeout_seconds(cfg)
+    workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
     try:
         invoke_seal_hook(
             hook,
@@ -107,6 +112,7 @@ def _maybe_invoke_seal_hook(
             jsonl_path=jsonl_path,
             seal_out=seal_out,
             line_count=line_count,
+            workflow_contract=workflow_contract,
             timeout_seconds=hook_timeout,
         )
     except subprocess.TimeoutExpired as exc:
@@ -138,6 +144,7 @@ def _maybe_invoke_verify_seal_hook(
     if not hook:
         return
     hook_timeout = verify_seal_hook_timeout_seconds(cfg)
+    workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
     try:
         invoke_verify_seal_hook(
             hook,
@@ -148,6 +155,7 @@ def _maybe_invoke_verify_seal_hook(
             manifest_schema=manifest_schema,
             line_count=line_count,
             file_sha256=file_sha256,
+            workflow_contract=workflow_contract,
             timeout_seconds=hook_timeout,
         )
     except subprocess.TimeoutExpired as exc:
@@ -207,6 +215,52 @@ def _export_run_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
         "attention_summary": attention["attention_summary"],
         "pending_approvals": attention["pending_approvals"],
     }
+
+
+def _policy_workflow_contract_from_events(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Contract-shaped dict for policy-hook env (digest + name/version from ``run_started``)."""
+
+    for event in events:
+        if event.get("type") != "run_started":
+            continue
+        payload = event.get("payload") or {}
+        if not isinstance(payload, dict):
+            continue
+        name = payload.get("workflow_name")
+        ver = payload.get("workflow_version")
+        runtime = payload.get("runtime") or {}
+        wf_rt = runtime.get("workflow") if isinstance(runtime, dict) else None
+        digest = wf_rt.get("contract_sha256") if isinstance(wf_rt, dict) else None
+        wf: dict[str, Any] = {}
+        if name is not None:
+            wf["name"] = name
+        if ver is not None:
+            wf["version"] = ver
+        return {
+            "contract_sha256": digest if isinstance(digest, str) else None,
+            "workflow": wf,
+        }
+    return {"contract_sha256": None, "workflow": {}}
+
+
+def _policy_workflow_contract_from_jsonl_path(path: Path) -> dict[str, Any]:
+    """First ``run_started`` line in a JSONL file (standalone ``seal`` / ``verify-seal``)."""
+
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return {"contract_sha256": None, "workflow": {}}
+    for line in text.splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        try:
+            event = json.loads(s)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict) and event.get("type") == "run_started":
+            return _policy_workflow_contract_from_events([event])
+    return {"contract_sha256": None, "workflow": {}}
 
 
 def _workflow_contract_snapshot(
@@ -586,6 +640,8 @@ def cmd_export_run(
         out=out,
         seal=seal,
         event_count=len(events),
+        events=events,
+        cli_target=target,
     )
     lines = events_to_jsonl_lines(events, lm)
     bundle = b"".join(lines)
@@ -702,6 +758,8 @@ def cmd_bundle_export(
         out=out,
         seal=seal,
         event_count=len(events),
+        events=events,
+        cli_target=target,
         report_style=report_style,
     )
     report_html = build_run_report_html(run_id, events, style=report_style)

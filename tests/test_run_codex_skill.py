@@ -43,6 +43,30 @@ def test_resolve_skill_root_prefers_cli_flag_over_env(tmp_path: Path, monkeypatc
     assert mod.resolve_skill_root(str(explicit_root)) == explicit_root.resolve()
 
 
+def test_ensure_codex_installed_uses_stdin_devnull_for_npm(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    binary = tmp_path / "bin" / "codex"
+    captured: dict[str, object] = {}
+
+    monkeypatch.setattr(mod, "repo_root", lambda: repo)
+    monkeypatch.setattr(mod, "codex_binary_path", lambda: binary)
+
+    def fake_run(cmd, **kwargs):
+        captured["cmd"] = list(cmd)
+        captured["kwargs"] = kwargs
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.write_bytes(b"")
+        return subprocess.CompletedProcess(cmd, 0, "", "")
+
+    monkeypatch.setattr(mod.subprocess, "run", fake_run)
+
+    assert mod.ensure_codex_installed() == binary
+    assert captured["cmd"][:2] == ["npm", "install"]
+    assert captured["kwargs"].get("stdin") is subprocess.DEVNULL
+
+
 def test_resolve_skill_root_rejects_missing_or_non_directory(tmp_path: Path, monkeypatch) -> None:
     mod = _load_script()
     repo = tmp_path / "repo"

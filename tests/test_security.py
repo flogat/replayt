@@ -7,11 +7,14 @@ from unittest.mock import MagicMock
 
 import pytest
 
+from replayt.cli.config import inputs_file_trust_audit_paths
+from replayt.cli.targets import workflow_trust_audit_paths
 from replayt.security import (
     approval_reason_missing,
     dotenv_permission_trust_checks,
     dotenv_trust_candidate_paths,
     extraneous_llm_credential_env_names,
+    inputs_file_permission_trust_checks,
     llm_credential_env_presence,
     log_directory_permission_trust_checks,
     missing_actor_fields,
@@ -19,6 +22,7 @@ from replayt.security import (
     redact_named_fields,
     sanitize_base_url_for_output,
     trust_boundary_checks,
+    workflow_entrypoint_permission_trust_checks,
 )
 from replayt.types import LogMode
 
@@ -308,3 +312,139 @@ def test_extraneous_llm_credential_env_names_lists_non_openai(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GROQ_API_KEY", "k")
     assert extraneous_llm_credential_env_names() == ("GROQ_API_KEY",)
+
+
+def test_workflow_entrypoint_permission_trust_checks_empty_on_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    wf = tmp_path / "w.py"
+    wf.write_text("x = 1\n", encoding="utf-8")
+    monkeypatch.setattr(os, "name", "nt")
+    assert workflow_entrypoint_permission_trust_checks([wf]) == []
+
+
+def test_workflow_entrypoint_permission_trust_checks_ok_for_restrictive_mode(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    wf = tmp_path / "w.py"
+    wf.write_text("x = 1\n", encoding="utf-8")
+    wf.chmod(0o600)
+    names = {c.name: c for c in workflow_entrypoint_permission_trust_checks([wf])}
+    assert names["trust_workflow_entry_group_readable"].ok is True
+    assert names["trust_workflow_entry_group_writable"].ok is True
+    assert names["trust_workflow_entry_other_readable"].ok is True
+    assert names["trust_workflow_entry_other_writable"].ok is True
+
+
+def test_workflow_entrypoint_permission_trust_checks_warns_group_accessible(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    wf = tmp_path / "w.py"
+    wf.write_text("x = 1\n", encoding="utf-8")
+    wf.chmod(0o660)
+    names = {c.name: c for c in workflow_entrypoint_permission_trust_checks([wf])}
+    assert names["trust_workflow_entry_group_readable"].ok is False
+    assert names["trust_workflow_entry_group_writable"].ok is False
+    assert str(wf) in names["trust_workflow_entry_group_readable"].detail
+
+
+def test_workflow_entrypoint_permission_trust_checks_warns_via_mocked_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(os, "name", "posix")
+    wf = tmp_path / "w.py"
+    wf.write_text("x = 1\n", encoding="utf-8")
+
+    class _Stat:
+        st_mode = stat.S_IFREG | stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO
+
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr(Path, "resolve", lambda self: self)
+    monkeypatch.setattr(Path, "stat", lambda self: _Stat())
+
+    names = {c.name: c for c in workflow_entrypoint_permission_trust_checks([wf])}
+    assert names["trust_workflow_entry_group_readable"].ok is False
+    assert names["trust_workflow_entry_group_writable"].ok is False
+    assert names["trust_workflow_entry_other_readable"].ok is False
+    assert names["trust_workflow_entry_other_writable"].ok is False
+
+
+def test_workflow_trust_audit_paths_resolves_py_file(tmp_path: Path) -> None:
+    wf = tmp_path / "w.py"
+    wf.write_text("x = 1\n", encoding="utf-8")
+    paths = workflow_trust_audit_paths(str(wf))
+    assert paths == [wf.resolve()]
+
+
+def test_workflow_trust_audit_paths_resolves_module_file() -> None:
+    paths = workflow_trust_audit_paths("replayt.workflow:Workflow")
+    assert len(paths) == 1
+    assert paths[0].name == "workflow.py"
+    assert paths[0].is_file()
+
+
+def test_inputs_file_permission_trust_checks_empty_on_windows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    inp = tmp_path / "in.json"
+    inp.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(os, "name", "nt")
+    assert inputs_file_permission_trust_checks([inp]) == []
+
+
+def test_inputs_file_permission_trust_checks_ok_for_restrictive_mode(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    inp = tmp_path / "in.json"
+    inp.write_text("{}", encoding="utf-8")
+    inp.chmod(0o600)
+    names = {c.name: c for c in inputs_file_permission_trust_checks([inp])}
+    assert names["trust_inputs_file_group_readable"].ok is True
+    assert names["trust_inputs_file_group_writable"].ok is True
+    assert names["trust_inputs_file_other_readable"].ok is True
+    assert names["trust_inputs_file_other_writable"].ok is True
+
+
+def test_inputs_file_permission_trust_checks_warns_group_accessible(tmp_path: Path) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX mode bits only")
+    inp = tmp_path / "in.json"
+    inp.write_text("{}", encoding="utf-8")
+    inp.chmod(0o660)
+    names = {c.name: c for c in inputs_file_permission_trust_checks([inp])}
+    assert names["trust_inputs_file_group_readable"].ok is False
+    assert names["trust_inputs_file_group_writable"].ok is False
+    assert str(inp) in names["trust_inputs_file_group_readable"].detail
+
+
+def test_inputs_file_trust_audit_paths_skips_stdin_and_dedupes(tmp_path: Path) -> None:
+    inp = tmp_path / "in.json"
+    inp.write_text("{}", encoding="utf-8")
+    assert inputs_file_trust_audit_paths(default_inputs_file="-") == []
+    assert inputs_file_trust_audit_paths(default_inputs_file=None, explicit_inputs_file=Path("-")) == []
+    resolved = inp.resolve()
+    assert inputs_file_trust_audit_paths(
+        default_inputs_file=str(resolved),
+        explicit_inputs_file=inp,
+    ) == [resolved]
+
+
+def test_inputs_file_permission_trust_checks_warns_via_mocked_mode(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setattr(os, "name", "posix")
+    inp = tmp_path / "in.json"
+    inp.write_text("{}", encoding="utf-8")
+
+    class _Stat:
+        st_mode = stat.S_IFREG | stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO
+
+    monkeypatch.setattr(Path, "is_file", lambda self: True)
+    monkeypatch.setattr(Path, "resolve", lambda self: self)
+    monkeypatch.setattr(Path, "stat", lambda self: _Stat())
+
+    names = {c.name: c for c in inputs_file_permission_trust_checks([inp])}
+    assert names["trust_inputs_file_group_readable"].ok is False
+    assert names["trust_inputs_file_group_writable"].ok is False
+    assert names["trust_inputs_file_other_readable"].ok is False
+    assert names["trust_inputs_file_other_writable"].ok is False

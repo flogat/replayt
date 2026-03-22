@@ -26,12 +26,14 @@ def changed_files_vs_base(base_branch: str) -> list[str]:
         _git_command(repo, "fetch", "--depth=256", "origin", base_branch),
         check=False,
         capture_output=True,
+        stdin=subprocess.DEVNULL,
     )
     result = subprocess.run(
         _git_command(repo, "diff", "--name-only", f"origin/{base_branch}...HEAD"),
         check=True,
         capture_output=True,
         text=True,
+        stdin=subprocess.DEVNULL,
     )
     return [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
 

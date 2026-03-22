@@ -443,7 +443,11 @@ def test_llm_bridge_parse_rejects_oversized_response() -> None:
         state_getter=lambda: "parse",
     )
     huge = "x" * 101
-    with patch.object(bridge, "_request_text", return_value=(huge, {"model": "m"}, {})):
+    with patch.object(
+        bridge,
+        "_request_text",
+        return_value=(huge, {"model": "m"}, {}, {"latency_ms": 1, "usage": None, "finish_reason": None}),
+    ):
         with pytest.raises(ValueError, match="exceeds max_parse_response_chars"):
             bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
 
@@ -506,7 +510,12 @@ def test_llm_bridge_parse_success_emits_schema_and_request_fingerprints() -> Non
         log_mode=LogMode.full,
         state_getter=lambda: "parse",
     )
-    canned = {"choices": [{"message": {"content": '{"value": 7}'}}], "usage": {}}
+    canned = {
+        "id": "chatcmpl-parse-1",
+        "system_fingerprint": "fp_parse",
+        "choices": [{"message": {"content": '{"value": 7}'}, "finish_reason": "stop"}],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    }
 
     with patch.object(client, "chat_completions", return_value=canned):
         out = bridge.parse(Answer, messages=[{"role": "user", "content": "hi"}])
@@ -524,6 +533,11 @@ def test_llm_bridge_parse_success_emits_schema_and_request_fingerprints() -> Non
     assert structured["messages_sha256"] == req["messages_sha256"]
     assert structured["effective_sha256"] == req["effective_sha256"]
     assert structured["schema_sha256"] == req["schema_sha256"]
+    assert structured["usage"] == canned["usage"]
+    assert structured["finish_reason"] == "stop"
+    assert structured["latency_ms"] == resp["latency_ms"]
+    assert structured["chat_completion_id"] == "chatcmpl-parse-1"
+    assert structured["system_fingerprint"] == "fp_parse"
 
 
 def test_llm_bridge_parse_emits_structured_output_failed_on_validation_error() -> None:

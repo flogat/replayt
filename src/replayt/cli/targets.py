@@ -208,3 +208,42 @@ def load_target(target: str) -> Workflow:
     if not isinstance(obj, Workflow):
         raise typer.BadParameter(f"{target} did not resolve to a replayt.workflow.Workflow")
     return obj
+
+
+def workflow_trust_audit_paths(target: str) -> list[Path]:
+    """Resolve filesystem paths to audit for POSIX permission bits (no workflow execution).
+
+    Used by ``replayt doctor`` / ``replayt config`` trust reports: ``replayt run`` executes code from
+    the workflow entry file (Python path or the module's ``__file__``). Returns at most one path.
+    """
+
+    raw = str(target).strip()
+    if not raw:
+        return []
+    path = Path(raw)
+    looks_like_file = path.suffix in {".py", ".yaml", ".yml"} and path.is_file()
+    if looks_like_file:
+        try:
+            return [path.resolve()]
+        except OSError:
+            return []
+    if ":" in raw and not _is_windows_drive_path_target(raw):
+        mod_name, _attr = raw.split(":", 1)
+        mod_name = mod_name.strip()
+        if not mod_name:
+            return []
+        try:
+            mod = importlib.import_module(mod_name)
+        except ModuleNotFoundError:
+            return []
+        fn = getattr(mod, "__file__", None)
+        if not fn:
+            return []
+        p = Path(fn)
+        if not p.is_file() or p.suffix != ".py":
+            return []
+        try:
+            return [p.resolve()]
+        except OSError:
+            return []
+    return []

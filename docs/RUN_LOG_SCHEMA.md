@@ -35,7 +35,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `workflow.contract_schema`
 - `workflow.contract_sha256`: stable SHA-256 fingerprint of `Workflow.contract()` without re-running the workflow
 - `llm.client_class`
-- non-secret LLM settings such as `provider`, `base_url`, `model`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `extra_body_keys`, timeouts, and whether an API key was present
+- non-secret LLM settings such as `provider`, `base_url`, `model`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `extra_body_keys`, `http_retries`, timeouts, and whether an API key was present
 - `trust_boundary.warnings`: soft local-policy findings such as `log_mode=full` or a risky `OPENAI_BASE_URL`
 - `policy_hooks.run` / `policy_hooks.resume` (object, optional): compact CLI policy-hook breadcrumbs with `source`, `argv0`, and `arg_count` when trusted external gate subprocesses were configured for the run lifecycle
 
@@ -91,6 +91,11 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `messages_sha256` (string): same fingerprint as the triggering `llm_request`
 - `effective_sha256` (string): same fingerprint as the triggering `llm_request`
 - `schema_sha256` (string): stable SHA-256 fingerprint of the parse schema
+- `latency_ms` (integer): wall time for the provider round trip (same as the preceding `llm_response`)
+- `usage` (object or null): token accounting from the provider when present (same shape as on `llm_response`)
+- `finish_reason` (string or null): first choice `finish_reason` when the gateway returned one
+- `chat_completion_id` (string, optional): provider response `id` when returned (correlate with vendor dashboards without joining `llm_response`)
+- `system_fingerprint` (string, optional): provider fingerprint when returned
 
 ### `structured_output_failed`
 

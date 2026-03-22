@@ -491,6 +491,7 @@ def test_maintainer_checks_tmp_pass_skipping_public_api(tmp_path: Path) -> None:
     assert report["schema"] == "replayt.maintainer_checks.v1"
     assert report["ok"] is True
     assert report["checks"]["version_consistency"]["ok"] is True
+    assert report["checks"]["pyproject_pep621"]["ok"] is True
     assert report["checks"]["changelog_unreleased"]["ok"] is True
     assert report["checks"]["docs_index"]["ok"] is True
     assert report["checks"]["example_catalog"]["ok"] is True
@@ -626,6 +627,7 @@ def test_maintainer_checks_tmp_pass_with_public_api_snapshot(tmp_path: Path) -> 
     report = mod.maintainer_checks_report(tmp_path)
 
     assert report["ok"] is True
+    assert report["checks"]["pyproject_pep621"]["ok"] is True
     assert report["checks"]["public_api"]["ok"] is True
 
 
@@ -704,6 +706,7 @@ def test_maintainer_checks_main_all_skips_exits_2(capsys) -> None:
     code = mod.main(
         [
             "--skip-version",
+            "--skip-pyproject-pep621",
             "--skip-changelog",
             "--skip-docs-index",
             "--skip-example-catalog",
@@ -727,6 +730,20 @@ def test_maintainer_checks_real_repo_full() -> None:
     assert report["ok"] is True, report
 
 
+def test_pyproject_pep621_report_real_repo() -> None:
+    mod = _load_script("pyproject_pep621_replayt", "pyproject_pep621_report.py")
+    root = Path(__file__).resolve().parents[1]
+
+    report = mod.pyproject_pep621_report(root / "pyproject.toml")
+
+    assert report["ok"] is True, report
+    proj = report["project"]
+    assert isinstance(proj, dict)
+    assert proj["name"] == "replayt"
+    assert isinstance(proj["version"], str) and len(proj["version"]) > 0
+    assert "httpx" in " ".join(proj["dependencies"])
+
+
 def test_example_catalog_contract_real_repo_snapshot_matches() -> None:
     mod = _load_script("example_catalog_contract_replayt", "example_catalog_contract.py")
     root = Path(__file__).resolve().parents[1]
@@ -743,6 +760,105 @@ def test_public_api_report_real_repo_snapshot_matches() -> None:
     report = mod.check_snapshot(root / "docs" / "PUBLIC_API_CONTRACT.json")
 
     assert report["ok"] is True, report
+
+
+def test_pyproject_pep621_report_ok_minimal(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project]
+        name = "demo"
+        version = "1.0.0"
+        dependencies = ["httpx>=1", "pydantic>=2"]
+        [project.optional-dependencies]
+        dev = ["pytest>=8"]
+        """,
+    )
+    mod = _load_script("pyproject_pep621_ok", "pyproject_pep621_report.py")
+    report = mod.pyproject_pep621_report(tmp_path / "pyproject.toml")
+
+    assert report["schema"] == "replayt.pyproject_pep621_report.v1"
+    assert report["ok"] is True
+    proj = report["project"]
+    assert isinstance(proj, dict)
+    assert proj["name"] == "demo"
+    assert proj["version"] == "1.0.0"
+    assert proj["dependencies"] == ["httpx>=1", "pydantic>=2"]
+    assert proj["optional_dependencies"] == {"dev": ["pytest>=8"]}
+    assert proj["optional_dependency_extras"] == ["dev"]
+
+
+def test_pyproject_pep621_report_sorted_lists(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project]
+        name = "demo"
+        version = "1.0.0"
+        dependencies = ["zebra", "apple"]
+        [project.optional-dependencies]
+        z = ["b", "a"]
+        a = ["z"]
+        """,
+    )
+    mod = _load_script("pyproject_pep621_sorted", "pyproject_pep621_report.py")
+    report = mod.pyproject_pep621_report(tmp_path / "pyproject.toml")
+
+    assert report["ok"] is True
+    proj = report["project"]
+    assert proj["dependencies"] == ["apple", "zebra"]
+    assert proj["optional_dependencies"] == {"a": ["z"], "z": ["a", "b"]}
+    assert proj["optional_dependency_extras"] == ["a", "z"]
+
+
+def test_pyproject_pep621_report_missing_project_table(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [build-system]
+        requires = ["setuptools"]
+        build-backend = "setuptools.build_meta"
+        """,
+    )
+    mod = _load_script("pyproject_pep621_nop", "pyproject_pep621_report.py")
+    report = mod.pyproject_pep621_report(tmp_path / "pyproject.toml")
+
+    assert report["ok"] is False
+    assert "missing a [project]" in (report.get("error") or "")
+
+
+def test_pyproject_pep621_report_bad_dependencies_type(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project]
+        name = "demo"
+        version = "1.0.0"
+        dependencies = "not-a-list"
+        """,
+    )
+    mod = _load_script("pyproject_pep621_baddeps", "pyproject_pep621_report.py")
+    report = mod.pyproject_pep621_report(tmp_path / "pyproject.toml")
+
+    assert report["ok"] is False
+    assert "dependencies must be a TOML array" in (report.get("error") or "")
+
+
+def test_pyproject_pep621_report_invalid_toml_syntax(tmp_path: Path) -> None:
+    """Invalid TOML must return ok=False (tomli's decode error is not a ValueError on 3.10)."""
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project
+        name = "demo"
+        """,
+    )
+    mod = _load_script("pyproject_pep621_badtoml", "pyproject_pep621_report.py")
+    report = mod.pyproject_pep621_report(tmp_path / "pyproject.toml")
+
+    assert report["ok"] is False
+    assert report.get("error")
+    assert report.get("project") is None
 
 
 def test_changelog_main_json_output(tmp_path: Path, capsys) -> None:
@@ -769,3 +885,12 @@ def test_changelog_main_json_output(tmp_path: Path, capsys) -> None:
     data = json.loads(capsys.readouterr().out)
     assert data["schema"] == "replayt.unreleased_changelog.v1"
     assert data["items"] == ["First note", "Second note"]
+
+
+def test_run_light_release_skill_requires_repo_root(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("REPO_ROOT", raising=False)
+    mod = _load_script("run_light_release_skill_rr", "run_light_release_skill.py")
+    prompt = tmp_path / "prompt.md"
+    prompt.write_text("task\n", encoding="utf-8")
+    with pytest.raises(SystemExit, match="REPO_ROOT environment variable is required"):
+        mod.main(["--prompt-file", str(prompt)])

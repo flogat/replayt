@@ -718,7 +718,7 @@ class LLMBridge:
         effective_extras: dict[str, Any] | None = None,
         schema_json: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
-    ) -> tuple[str, dict[str, Any], dict[str, str]]:
+    ) -> tuple[str, dict[str, Any], dict[str, str], dict[str, Any]]:
         state = self._state_getter()
         effective, hdrs, eff_base_url, eff_extra_body = self._merge_call(
             model=model,
@@ -803,7 +803,16 @@ class LLMBridge:
         elif self._log_mode == LogMode.redacted:
             resp_payload["content_preview"] = content[:800]
         self._emit("llm_response", resp_payload)
-        return content, effective, fingerprints
+        structured_meta: dict[str, Any] = {
+            "latency_ms": dt_ms,
+            "usage": usage,
+            "finish_reason": finish_reason,
+        }
+        if isinstance(cid, str) and cid.strip():
+            structured_meta["chat_completion_id"] = cid.strip()
+        if isinstance(fp, str) and fp.strip():
+            structured_meta["system_fingerprint"] = fp.strip()
+        return content, effective, fingerprints, structured_meta
 
     def _emit_structured_output_failed(
         self,
@@ -872,7 +881,7 @@ class LLMBridge:
         extra_body: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> str:
-        text, _effective, _fingerprints = self._request_text(
+        text, _effective, _fingerprints, _meta = self._request_text(
             messages=messages,
             model=model,
             temperature=temperature,
@@ -940,7 +949,7 @@ class LLMBridge:
         )
         full_messages = [{"role": "system", "content": sys}, *messages]
         response_format = self._native_response_format(model_type) if use_native_response_format else None
-        text, effective, fingerprints = self._request_text(
+        text, effective, fingerprints, response_meta = self._request_text(
             messages=full_messages,
             model=model,
             temperature=temperature,
@@ -1028,6 +1037,7 @@ class LLMBridge:
                 "schema_name": model_type.__name__,
                 "data": result.model_dump(),
                 **fingerprints,
+                **response_meta,
             },
         )
         return result

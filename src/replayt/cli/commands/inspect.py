@@ -141,6 +141,28 @@ def _filter_events_by_tool_name(
     return filtered
 
 
+def _filter_events_by_structured_schema_name(
+    events: list[dict[str, Any]],
+    filters: frozenset[str] | None,
+    *,
+    event_type_filters: frozenset[str] | None,
+) -> list[dict[str, Any]]:
+    if filters is None:
+        return events
+    filtered: list[dict[str, Any]] = []
+    for event in events:
+        typ = event.get("type")
+        if typ in {"structured_output", "structured_output_failed"}:
+            payload = event.get("payload") or {}
+            sn = payload.get("schema_name")
+            if isinstance(sn, str) and sn in filters:
+                filtered.append(event)
+            continue
+        if event_type_filters is not None and typ in event_type_filters:
+            filtered.append(event)
+    return filtered
+
+
 def _contract_json_lines(contract: dict[str, Any]) -> list[str]:
     return json.dumps(contract, indent=2, sort_keys=True).splitlines()
 
@@ -213,6 +235,22 @@ def _duration_filter_seconds(raw: str | None, *, flag_name: str) -> int | None:
     return seconds
 
 
+def _extract_run_started_inputs(events: list[dict[str, Any]]) -> dict[str, Any]:
+    for event in events:
+        if event.get("type") != "run_started":
+            continue
+        payload = event.get("payload")
+        if not isinstance(payload, dict):
+            return {}
+        raw = payload.get("inputs")
+        if raw is None:
+            return {}
+        if not isinstance(raw, dict):
+            raise ValueError("run_started.inputs is not a JSON object in this log")
+        return dict(raw)
+    raise LookupError("No run_started event found in this run")
+
+
 def cmd_inspect(
     run_id: str = typer.Argument(...),
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR),
@@ -250,6 +288,15 @@ def cmd_inspect(
             "Without --event-type, this narrows the event list to matching tool calls only."
         ),
     ),
+    structured_schema: list[str] | None = typer.Option(
+        None,
+        "--structured-schema",
+        help=(
+            "Only include `structured_output` / `structured_output_failed` events whose payload "
+            "`schema_name` matches (repeatable; OR). Without --event-type, narrows the list to "
+            "those events only."
+        ),
+    ),
     as_json: bool = typer.Option(
         False,
         "--json",
@@ -260,6 +307,15 @@ def cmd_inspect(
         "--output",
         help="text (default), json (machine-readable), or markdown (paste-friendly stakeholder summary).",
     ),
+    print_inputs: bool = typer.Option(
+        False,
+        "--print-inputs",
+        help=(
+            "Print only the run_started.inputs object as compact JSON (stdout) and exit. "
+            "Uses the same --log-dir / --log-subdir / --sqlite as a normal inspect. "
+            "Incompatible with --output json/markdown, --json, and timeline filters."
+        ),
+    ),
 ) -> None:
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
@@ -267,12 +323,39 @@ def cmd_inspect(
     note_kind_filters = parse_note_kind_filters(note_kind)
     finish_reason_filters = parse_finish_reason_filters(finish_reason)
     tool_name_filters = parse_tool_name_filters(tool)
+    structured_schema_filters = parse_structured_schema_name_filters(structured_schema)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
         typer.echo(f"No events for run_id={run_id!r} in {log_dir}", err=True)
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
+    if print_inputs:
+        if as_json or output != "text":
+            raise typer.BadParameter(
+                "--print-inputs only supports default text mode; omit --output and --json."
+            )
+        if (
+            type_filters is not None
+            or note_kind_filters is not None
+            or finish_reason_filters is not None
+            or tool_name_filters is not None
+            or structured_schema_filters is not None
+        ):
+            raise typer.BadParameter(
+                "--print-inputs reads run_started from the full timeline; omit --event-type, "
+                "--note-kind, --finish-reason, --tool, and --structured-schema."
+            )
+        try:
+            inputs_obj = _extract_run_started_inputs(events)
+        except LookupError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+        typer.echo(json.dumps(inputs_obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
+        return
     use_json = as_json or output == "json"
     if output == "markdown":
         if (
@@ -280,10 +363,11 @@ def cmd_inspect(
             or note_kind_filters is not None
             or finish_reason_filters is not None
             or tool_name_filters is not None
+            or structured_schema_filters is not None
         ):
             raise typer.BadParameter(
                 "--output markdown summarizes the full run; omit --event-type, --note-kind, "
-                "--finish-reason, and --tool."
+                "--finish-reason, --tool, and --structured-schema."
             )
         typer.echo(inspect_stakeholder_markdown(run_id, events))
         return
@@ -291,6 +375,9 @@ def cmd_inspect(
     filtered = _filter_events_by_note_kind(filtered, note_kind_filters, event_type_filters=type_filters)
     filtered = _filter_events_by_finish_reason(filtered, finish_reason_filters, event_type_filters=type_filters)
     filtered = _filter_events_by_tool_name(filtered, tool_name_filters, event_type_filters=type_filters)
+    filtered = _filter_events_by_structured_schema_name(
+        filtered, structured_schema_filters, event_type_filters=type_filters
+    )
     if use_json:
         summary = event_summary(events)
         payload: dict[str, Any] = {
@@ -307,6 +394,8 @@ def cmd_inspect(
             payload["finish_reason_filter"] = sorted(finish_reason_filters)
         if tool_name_filters is not None:
             payload["tool_name_filter"] = sorted(tool_name_filters)
+        if structured_schema_filters is not None:
+            payload["structured_schema_filter"] = sorted(structured_schema_filters)
         typer.echo(json.dumps(payload, indent=2, default=str))
         return
     summary = event_summary(events)
@@ -322,6 +411,7 @@ def cmd_inspect(
         or note_kind_filters is not None
         or finish_reason_filters is not None
         or tool_name_filters is not None
+        or structured_schema_filters is not None
     ):
         event_counts += f" shown={len(filtered)}"
     typer.echo(

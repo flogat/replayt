@@ -98,6 +98,35 @@ def preview_default_inputs_file(cfg: dict[str, Any], *, config_path: str | None)
     return None, "unset"
 
 
+def inputs_file_trust_audit_paths(
+    *,
+    default_inputs_file: str | None,
+    explicit_inputs_file: Path | None = None,
+) -> list[Path]:
+    """Paths to existing inputs JSON files for POSIX permission audits (resolved; mode bits only in checks)."""
+
+    paths: list[Path] = []
+    seen: set[str] = set()
+    for raw in (default_inputs_file, explicit_inputs_file):
+        if raw is None:
+            continue
+        label = str(raw).strip()
+        if not label or label == "-":
+            continue
+        try:
+            p = Path(label).expanduser().resolve()
+        except OSError:
+            continue
+        if not p.is_file():
+            continue
+        key = str(p)
+        if key in seen:
+            continue
+        seen.add(key)
+        paths.append(p)
+    return paths
+
+
 def resolve_run_inputs_json(
     inputs_json: str | None,
     inputs_file: Path | None,
@@ -116,7 +145,9 @@ def resolve_run_inputs_json(
     from replayt.cli.validation import inputs_json_from_options
 
     if inputs_json is not None or inputs_file is not None:
-        resolved = inputs_json_from_options(inputs_json, inputs_file, input_value)
+        resolved = inputs_json_from_options(
+            inputs_json, inputs_file, input_value, inputs_file_origin="cli"
+        )
         if inputs_file is not None:
             src = "cli:--inputs-file (stdin)" if inputs_file == Path("-") else "cli:--inputs-file"
         elif inputs_json is not None:
@@ -136,13 +167,17 @@ def resolve_run_inputs_json(
             resolved = inputs_json_from_options(None, Path("-"), input_value)
             return resolved, f"env:{REPLAYT_INPUTS_FILE_ENV} (stdin)"
         p = Path(env_raw).expanduser()
-        resolved = inputs_json_from_options(None, p, input_value)
+        resolved = inputs_json_from_options(
+            None, p, input_value, inputs_file_origin="env"
+        )
         return resolved, f"env:{REPLAYT_INPUTS_FILE_ENV}"
 
     cfg_raw = cfg.get("inputs_file")
     if isinstance(cfg_raw, str) and cfg_raw.strip():
         p = resolve_project_path(cfg_raw.strip(), config_path=config_path)
-        resolved = inputs_json_from_options(None, p, input_value)
+        resolved = inputs_json_from_options(
+            None, p, input_value, inputs_file_origin="project"
+        )
         return resolved, "project_config:inputs_file"
 
     if input_value:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import typer
 
@@ -13,10 +13,31 @@ from replayt.workflow import Workflow
 
 VALIDATE_REPORT_SCHEMA = "replayt.validate_report.v1"
 
+InputsFileOrigin = Literal["cli", "env", "project"]
 
-def _read_json_text_file(path: Path, *, label: str) -> str:
+
+def _inputs_file_missing_hint(origin: InputsFileOrigin | None) -> str:
+    if origin == "project":
+        return (
+            "That path comes from [tool.replayt] inputs_file (resolved relative to your config file). "
+            "Edit `.replaytrc.toml` or `pyproject.toml`, run `replayt config` to see the resolved default, "
+            "or pass `--inputs-file PATH` for this run only. See docs/CONFIG.md."
+        )
+    if origin == "env":
+        return (
+            "That path comes from REPLAYT_INPUTS_FILE. Unset it, point it at a real JSON file, "
+            "use `-` for stdin, or pass `--inputs-file` / `--inputs-json` to override for this command."
+        )
+    return (
+        "Verify the path exists. Relative paths resolve from the current working directory "
+        "(see `replayt config` for project defaults when you expected config to supply inputs)."
+    )
+
+
+def _read_json_text_file(path: Path, *, label: str, origin: InputsFileOrigin | None = None) -> str:
     if not path.is_file():
-        raise typer.BadParameter(f"{label} file not found: {path}")
+        hint = _inputs_file_missing_hint(origin)
+        raise typer.BadParameter(f"{label} file not found: {path}. {hint}")
     try:
         raw = path.read_text(encoding="utf-8")
     except UnicodeDecodeError as e:
@@ -49,6 +70,8 @@ def inputs_json_from_options(
     inputs_json: str | None,
     inputs_file: Path | None,
     input_value: list[str] | None = None,
+    *,
+    inputs_file_origin: InputsFileOrigin | None = None,
 ) -> str | None:
     if inputs_json is not None and inputs_file is not None:
         raise typer.BadParameter("Use only one of --inputs-json or --inputs-file")
@@ -57,7 +80,9 @@ def inputs_json_from_options(
         if _is_stdin_inputs_path(inputs_file):
             base_raw = _read_json_from_stdin(label="--inputs-file")
         else:
-            base_raw = _read_json_text_file(inputs_file, label="--inputs-file")
+            base_raw = _read_json_text_file(
+                inputs_file, label="--inputs-file", origin=inputs_file_origin
+            )
     elif inputs_json is not None and inputs_json.startswith("@"):
         file_ref = inputs_json[1:].strip()
         if not file_ref:
@@ -65,7 +90,9 @@ def inputs_json_from_options(
         if file_ref == "-":
             base_raw = _read_json_from_stdin(label="--inputs-json @-")
         else:
-            base_raw = _read_json_text_file(Path(file_ref), label="--inputs-json @path")
+            base_raw = _read_json_text_file(
+                Path(file_ref), label="--inputs-json @path", origin=inputs_file_origin
+            )
     else:
         base_raw = inputs_json
     if not input_value:

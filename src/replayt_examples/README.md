@@ -81,6 +81,18 @@ replayt validate my_pkg.workflow:wf
 
 CLI **`--inputs-json`** / **`--inputs-file`** still override. Inspect effective paths with **`replayt config --format json`** (`run.default_inputs_file`, `run.default_inputs_file_source`). **`replayt try`** ignores this default so packaged samples keep their built-in payloads unless you pass **`--inputs-json`** or **`--inputs-file`** explicitly.
 
+### Reuse inputs from a finished run
+
+When you want the same **`run_started.inputs`** payload again (debugging, A/B on prompts, or a teammate’s run id), dump the logged object and pass it explicitly—**`TARGET`** still comes from **`MODULE:VAR`**, project config, or **`REPLAYT_TARGET`**, not from the JSONL file.
+
+```bash
+RUN_ID=...   # from replayt run output or replayt runs
+replayt inspect "$RUN_ID" --print-inputs
+replayt run "$TARGET" --inputs-json "$(replayt inspect "$RUN_ID" --print-inputs)"
+```
+
+On bash you can also write the blob once: **`replayt inspect "$RUN_ID" --print-inputs > last-inputs.json`** then **`replayt run "$TARGET" --inputs-json @last-inputs.json`**. Redacted keys replay as **`{"_redacted": true}`** when the original run used **`--redact-key`**; fix those fields before a live rerun if the workflow requires real values.
+
 ### Install (from this repository)
 
 ```bash
@@ -114,6 +126,24 @@ CMD ["replayt", "ci", "your_pkg.workflow:wf", "--strict-graph", "--summary-json"
 GitHub Actions sets **`GITHUB_STEP_SUMMARY`** for you; in other runners set **`REPLAYT_STEP_SUMMARY`** to a path under your artifacts directory so the same markdown block is not a silent no-op. When both **`GITHUB_STEP_SUMMARY`** and **`REPLAYT_STEP_SUMMARY`** exist, replayt appends to the GitHub file only.
 
 For GitHub Actions, keep **`--github-summary`** or **`REPLAYT_GITHUB_SUMMARY=1`** explicit in the workflow file so local shells do not pick up surprising markdown behavior.
+
+### Beyond core: explicit CI artifact paths and log forwarding
+
+Some templates want one **`--artifacts-dir`** with fixed filenames for JUnit, **`replayt.ci_run_summary.v1`**, and markdown. replayt keeps those paths **explicit** so upload globs and retention policies stay obvious in job YAML. Point **`REPLAYT_STEP_SUMMARY`** at a file beside the other outputs:
+
+```bash
+ART="$GITHUB_WORKSPACE/replayt-ci"
+mkdir -p "$ART"
+export REPLAYT_STEP_SUMMARY="$ART/step-summary.md"
+replayt ci "$TARGET" --strict-graph \
+  --junit-xml "$ART/junit.xml" \
+  --summary-json "$ART/summary.json" \
+  --github-summary
+```
+
+For pipeline branching on **`replayt run` / `ci` / `resume` / `try`** without rereading prose docs, consume **`cli_exit_codes`** from **`replayt version --format json`** (stable alongside **`cli_machine_readable_schemas`**).
+
+replayt does **not** tee JSONL to **stdout**: treat **`.replayt/runs/*.jsonl`** as the audit source and tail or ship them with your log agent instead of turning the workflow process into a log forwarder.
 
 ### Beyond core: auto-filled `ci_metadata` from vendor env vars
 
@@ -160,7 +190,7 @@ pip-audit -r requirements.txt  # example; use your org's scanner and inputs
 
 ### Beyond core: MCP servers wrap the CLI
 
-**Model Context Protocol** hosts expect stable tool contracts, explicit argv, and parseable errors. replayt stays a **CLI + library**, not an MCP runtime: implement tools in **your** server that call **`replayt`** as a subprocess with a fixed allowlist (for example only **`inspect`**, **`runs`**, **`verify-seal`** in production). Use **`--output json`** / **`--format json`** and map **`schema`** fields to the ids advertised under **`cli_machine_readable_schemas`** from **`replayt version --format json`**. When you implement **`run_hook`**, **`resume_hook`**, or export/seal/verify hooks yourself, read **`policy_hook_env_catalog`** from the same JSON so your wrapper asserts the full set of injected **`REPLAYT_*`** names (optional keys may be absent on a given invocation) and matches **`subprocess_stdin`**: **`devnull`**. Respect exit codes: **`0`** success, **`1`** user or verification errors on read-only commands, **`2`** approval pause on **`replayt run`** / **`replayt ci`** only.
+**Model Context Protocol** hosts expect stable tool contracts, explicit argv, and parseable errors. replayt stays a **CLI + library**, not an MCP runtime: implement tools in **your** server that call **`replayt`** as a subprocess with a fixed allowlist (for example only **`inspect`**, **`runs`**, **`verify-seal`** in production). Cross-check allowlisted names against sorted **`cli_subcommands`** from the same JSON when you upgrade replayt. Use **`--output json`** / **`--format json`** and map **`schema`** fields to the ids advertised under **`cli_machine_readable_schemas`** from **`replayt version --format json`**. Read **`cli_stdio_contract`** from the same JSON: unless you intentionally pipe a UTF-8 JSON object for **`--inputs-file -`**, **`--inputs-json @-`**, or **`REPLAYT_INPUTS_FILE=-`**, pass **`stdin=subprocess.DEVNULL`** so the host's attached stdin does not become workflow inputs on **`run`**, **`ci`**, **`validate`**, or **`doctor`**. There is no generated OpenAPI or function-calling schema for every CLI flag; derive tool argv from **`--help`** and validate JSON payloads with **`cli_machine_readable_schemas`**. When you implement **`run_hook`**, **`resume_hook`**, or export/seal/verify hooks yourself, read **`policy_hook_env_catalog`** from the same JSON so your wrapper asserts the full set of injected **`REPLAYT_*`** names (optional keys may be absent on a given invocation) and matches **`subprocess_stdin`**: **`devnull`**. Respect exit codes: **`0`** success, **`1`** user or verification errors on read-only commands, **`2`** approval pause on **`replayt run`** / **`replayt ci`** only.
 
 ```bash
 replayt version --format json | python -c "import json,sys; print(json.load(sys.stdin)['cli_machine_readable_schemas']['verify_seal_report'])"
@@ -168,6 +198,10 @@ replayt version --format json | python -c "import json,sys; print(json.load(sys.
 
 ```bash
 replayt version --format json | python -c "import json,sys; d=json.load(sys.stdin)['policy_hook_env_catalog']['hooks']['run_hook']; print(d['argv_env'], len(d['injected_env_vars']))"
+```
+
+```bash
+replayt version --format json | python -c "import json,sys; c=json.load(sys.stdin)['cli_stdio_contract']; print(c['recommended_subprocess_stdin'], c['reads_utf8_json_object_from_stdin']['subcommands'])"
 ```
 
 ```python
@@ -190,9 +224,41 @@ def tool_inspect_run(run_id: str) -> dict:
 
 For raw JSONL reads (no subprocess), open **`.replayt/runs/<run_id>.jsonl`** read-only and parse line-delimited JSON; see **Pattern: approval bridge** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md).
 
+### Beyond core: shell completion and CLI discovery for wrappers
+
+replayt keeps Typer **`add_completion=False`**, so there is no bundled **`replayt completion`** subcommand or **`--install-completion`** wiring in core: shells, path policy, and completion style vary by team. Add fish/bash/zsh snippets or Typer completion hooks **beside your repo** if you want tab completion for **`python -m replayt`**.
+
+For argv allowlists and doc drift checks without scraping **`--help`**, read sorted **`cli_subcommands`** from **`replayt version --format json`** (top-level command names registered on the installed CLI). replayt does **not** ship **`replayt --help --format json`** or a full per-command flag schema; use **`replayt <cmd> --help`** from a dev-only codegen step, or introspect Click/Typer in **your** tooling when you need every option spelled out.
+
+```bash
+replayt version --format json | python -c "import json,sys; print(json.load(sys.stdin)['cli_subcommands'])"
+```
+
+### Beyond core: skill-release loop wrappers and sidecar integrity
+
+Maintainer **`scripts/skill_release_loop.py`** (and **`skill_release_loop_agent.py`**) export **`SKILL_*`** environment variables and write **`replayt.skill_invocation.v1`** JSON beside each generated **`*.prompt.md`**; see **Automated skill-loop release** in [`CONTRIBUTING.md`](../../CONTRIBUTING.md). replayt does not auto-inject a parent run directory for nested loops or add a **`prompt_sha256`** field on every sidecar: only your outer harness knows whether a run is nested, and hashing prompts is a one-liner when you need it.
+
+```bash
+INV=iter-01-demo.invocation.json
+PROMPT=$(jq -r '.prompt_file' "$INV")
+test -f "$PROMPT"
+shasum -a 256 "$PROMPT"
+```
+
+Export **`PARENT_SKILL_RUN_DIR`** (or similar) from **your** wrapper before invoking the loop a second time, and mention it inside **`--task`** so agents and logs stay explicit.
+
 ## Beyond core: streaming, hooks, approvals, and logs
 
 replayt keeps explicit states, append-only **JSONL**, and structured LLM outputs. Use **`ctx.llm.with_settings(...)`** for per-call overrides; they show up under **`effective`** on **`llm_request`** events. Core does **not** log per-token streams because that is too noisy for replay. Stream inside a step, then store a **Pydantic-validated** result or a short summary. **`replayt resume`** covers many approval flows; richer UIs can read the same JSONL and resolve gates in **your** app. Notifications, trace IDs, and policy hooks belong in wrappers or callbacks. If you need stronger audit handoff, hash, encrypt, or archive **your** logs; the runtime cannot prove integrity if an attacker can write the log directory (see **Security and trust boundaries** in [`README.md`](../../README.md)).
+
+### Beyond core: PDF rendering and wiki uploads
+
+**`replayt report`** already emits self-contained HTML or Markdown (**`--format`**, **`--style stakeholder`**). Legal and PM handoffs sometimes want PDFs or a Confluence/Notion page. PDF engines, fonts, headers, and headless browser pins differ by team, and each wiki has its own OAuth, space keys, and retention rules. Keep replayt local-first: write the report to disk, then convert or upload in **your** CI or desktop toolchain. Treat **`bundle-export`** tarballs as the canonical audit bundle and link them from the wiki if policy allows.
+
+```bash
+replayt report "$RUN_ID" --style stakeholder --out report.html
+# Print report.html to PDF from a browser, Chromium --print-to-pdf, or a container image you maintain.
+```
 
 ### Beyond core: logprobs and vendor-only chat fields
 
@@ -330,9 +396,12 @@ Use **`replayt inspect RUN_ID --tool search_repo`** (repeat for OR) to list only
 ```bash
 replayt runs --structured-schema Decision --structured-schema Plan --limit 50
 replayt stats --structured-schema Decision --output json
+replayt inspect RUN_ID --structured-schema Decision --structured-schema Plan --output json
 ```
 
-Use **`replayt inspect RUN_ID --event-type structured_output`** (and repeat **`--event-type structured_output_failed`** if you need both) when you want only those lines from one run.
+Use **`replayt inspect RUN_ID --structured-schema MyModel`** (repeat for OR) when you want matching **`structured_output`** / **`structured_output_failed`** lines only, or **`--event-type structured_output`** (and repeat **`--event-type structured_output_failed`** if you need both event types regardless of **`schema_name`**).
+
+Each successful **`structured_output`** line also carries **`usage`**, **`latency_ms`**, and **`finish_reason`** copied from the same completion as the preceding **`llm_response`**, so cost or latency rollups keyed by **`schema_name`** do not need a second join. Example: `jq 'select(.type=="structured_output") | .payload | {schema_name, usage, latency_ms}' run.jsonl` (or **`duckdb`** over **`read_json_auto`** per **Pattern: DuckDB ad-hoc analytics** in [`docs/EXAMPLES_PATTERNS.md`](../../docs/EXAMPLES_PATTERNS.md)).
 
 ### Finding runs by LLM `finish_reason`
 
@@ -354,7 +423,7 @@ replayt runs --note-kind framework_summary --limit 50
 replayt inspect RUN_ID --note-kind framework_summary
 ```
 
-This keeps the query aligned with replayt's explicit event model: one framework-shaped breadcrumb in the log, not framework-owned control flow in the runner.
+That matches replayt's explicit event model: one framework-shaped breadcrumb in the log, not framework-owned control flow in the runner.
 
 ### Beyond core: graph checkpoints and model-driven multi-tool turns
 

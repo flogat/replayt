@@ -65,7 +65,7 @@ decision = (
 )
 ```
 
-If parsing still fails, replayt emits `structured_output_failed` with a stage such as `json_extract` or `schema_validate` so the JSONL tells you whether the miss was malformed JSON, an oversized response, or a schema mismatch. For Pydantic rejections at `schema_validate`, the event also includes bounded `validation_issues` (field path and message) plus `validation_issue_count` when many fields fail at once.
+If parsing still fails, replayt emits `structured_output_failed` with a stage such as `json_extract` or `schema_validate` so the JSONL tells you whether the miss was malformed JSON, an oversized response, or a schema mismatch. For Pydantic rejections at `schema_validate`, the event also includes bounded `validation_issues` (field path and message) plus `validation_issue_count` when many fields fail at once. When parsing succeeds, `structured_output` also carries `usage`, `latency_ms`, and `finish_reason` from that completion (mirroring the preceding `llm_response`) so you can sum tokens or latency per `schema_name` with a single `jq` or SQL filter.
 
 For timeouts, retries, or betas exposed only through the official `openai` SDK, keep replayt's graph and approvals as-is and call the SDK **inside a single step** (see **Pattern: OpenAI Python SDK inside a step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md)).
 

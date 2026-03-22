@@ -41,6 +41,7 @@ def maintainer_checks_report(
     skip_version: bool = False,
     skip_changelog: bool = False,
     skip_docs_index: bool = False,
+    skip_pyproject_pep621: bool = False,
     skip_example_catalog: bool = False,
     skip_public_api: bool = False,
     verbose: bool = False,
@@ -62,6 +63,15 @@ def maintainer_checks_report(
             details["version_consistency"] = vr
         if not vr["ok"]:
             errors.append("version_consistency failed (pyproject vs package __version__)")
+
+    if not skip_pyproject_pep621:
+        pp = _load_script("pp", "pyproject_pep621_report.py")
+        pr = pp.pyproject_pep621_report(repo_root / "pyproject.toml")
+        checks["pyproject_pep621"] = {"ok": bool(pr["ok"]), "schema": pr["schema"]}
+        if verbose:
+            details["pyproject_pep621"] = pr
+        if not pr["ok"]:
+            errors.append("pyproject_pep621 failed (parse error or missing [project])")
 
     if not skip_changelog:
         cl = _load_script("cl", "changelog_unreleased.py")
@@ -167,6 +177,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Include full sub-reports under 'details' in JSON output.",
     )
     parser.add_argument("--skip-version", action="store_true", help="Skip pyproject vs __version__ check.")
+    parser.add_argument(
+        "--skip-pyproject-pep621",
+        action="store_true",
+        help="Skip [project] PEP 621 metadata parse report.",
+    )
     parser.add_argument("--skip-changelog", action="store_true", help="Skip Unreleased changelog check.")
     parser.add_argument("--skip-docs-index", action="store_true", help="Skip docs/README.md index check.")
     parser.add_argument(
@@ -190,6 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         skip_version=args.skip_version,
         skip_changelog=args.skip_changelog,
         skip_docs_index=args.skip_docs_index,
+        skip_pyproject_pep621=args.skip_pyproject_pep621,
         skip_example_catalog=args.skip_example_catalog,
         skip_public_api=args.skip_public_api,
         verbose=args.verbose,

@@ -10,15 +10,34 @@ import typer
 
 import replayt
 from replayt.cli.config import SUPPORTED_CONFIG_KEYS
-from replayt.cli.run_support import RUN_RESULT_SCHEMA, build_policy_hook_env_catalog
+from replayt.cli.run_support import (
+    RUN_RESULT_SCHEMA,
+    build_cli_exit_codes_report,
+    build_cli_stdio_contract,
+    build_policy_hook_env_catalog,
+)
 
 VERSION_REPORT_SCHEMA = "replayt.version_report.v1"
 
 # Stable schema ids emitted by repo-local scripts under scripts/ (maintainer_checks loads these).
+def _registered_cli_subcommands() -> list[str]:
+    """Sorted top-level Typer command names (lazy import avoids cycles during CLI package import)."""
+
+    from replayt.cli.main import app
+
+    names: list[str] = []
+    for info in app.registered_commands:
+        n = getattr(info, "name", None)
+        if n:
+            names.append(str(n))
+    return sorted(names)
+
+
 MAINTAINER_SCRIPT_SCHEMAS: dict[str, str] = {
     "unreleased_changelog": "replayt.unreleased_changelog.v1",
     "docs_index_report": "replayt.docs_index_report.v1",
     "version_consistency": "replayt.version_consistency.v1",
+    "pyproject_pep621": "replayt.pyproject_pep621_report.v1",
     "example_catalog_contract": "replayt.example_catalog_contract.v1",
     "public_api_report": "replayt.public_api_report.v1",
     "maintainer_checks": "replayt.maintainer_checks.v1",
@@ -40,9 +59,12 @@ def build_version_report() -> dict[str, object]:
             "serial": vi.serial,
         },
         "platform": sys.platform,
+        "cli_subcommands": _registered_cli_subcommands(),
         "supported_project_config_keys": sorted(SUPPORTED_CONFIG_KEYS),
         "maintainer_script_schemas": dict(sorted(MAINTAINER_SCRIPT_SCHEMAS.items())),
         "policy_hook_env_catalog": build_policy_hook_env_catalog(),
+        "cli_exit_codes": build_cli_exit_codes_report(),
+        "cli_stdio_contract": build_cli_stdio_contract(),
         "cli_machine_readable_schemas": {
             "version_report": VERSION_REPORT_SCHEMA,
             "workflow_contract": "replayt.workflow_contract.v1",

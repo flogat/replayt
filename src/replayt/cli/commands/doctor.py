@@ -14,8 +14,10 @@ from replayt.cli.ci_artifacts import ci_artifacts_payload, resolve_ci_artifacts
 from replayt.cli.config import (
     DEFAULT_LOG_DIR,
     get_project_config,
+    inputs_file_trust_audit_paths,
     min_replayt_version_report,
     parse_log_mode,
+    preview_default_inputs_file,
     resolve_approval_reason_required,
     resolve_forbid_log_mode_full,
     resolve_llm_settings,
@@ -26,15 +28,17 @@ from replayt.cli.config import (
 )
 from replayt.cli.path_readiness import ci_artifact_readiness_checks, readiness_checks
 from replayt.cli.run_support import export_hook_audit, resume_hook_audit, run_hook_audit, seal_hook_audit
-from replayt.cli.targets import load_target
+from replayt.cli.targets import load_target, workflow_trust_audit_paths
 from replayt.cli.validation import validate_workflow_graph, validation_report
 from replayt.security import (
     dotenv_permission_trust_checks,
     dotenv_trust_candidate_paths,
     extraneous_llm_credential_env_names,
+    inputs_file_permission_trust_checks,
     llm_credential_env_presence,
     log_directory_permission_trust_checks,
     trust_boundary_checks,
+    workflow_entrypoint_permission_trust_checks,
 )
 from replayt.types import LogMode
 
@@ -297,6 +301,17 @@ def cmd_doctor(
         dotenv_trust_candidate_paths(cwd=Path.cwd(), project_config_path=cfg_path)
     ):
         checks.append((check.name, check.ok, check.detail))
+    default_inputs_file, _default_inputs_src = preview_default_inputs_file(cfg, config_path=cfg_path)
+    for check in inputs_file_permission_trust_checks(
+        inputs_file_trust_audit_paths(
+            default_inputs_file=default_inputs_file,
+            explicit_inputs_file=inputs_file,
+        )
+    ):
+        checks.append((check.name, check.ok, check.detail))
+    if target is not None:
+        for check in workflow_entrypoint_permission_trust_checks(workflow_trust_audit_paths(target)):
+            checks.append((check.name, check.ok, check.detail))
     for check in readiness_checks(log_dir=resolved_log_dir, sqlite=resolved_sqlite):
         checks.append((check.name, check.ok, check.detail))
     for check in ci_artifact_readiness_checks(
@@ -386,6 +401,30 @@ def cmd_doctor(
         "trust_dotenv_other_writable": (
             "Remove world-writable bits from .env so other accounts cannot swap in attacker-controlled secrets."
         ),
+        "trust_workflow_entry_group_readable": (
+            "Tighten permissions on the workflow entry file unless every account in the owning Unix group may read it."
+        ),
+        "trust_workflow_entry_group_writable": (
+            "Remove group write on workflow sources so peer accounts cannot replace the code replayt executes."
+        ),
+        "trust_workflow_entry_other_readable": (
+            "Tighten workflow file permissions so other OS accounts cannot read proprietary or regulated logic."
+        ),
+        "trust_workflow_entry_other_writable": (
+            "Strip world write on workflow entry files so unrelated accounts cannot swap in malicious code."
+        ),
+        "trust_inputs_file_group_readable": (
+            "Tighten permissions on inputs JSON unless every account in the owning Unix group may read run inputs."
+        ),
+        "trust_inputs_file_group_writable": (
+            "Remove group write on inputs files so peer accounts cannot replace payloads before the next run."
+        ),
+        "trust_inputs_file_other_readable": (
+            "Restrict inputs JSON permissions so other OS accounts cannot read customer or tenant fields."
+        ),
+        "trust_inputs_file_other_writable": (
+            "Strip world write on inputs files so unrelated accounts cannot inject malicious run inputs."
+        ),
         "log_dir_ready": "Fix the resolved log_dir path or its parent-directory permissions before running replayt.",
         "sqlite_ready": "Fix the resolved sqlite path or its parent-directory permissions before enabling the mirror.",
         "ci_junit_xml_ready": (
@@ -433,6 +472,14 @@ def cmd_doctor(
             "trust_dotenv_group_writable",
             "trust_dotenv_other_readable",
             "trust_dotenv_other_writable",
+            "trust_workflow_entry_group_readable",
+            "trust_workflow_entry_group_writable",
+            "trust_workflow_entry_other_readable",
+            "trust_workflow_entry_other_writable",
+            "trust_inputs_file_group_readable",
+            "trust_inputs_file_group_writable",
+            "trust_inputs_file_other_readable",
+            "trust_inputs_file_other_writable",
             "credential_env_extra_providers",
             "approval_reason_policy",
             "policy_hooks_external_code",

@@ -15,6 +15,7 @@ from replayt.cli.config import (
     DEFAULT_LOG_DIR,
     export_hook_timeout_seconds,
     get_project_config,
+    inputs_file_trust_audit_paths,
     min_replayt_version_report,
     preview_default_cli_target,
     preview_default_inputs_file,
@@ -41,12 +42,15 @@ from replayt.cli.run_support import (
     seal_hook_argv,
     verify_seal_hook_argv,
 )
+from replayt.cli.targets import workflow_trust_audit_paths
 from replayt.security import (
     dotenv_permission_trust_checks,
     dotenv_trust_candidate_paths,
     extraneous_llm_credential_env_names,
+    inputs_file_permission_trust_checks,
     log_directory_permission_trust_checks,
     trust_boundary_checks,
+    workflow_entrypoint_permission_trust_checks,
 )
 
 
@@ -168,6 +172,8 @@ def _config_report(
     else:
         verify_seal_hook_timeout_source = "default:120"
     trust_base_url = llm_settings.base_url if llm_settings is not None else os.environ.get("OPENAI_BASE_URL")
+    wf_trust_paths = workflow_trust_audit_paths(default_target) if default_target else []
+    inputs_trust_paths = inputs_file_trust_audit_paths(default_inputs_file=default_inputs_file)
     trust_checks = (
         trust_boundary_checks(
             base_url=trust_base_url,
@@ -177,6 +183,8 @@ def _config_report(
         + dotenv_permission_trust_checks(
             dotenv_trust_candidate_paths(cwd=Path.cwd(), project_config_path=cfg_path)
         )
+        + workflow_entrypoint_permission_trust_checks(wf_trust_paths)
+        + inputs_file_permission_trust_checks(inputs_trust_paths)
     )
     filesystem_checks = readiness_checks(log_dir=resolved_log_dir, sqlite=sqlite_path) + ci_artifact_readiness_checks(
         junit_xml=ci_artifacts.junit_xml,

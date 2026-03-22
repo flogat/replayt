@@ -373,6 +373,262 @@ def dotenv_permission_trust_checks(candidate_paths: Sequence[Path]) -> list[Trus
     return checks
 
 
+def workflow_entrypoint_permission_trust_checks(candidate_paths: Sequence[Path]) -> list[TrustBoundaryCheck]:
+    """Soft warnings when a workflow entry file is group/world-readable or writable (POSIX only)."""
+
+    if os.name == "nt" or not candidate_paths:
+        return []
+    existing: list[Path] = []
+    resolved_seen: set[str] = set()
+    for raw in candidate_paths:
+        try:
+            p = raw.resolve()
+        except OSError:
+            continue
+        if not p.is_file():
+            continue
+        key = str(p)
+        if key in resolved_seen:
+            continue
+        resolved_seen.add(key)
+        existing.append(p)
+    if not existing:
+        return []
+
+    bad_group_read: list[str] = []
+    bad_group_write: list[str] = []
+    bad_other_read: list[str] = []
+    bad_other_write: list[str] = []
+    for p in existing:
+        try:
+            mode = p.stat().st_mode
+        except OSError:
+            continue
+        label = str(p)
+        if mode & stat.S_IRGRP:
+            bad_group_read.append(label)
+        if mode & stat.S_IWGRP:
+            bad_group_write.append(label)
+        if mode & stat.S_IROTH:
+            bad_other_read.append(label)
+        if mode & stat.S_IWOTH:
+            bad_other_write.append(label)
+
+    checks: list[TrustBoundaryCheck] = []
+    if bad_group_read:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_workflow_entry_group_readable",
+                ok=False,
+                detail="group-readable workflow entry file(s): " + ", ".join(bad_group_read),
+                hint=(
+                    "Tighten permissions on workflow sources (for example chmod 640) unless every account "
+                    "in the owning Unix group is trusted to read the code replayt executes."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_workflow_entry_group_readable",
+                ok=True,
+                detail=f"checked {len(existing)} workflow entry file(s); none are group-readable",
+            )
+        )
+
+    if bad_group_write:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_workflow_entry_group_writable",
+                ok=False,
+                detail="group-writable workflow entry file(s): " + ", ".join(bad_group_write),
+                hint=(
+                    "Strip group write on workflow files so peer accounts cannot swap in "
+                    "attacker-controlled code before the next run."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_workflow_entry_group_writable",
+                ok=True,
+                detail=f"checked {len(existing)} workflow entry file(s); none are group-writable",
+            )
+        )
+
+    if bad_other_read:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_workflow_entry_other_readable",
+                ok=False,
+                detail="world-readable workflow entry file(s): " + ", ".join(bad_other_read),
+                hint=(
+                    "Restrict workflow file permissions so other OS accounts cannot read proprietary "
+                    "or regulated logic replayt loads from disk."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_workflow_entry_other_readable",
+                ok=True,
+                detail=f"checked {len(existing)} workflow entry file(s); none are world-readable",
+            )
+        )
+
+    if bad_other_write:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_workflow_entry_other_writable",
+                ok=False,
+                detail="world-writable workflow entry file(s): " + ", ".join(bad_other_write),
+                hint=(
+                    "Strip world write on workflow entry files so unrelated accounts cannot replace "
+                    "the code path replayt executes."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_workflow_entry_other_writable",
+                ok=True,
+                detail=f"checked {len(existing)} workflow entry file(s); none are world-writable",
+            )
+        )
+    return checks
+
+
+def inputs_file_permission_trust_checks(candidate_paths: Sequence[Path]) -> list[TrustBoundaryCheck]:
+    """Soft warnings when a default or explicit inputs JSON file is group/world-readable or writable (POSIX only)."""
+
+    if os.name == "nt" or not candidate_paths:
+        return []
+    existing: list[Path] = []
+    resolved_seen: set[str] = set()
+    for raw in candidate_paths:
+        try:
+            p = raw.resolve()
+        except OSError:
+            continue
+        if not p.is_file():
+            continue
+        key = str(p)
+        if key in resolved_seen:
+            continue
+        resolved_seen.add(key)
+        existing.append(p)
+    if not existing:
+        return []
+
+    bad_group_read: list[str] = []
+    bad_group_write: list[str] = []
+    bad_other_read: list[str] = []
+    bad_other_write: list[str] = []
+    for p in existing:
+        try:
+            mode = p.stat().st_mode
+        except OSError:
+            continue
+        label = str(p)
+        if mode & stat.S_IRGRP:
+            bad_group_read.append(label)
+        if mode & stat.S_IWGRP:
+            bad_group_write.append(label)
+        if mode & stat.S_IROTH:
+            bad_other_read.append(label)
+        if mode & stat.S_IWOTH:
+            bad_other_write.append(label)
+
+    checks: list[TrustBoundaryCheck] = []
+    if bad_group_read:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_inputs_file_group_readable",
+                ok=False,
+                detail="group-readable inputs JSON file(s): " + ", ".join(bad_group_read),
+                hint=(
+                    "Tighten permissions on inputs files (for example chmod 600) unless every account "
+                    "in the owning Unix group may read customer or tenant fields loaded into runs."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_inputs_file_group_readable",
+                ok=True,
+                detail=f"checked {len(existing)} inputs file(s); none are group-readable",
+            )
+        )
+
+    if bad_group_write:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_inputs_file_group_writable",
+                ok=False,
+                detail="group-writable inputs JSON file(s): " + ", ".join(bad_group_write),
+                hint=(
+                    "Strip group write on inputs JSON so peer accounts cannot swap in attacker-controlled "
+                    "or wrong-environment payloads before the next run."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_inputs_file_group_writable",
+                ok=True,
+                detail=f"checked {len(existing)} inputs file(s); none are group-writable",
+            )
+        )
+
+    if bad_other_read:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_inputs_file_other_readable",
+                ok=False,
+                detail="world-readable inputs JSON file(s): " + ", ".join(bad_other_read),
+                hint=(
+                    "Restrict inputs file permissions so other OS accounts cannot read PII or secrets "
+                    "passed as workflow inputs."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_inputs_file_other_readable",
+                ok=True,
+                detail=f"checked {len(existing)} inputs file(s); none are world-readable",
+            )
+        )
+
+    if bad_other_write:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_inputs_file_other_writable",
+                ok=False,
+                detail="world-writable inputs JSON file(s): " + ", ".join(bad_other_write),
+                hint=(
+                    "Strip world write on inputs JSON so unrelated accounts cannot replace run inputs "
+                    "with malicious data."
+                ),
+            )
+        )
+    else:
+        checks.append(
+            TrustBoundaryCheck(
+                name="trust_inputs_file_other_writable",
+                ok=True,
+                detail=f"checked {len(existing)} inputs file(s); none are world-writable",
+            )
+        )
+    return checks
+
+
 def trust_boundary_checks(*, base_url: str | None, log_mode: LogMode | str) -> list[TrustBoundaryCheck]:
     mode = log_mode.value if isinstance(log_mode, LogMode) else str(log_mode).strip().lower()
     checks: list[TrustBoundaryCheck] = []

@@ -504,6 +504,8 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert isinstance(env, dict)
     assert env["SKILL_ROOT"] == str(skill_root.resolve())
     assert env["SKILL_RUN_DIR"] == str(run_dir.resolve())
+    assert env["SKILL_STEP_INDEX"] == "1"
+    assert env["SKILL_STEP_TOTAL"] == "1"
     inv_path = run_dir / "iter-01-demo.invocation.json"
     assert inv_path.is_file()
     inv = json.loads(inv_path.read_text(encoding="utf-8"))
@@ -512,11 +514,14 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert inv["skill_requested_name"] == "demo"
     assert inv["iteration"] == 1
     assert inv["max_iterations"] == mod.parse_args([]).max_iterations
+    assert inv["step_index"] == 1
+    assert inv["step_total"] == 1
     assert inv["repo_root"] == str(repo.resolve())
     assert inv["run_dir"] == str(run_dir.resolve())
     assert inv["injected_env_keys"] == sorted(mod.SKILL_LOOP_MAIN_INJECTED_ENV_KEYS)
     assert inv["prompt_file"] == str((run_dir / "iter-01-demo.prompt.md").resolve())
     assert inv["log_file"] == str((run_dir / "iter-01-demo.log").resolve())
+    assert "Pipeline step: 1/1" in (run_dir / "iter-01-demo.prompt.md").read_text(encoding="utf-8")
 
 
 def test_preflight_rejects_dirty_worktree(tmp_path: Path) -> None:
@@ -810,6 +815,7 @@ def test_run_git_marks_repo_safe_directory(tmp_path: Path, monkeypatch) -> None:
         str(repo.resolve()),
         "status",
     ]
+    assert captured["kwargs"].get("stdin") is subprocess.DEVNULL
 
 
 def test_ensure_tag_absent_marks_repo_safe_directory(tmp_path: Path, monkeypatch) -> None:
@@ -820,6 +826,7 @@ def test_ensure_tag_absent_marks_repo_safe_directory(tmp_path: Path, monkeypatch
 
     def fake_run(cmd: list[str], **kwargs):
         captured["cmd"] = cmd
+        captured["kwargs"] = kwargs
         return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="")
 
     monkeypatch.setattr(mod.subprocess, "run", fake_run)
@@ -837,6 +844,7 @@ def test_ensure_tag_absent_marks_repo_safe_directory(tmp_path: Path, monkeypatch
         "--verify",
         "refs/tags/v1.2.3",
     ]
+    assert captured["kwargs"].get("stdin") is subprocess.DEVNULL
 
 
 def _minimal_git_repo(tmp_path: Path) -> Path:

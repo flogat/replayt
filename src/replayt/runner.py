@@ -271,6 +271,7 @@ class Runner:
                     "stop": list(settings.stop) if settings.stop else None,
                     "extra_body_keys": sorted((settings.extra_body or {}).keys()),
                     "max_response_bytes": settings.max_response_bytes,
+                    "http_retries": settings.http_retries,
                     "max_parse_response_chars": settings.max_parse_response_chars,
                     "max_schema_json_chars": settings.max_schema_json_chars,
                     "extra_header_names": sorted((settings.extra_headers or {}).keys()),

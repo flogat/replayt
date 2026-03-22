@@ -48,9 +48,11 @@ def test_changed_files_vs_base_marks_repo_as_safe_directory(tmp_path: Path, monk
     gate = _load_script()
     monkeypatch.chdir(tmp_path)
     calls: list[list[str]] = []
+    kw_list: list[dict[str, object]] = []
 
     def fake_run(cmd: list[str], **kwargs):
         calls.append(cmd)
+        kw_list.append(kwargs)
         stdout = "src/replayt/runner.py\n" if "diff" in cmd else ""
         return subprocess.CompletedProcess(cmd, 0, stdout=stdout, stderr="")
 
@@ -62,3 +64,5 @@ def test_changed_files_vs_base_marks_repo_as_safe_directory(tmp_path: Path, monk
     expected_prefix = ["git", "-c", f"safe.directory={tmp_path.resolve()}"]
     assert calls[0][:3] == expected_prefix
     assert calls[1][:3] == expected_prefix
+    assert kw_list[0].get("stdin") is subprocess.DEVNULL
+    assert kw_list[1].get("stdin") is subprocess.DEVNULL

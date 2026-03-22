@@ -245,6 +245,7 @@ def test_runner_run_started_includes_runtime_snapshot(tmp_path: Path) -> None:
         frequency_penalty=0.1,
         presence_penalty=-0.2,
         seed=7,
+        http_retries=2,
         extra_body={"reasoning": {"effort": "high"}},
     )
     store = JSONLStore(tmp_path)
@@ -271,6 +272,7 @@ def test_runner_run_started_includes_runtime_snapshot(tmp_path: Path) -> None:
     assert runtime["llm"]["seed"] == 7
     assert runtime["llm"]["stop"] is None
     assert runtime["llm"]["extra_body_keys"] == ["reasoning"]
+    assert runtime["llm"]["http_retries"] == 2
     assert runtime["llm"]["api_key_present"] is True
     assert runtime["trust_boundary"]["warnings"] == ["full log mode stores raw LLM request and response bodies on disk"]
 
@@ -335,6 +337,9 @@ def test_runner_persists_llm_request_schema_fingerprints(tmp_path: Path) -> None
     assert structured["messages_sha256"] == request["messages_sha256"]
     assert structured["effective_sha256"] == request["effective_sha256"]
     assert structured["schema_sha256"] == request["schema_sha256"]
+    assert structured["usage"] == response["usage"]
+    assert structured["latency_ms"] == response["latency_ms"]
+    assert structured["finish_reason"] == response["finish_reason"]
 
 
 def test_runner_run_started_includes_policy_hook_breadcrumbs(tmp_path: Path) -> None:

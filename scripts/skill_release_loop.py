@@ -87,6 +87,8 @@ SKILL_LOOP_MAIN_INJECTED_ENV_KEYS: tuple[str, ...] = (
     "SKILL_REQUESTED_NAME",
     "SKILL_ROOT",
     "SKILL_RUN_DIR",
+    "SKILL_STEP_INDEX",
+    "SKILL_STEP_TOTAL",
     "SKILL_TASK",
 )
 SKILL_LOOP_FIX_INJECTED_ENV_KEYS: tuple[str, ...] = (
@@ -98,6 +100,8 @@ SKILL_LOOP_FIX_INJECTED_ENV_KEYS: tuple[str, ...] = (
     "SKILL_PROMPT_FILE",
     "SKILL_ROOT",
     "SKILL_RUN_DIR",
+    "SKILL_STEP_INDEX",
+    "SKILL_STEP_TOTAL",
     "SKILL_TASK",
 )
 
@@ -138,6 +142,8 @@ def write_skill_invocation_json(
     iteration: int,
     max_iterations: int,
     task: str,
+    step_index: int,
+    step_total: int,
     skill_requested_name: str | None = None,
 ) -> Path:
     """Atomically write machine-readable metadata for one skill / fix prompt invocation."""
@@ -154,6 +160,8 @@ def write_skill_invocation_json(
         "injected_env_keys": sorted(injected_env_keys),
         "iteration": iteration,
         "max_iterations": max_iterations,
+        "step_index": step_index,
+        "step_total": step_total,
         "task": task,
         "written_at": _utc_iso(),
     }
@@ -258,9 +266,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog=(
             "The script is backend-agnostic. --skill-command runs once per skill and can use placeholders:\n"
             "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {run_dir}\n"
-            "  {repo} {iteration} {max_iterations}\n"
+            "  {repo} {iteration} {max_iterations} {step_index} {step_total}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
             "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
+            "Pipeline position within one iteration uses {step_index}/{step_total} (SKILL_STEP_*); "
+            "fix prompts use 0/0. Outer retry loop uses {iteration}/{max_iterations} "
+            "(SKILL_ITERATION / SKILL_MAX_ITERATIONS).\n"
             "Progress: prints configuration, a decision-tree summary, each command and log path, streamed "
             "child output (unless --quiet), and explicit decision lines after checks. Use --quiet for logs only.\n"
             "Codex usage limits: by default, if a skill log matches a usage-limit message and includes "
@@ -543,12 +554,22 @@ def load_skill(skill_root: Path, name: str) -> SkillSpec:
     )
 
 
-def build_prompt(skill: SkillSpec, task: str, repo: Path, iteration: int, max_iterations: int) -> str:
+def build_prompt(
+    skill: SkillSpec,
+    task: str,
+    repo: Path,
+    iteration: int,
+    max_iterations: int,
+    *,
+    step_index: int,
+    step_total: int,
+) -> str:
     return (
         f"Repository root: {repo}\n"
         f"Skill: {skill.name}\n"
         f"Requested as: {skill.requested_name}\n"
-        f"Iteration: {iteration}/{max_iterations}\n\n"
+        f"Iteration: {iteration}/{max_iterations}\n"
+        f"Pipeline step: {step_index}/{step_total}\n\n"
         "Follow the skill instructions below exactly.\n"
         "Apply repository changes directly in the working tree.\n"
         "Do not commit, tag, or push; the outer release loop owns that.\n"
@@ -612,6 +633,8 @@ def describe_skill_env_snippet(env: dict[str, str], *, task_max: int = 160) -> s
         "SKILL_ROOT",
         "SKILL_NAME",
         "SKILL_ITERATION",
+        "SKILL_STEP_INDEX",
+        "SKILL_STEP_TOTAL",
         "SKILL_PROMPT_FILE",
         "SKILL_LOG_FILE",
         "SKILL_RUN_DIR",
@@ -935,14 +958,26 @@ def run_skill_iteration(
         "Decision: run each skill in sequence; each step invokes --skill-command with a fresh prompt file."
         + ("; resume skips steps whose logs end with exit_code=0." if resume else ".")
     )
-    for skill in skills:
+    step_total = len(skills)
+    for step_index, skill in enumerate(skills, start=1):
         stem = f"iter-{iteration:02d}-{skill.name}"
         prompt_path = run_dir / f"{stem}.prompt.md"
         log_path = run_dir / f"{stem}.log"
         if resume and log_path_last_exit_code(log_path) == 0:
             progress_line(f"Decision: resume; skip {skill.name} (prior exit_code=0): {log_path}")
             continue
-        prompt_path.write_text(build_prompt(skill, args.task, repo, iteration, args.max_iterations), encoding="utf-8")
+        prompt_path.write_text(
+            build_prompt(
+                skill,
+                args.task,
+                repo,
+                iteration,
+                args.max_iterations,
+                step_index=step_index,
+                step_total=step_total,
+            ),
+            encoding="utf-8",
+        )
         env = os.environ.copy()
         repo_resolved = str(repo.resolve())
         skill_root_resolved = str((repo / args.skill_root).resolve())
@@ -959,6 +994,8 @@ def run_skill_iteration(
             iteration=iteration,
             max_iterations=args.max_iterations,
             task=args.task,
+            step_index=step_index,
+            step_total=step_total,
             skill_requested_name=skill.requested_name,
         )
         # Inject safe.directory so child processes (e.g. Codex sandbox running as a
@@ -979,6 +1016,8 @@ def run_skill_iteration(
                 "SKILL_MAX_ITERATIONS": str(args.max_iterations),
                 "SKILL_TASK": args.task,
                 "SKILL_RUN_DIR": run_dir_resolved,
+                "SKILL_STEP_INDEX": str(step_index),
+                "SKILL_STEP_TOTAL": str(step_total),
             }
         )
         command = render_command(
@@ -994,6 +1033,8 @@ def run_skill_iteration(
                 "iteration": str(iteration),
                 "max_iterations": str(args.max_iterations),
                 "task": args.task,
+                "step_index": str(step_index),
+                "step_total": str(step_total),
             },
         )
         progress_banner(f"Skill: {skill.name}")
@@ -1219,6 +1260,8 @@ def run_checks(
                 iteration=iteration,
                 max_iterations=args.max_iterations,
                 task="Fix the failing check.",
+                step_index=0,
+                step_total=0,
             )
 
             fix_command = render_command(
@@ -1233,6 +1276,8 @@ def run_checks(
                     "repo": str(repo),
                     "iteration": str(iteration),
                     "max_iterations": str(args.max_iterations),
+                    "step_index": "0",
+                    "step_total": "0",
                 },
             )
 
@@ -1249,6 +1294,8 @@ def run_checks(
                     "SKILL_MAX_ITERATIONS": str(args.max_iterations),
                     "SKILL_TASK": "Fix the failing check.",
                     "SKILL_RUN_DIR": run_dir_resolved,
+                    "SKILL_STEP_INDEX": "0",
+                    "SKILL_STEP_TOTAL": "0",
                 }
             )
 
@@ -1324,6 +1371,7 @@ def run_git(repo: Path, args: list[str], *, capture_output: bool = False) -> sub
         cwd=repo,
         env=_git_env(),
         text=True,
+        stdin=subprocess.DEVNULL,
         stdout=subprocess.PIPE if capture_output else None,
         stderr=subprocess.PIPE if capture_output else None,
     )
@@ -1467,6 +1515,7 @@ def tag_exists_locally(repo: Path, tag_name: str) -> bool:
         cwd=repo,
         env=_git_env(),
         text=True,
+        stdin=subprocess.DEVNULL,
         capture_output=True,
     )
     return result.returncode == 0
@@ -1606,6 +1655,8 @@ def run_pre_tag_github_ci_with_fixes(
             iteration=passed_iteration,
             max_iterations=args.max_iterations,
             task="Fix the failure so pre-tag GitHub Actions verification passes.",
+            step_index=0,
+            step_total=0,
         )
 
         fix_command = render_command(
@@ -1620,6 +1671,8 @@ def run_pre_tag_github_ci_with_fixes(
                 "repo": str(repo),
                 "iteration": str(passed_iteration),
                 "max_iterations": str(args.max_iterations),
+                "step_index": "0",
+                "step_total": "0",
             },
         )
 
@@ -1636,6 +1689,8 @@ def run_pre_tag_github_ci_with_fixes(
                 "SKILL_MAX_ITERATIONS": str(args.max_iterations),
                 "SKILL_TASK": "Fix the failure so pre-tag GitHub Actions verification passes.",
                 "SKILL_RUN_DIR": run_dir_resolved,
+                "SKILL_STEP_INDEX": "0",
+                "SKILL_STEP_TOTAL": "0",
             }
         )
 

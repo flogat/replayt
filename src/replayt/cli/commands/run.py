@@ -799,7 +799,9 @@ def cmd_try(
             )
         raise typer.Exit(code=0)
 
-    inputs_resolved = inputs_json_from_options(inputs_json, inputs_file)
+    inputs_resolved = inputs_json_from_options(
+        inputs_json, inputs_file, inputs_file_origin="cli"
+    )
     if inputs_resolved is None:
         default_inputs = dict(spec.inputs_example)
         if spec.key == "hello-world":

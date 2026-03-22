@@ -9,6 +9,8 @@ from datetime import datetime
 from itertools import zip_longest
 from typing import Any, Literal
 
+from replayt.cli.display import run_attention_summary
+
 REPORT_CSS = """
 :root {{
   --slate-50: #f8fafc; --slate-100: #f1f5f9; --slate-200: #e2e8f0; --slate-300: #cbd5e1;
@@ -94,6 +96,7 @@ REPORT_HTML = """\
         <p><span class="rp-label">Workflow:</span> {workflow_name}@{workflow_version}</p>
         <p><span class="rp-label">Status:</span>
           <span class="rp-badge {status_class}">{status}</span></p>
+        {attention_kv_html}
         <p><span class="rp-label">Duration:</span> {duration}</p>
         {tags_html}
         {meta_html}
@@ -718,9 +721,11 @@ def _legacy_build_run_report_html(
         workflow_version=html.escape(workflow_version),
         status=html.escape(status),
         status_class=status_class,
+        attention_kv_html=_report_attention_kv_html(events),
         duration=html.escape(duration),
         tags_html=tags_html,
         meta_html=meta_html,
+        attention_section="",
         approvals_section=approvals_section,
         timeline_html=timeline_html,
         outputs_section=outputs_section,
@@ -1128,6 +1133,37 @@ def build_report_diff_markdown(
     return "\n".join(lines).rstrip() + "\n"
 
 
+def _report_attention_kv_html(events: list[dict[str, Any]]) -> str:
+    """Header line matching ``replayt runs`` text output and inspect stakeholder Markdown."""
+
+    att = run_attention_summary(events)
+    kind = str(att.get("attention_kind") or "none")
+    asum = str(att.get("attention_summary") or "").strip()
+    if kind == "none":
+        return ""
+    if asum:
+        return (
+            '<p><span class="rp-label">attention=</span> '
+            f'<code class="rp-code">{html.escape(asum)}</code></p>'
+        )
+    return (
+        '<p><span class="rp-label">attention_kind=</span> '
+        f'<code class="rp-code">{html.escape(kind)}</code></p>'
+    )
+
+
+def _report_attention_md_lines(events: list[dict[str, Any]]) -> list[str]:
+    att = run_attention_summary(events)
+    kind = str(att.get("attention_kind") or "none")
+    asum = str(att.get("attention_summary") or "").strip()
+    if kind == "none":
+        return []
+    if asum:
+        safe = asum.replace("`", "'")
+        return [f"- **attention=** `{safe}`"]
+    return [f"- **attention_kind=** `{kind}`"]
+
+
 def build_run_report_html(
     run_id: str,
     events: list[dict[str, Any]],
@@ -1460,6 +1496,7 @@ def build_run_report_html(
         )
         report_title = "Run Report"
 
+    attention_kv_html = _report_attention_kv_html(events)
     return REPORT_HTML.format(
         report_title=html.escape(report_title),
         run_id=html.escape(run_id),
@@ -1467,6 +1504,7 @@ def build_run_report_html(
         workflow_version=html.escape(workflow_version),
         status=html.escape(status),
         status_class=status_class,
+        attention_kv_html=attention_kv_html,
         duration=html.escape(duration),
         tags_html=tags_html,
         meta_html=meta_html,
@@ -1541,8 +1579,9 @@ def build_run_report_markdown(
         f"- **Run ID:** `{run_id}`",
         f"- **Workflow:** {workflow_name}@{workflow_version}",
         f"- **Status:** {status}",
-        f"- **Duration:** {duration}",
     ]
+    lines.extend(_report_attention_md_lines(events))
+    lines += [f"- **Duration:** {duration}"]
     if tags:
         tag_strs = ", ".join(f"{k}={v}" for k, v in tags.items())
         lines.append(f"- **Tags:** {tag_strs}")

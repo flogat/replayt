@@ -27,7 +27,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--prompt-file", required=True)
     args = parser.parse_args(argv)
 
-    repo = Path(os.environ["REPO_ROOT"]).resolve()
+    try:
+        repo = Path(os.environ["REPO_ROOT"]).resolve()
+    except KeyError as exc:
+        raise SystemExit("REPO_ROOT environment variable is required") from exc
     skill = os.environ.get("SKILL_NAME", "")
     root = Path(__file__).resolve().parents[1]
     runner = root / "scripts" / "run_codex_skill.py"
@@ -41,6 +44,7 @@ def main(argv: list[str] | None = None) -> int:
         [sys.executable, str(runner), "--prompt-file", str(prompt)],
         cwd=str(repo),
         env=os.environ,
+        stdin=subprocess.DEVNULL,
     )
 
 

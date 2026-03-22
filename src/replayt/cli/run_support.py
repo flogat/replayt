@@ -248,6 +248,8 @@ def invoke_export_hook(
     seal: bool,
     event_count: int,
     report_style: str | None,
+    workflow_contract: dict[str, Any],
+    cli_target: str | None,
     timeout_seconds: float | None,
 ) -> None:
     """Run *argv* before ``export-run`` / ``bundle-export`` writes the archive; *argv* is trusted config only."""
@@ -260,11 +262,14 @@ def invoke_export_hook(
         "REPLAYT_EXPORT_OUT": str(out.resolve()),
         "REPLAYT_EXPORT_SEAL": "1" if seal else "0",
         "REPLAYT_EXPORT_EVENT_COUNT": str(event_count),
+        **_workflow_contract_hook_env(workflow_contract),
     }
     if sqlite is not None:
         extra["REPLAYT_SQLITE"] = str(sqlite.resolve())
     if report_style is not None:
         extra["REPLAYT_BUNDLE_REPORT_STYLE"] = report_style
+    if cli_target:
+        extra["REPLAYT_TARGET"] = cli_target
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -276,6 +281,7 @@ def invoke_seal_hook(
     jsonl_path: Path,
     seal_out: Path,
     line_count: int,
+    workflow_contract: dict[str, Any],
     timeout_seconds: float | None,
 ) -> None:
     """Run *argv* before ``replayt seal`` writes the manifest; *argv* is trusted config only."""
@@ -288,6 +294,7 @@ def invoke_seal_hook(
             "REPLAYT_SEAL_JSONL": str(jsonl_path.resolve()),
             "REPLAYT_SEAL_OUT": str(seal_out.resolve()),
             "REPLAYT_SEAL_LINE_COUNT": str(line_count),
+            **_workflow_contract_hook_env(workflow_contract),
         },
         timeout_seconds=timeout_seconds,
     )
@@ -303,6 +310,7 @@ def invoke_verify_seal_hook(
     manifest_schema: str,
     line_count: int,
     file_sha256: str,
+    workflow_contract: dict[str, Any],
     timeout_seconds: float | None,
 ) -> None:
     """Run *argv* after ``replayt verify-seal`` digests match; *argv* is trusted config only."""
@@ -317,6 +325,7 @@ def invoke_verify_seal_hook(
             "REPLAYT_VERIFY_SEAL_SCHEMA": manifest_schema,
             "REPLAYT_VERIFY_SEAL_LINE_COUNT": str(line_count),
             "REPLAYT_VERIFY_SEAL_FILE_SHA256": file_sha256,
+            **_workflow_contract_hook_env(workflow_contract),
         },
         timeout_seconds=timeout_seconds,
     )
@@ -377,6 +386,10 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_RUN_ID",
                     "REPLAYT_SQLITE",
+                    "REPLAYT_TARGET",
+                    "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_NAME",
+                    "REPLAYT_WORKFLOW_VERSION",
                 }
             ),
         },
@@ -390,6 +403,9 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_SEAL_JSONL",
                     "REPLAYT_SEAL_LINE_COUNT",
                     "REPLAYT_SEAL_OUT",
+                    "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_NAME",
+                    "REPLAYT_WORKFLOW_VERSION",
                 }
             ),
         },
@@ -405,6 +421,9 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_VERIFY_SEAL_LINE_COUNT",
                     "REPLAYT_VERIFY_SEAL_MANIFEST",
                     "REPLAYT_VERIFY_SEAL_SCHEMA",
+                    "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_NAME",
+                    "REPLAYT_WORKFLOW_VERSION",
                 }
             ),
         },
@@ -497,6 +516,69 @@ def exit_code_for_run_result(result: RunResult) -> int:
     if result.status == "paused":
         return 2
     return 1
+
+
+def build_cli_stdio_contract() -> dict[str, Any]:
+    """When the CLI may read the parent process stdin (subprocess / MCP wrappers).
+
+    Policy hooks always use ``stdin=subprocess.DEVNULL``; see ``policy_hook_env_catalog``.
+    """
+
+    return {
+        "recommended_subprocess_stdin": "devnull",
+        "reads_utf8_json_object_from_stdin": {
+            "subcommands": sorted(["ci", "doctor", "run", "validate"]),
+            "triggers": sorted(
+                [
+                    "cli:--inputs-file=-",
+                    "cli:--inputs-json=@-",
+                    "env:REPLAYT_INPUTS_FILE=-",
+                ]
+            ),
+            "encoding": "utf-8",
+            "empty_stdin_json": "object",
+        },
+        "note": (
+            "Unless you intentionally forward a UTF-8 JSON object for one of the triggers above, pass "
+            "stdin=subprocess.DEVNULL (or equivalent) so a host-attached stdin stream does not become "
+            "the workflow inputs payload."
+        ),
+    }
+
+
+def build_cli_exit_codes_report() -> dict[str, Any]:
+    """Machine-readable exit semantics for CI wrappers (``replayt version --format json``)."""
+
+    return {
+        "workflow_run": {
+            "subcommands": ["ci", "resume", "run", "try"],
+            "exit_codes": {
+                "0": {
+                    "run_status": "completed",
+                    "summary": "Workflow finished successfully.",
+                },
+                "1": {
+                    "run_status": "failed",
+                    "summary": (
+                        "Workflow failed, was interrupted, or a precondition or policy hook aborted "
+                        "(see stderr)."
+                    ),
+                },
+                "2": {
+                    "run_status": "paused",
+                    "summary": "Paused for approval; continue with replayt resume.",
+                },
+            },
+        },
+        "json_health_gates": {
+            "doctor": {"healthy_exit": 0, "unhealthy_exit": 1},
+            "validate": {"ok_exit": 0, "not_ok_exit": 1},
+        },
+        "note": (
+            "Listing, inspection, export, and seal helpers exit 1 on user or lookup errors so exit 2 "
+            "stays reserved for paused workflow runs."
+        ),
+    }
 
 
 def exit_for_run_result(result: RunResult) -> None:
