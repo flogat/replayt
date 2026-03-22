@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-## 0.4.12 - 2026-03-22
+- **Maintainer hygiene:** keep this section non-empty while the working tree contains unreleased changes so `scripts/maintainer_checks.py --changelog-nonempty` and the pre-tag GitHub Actions verification succeed on the live repository state.
+
+## 0.4.13 - 2026-03-22
 
 - **Maintainer hygiene:** restore a non-empty `## Unreleased` section so `scripts/maintainer_checks.py --changelog-nonempty` and the pre-tag GitHub Actions verification can pass on the live repository again.
 
