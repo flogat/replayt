@@ -35,4 +35,4 @@ __all__ = [
     "run_with_mock",
 ]
 
-__version__ = "0.4.7"
+__version__ = "0.4.9"

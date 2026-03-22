@@ -8,13 +8,13 @@ Baseline tag: **`v0.4.0`** (this release). Use `git log v0.4.0..HEAD --reverse` 
 | ------ | ------- | -------------- |
 | _(none yet)_ | | |
 
-## Release 0.4.0 delta (`f4a676a` … `3082122`)
+## Release 0.4.0 delta (`f4a676a` ... `3082122`)
 
 | Commit | Summary | Primary themes |
 | ------ | ------- | -------------- |
-| `3082122` | feat!: OpenRouter LLM defaults, persistence/CLI hardening, docs rollup | **Breaking:** unset provider → OpenRouter + `anthropic/claude-sonnet-4.6`; doctor, tests, docs, demos, examples |
+| `3082122` | feat!: OpenRouter LLM defaults, persistence/CLI hardening, docs rollup | **Breaking:** unset provider -> OpenRouter + `anthropic/claude-sonnet-4.6`; doctor, tests, docs, demos, examples |
 
-## Historical ledger (`v0.2.0` … `f4a676a`)
+## Historical ledger (`v0.2.0` ... `f4a676a`)
 
 Commits on the first-parent line from **`v0.2.0`** (`6a06bc9`) through **`f4a676a`** (0.3.0 release line). Reproduce with `git log v0.2.0..f4a676a --reverse`.
 
@@ -36,7 +36,7 @@ Commits on the first-parent line from **`v0.2.0`** (`6a06bc9`) through **`f4a676
 
 ## Thematic rollup (0.3.0 release line)
 
-1. **Breaking:** Tutorial package **`examples` → `replayt_examples`** (`fb8f94c`).
+1. **Breaking:** Tutorial package **`examples` -> `replayt_examples`** (`fb8f94c`).
 2. **CLI surface:** Modular commands (`f4a676a`); validate / dry-check, try, ci, seal, export, report-diff, doctor, init (`59d5f38`, `7f31743`, `f4a676a`).
 3. **Runner & workflow:** Hooks, approvals, experiment metadata, YAML graph inference (`59d5f38`, `0066209`, `a93f07a`, `c415ea6`).
 4. **Persistence:** SQLite WAL, JSONL locking, MultiStore (`0066209`, `a93f07a`, `c415ea6` and follow-ups in **CHANGELOG** **0.3.0**).

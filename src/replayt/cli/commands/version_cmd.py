@@ -9,6 +9,7 @@ from typing import Literal
 import typer
 
 import replayt
+from replayt.cli.run_support import RUN_RESULT_SCHEMA
 
 VERSION_REPORT_SCHEMA = "replayt.version_report.v1"
 
@@ -30,10 +31,17 @@ def build_version_report() -> dict[str, object]:
         "cli_machine_readable_schemas": {
             "version_report": VERSION_REPORT_SCHEMA,
             "workflow_contract": "replayt.workflow_contract.v1",
+            "workflow_contract_check": "replayt.workflow_contract_check.v1",
             "validate_report": "replayt.validate_report.v1",
             "doctor_report": "replayt.doctor_report.v1",
             "config_report": "replayt.config_report.v1",
             "ci_run_summary": "replayt.ci_run_summary.v1",
+            "run_result": RUN_RESULT_SCHEMA,
+            "inspect_report": "replayt.inspect_report.v1",
+            "stats_report": "replayt.stats_report.v1",
+            "diff_report": "replayt.diff_report.v1",
+            "try_examples": "replayt.try_examples.v1",
+            "try_copy": "replayt.try_copy.v1",
         },
     }
 

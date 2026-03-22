@@ -16,7 +16,14 @@ from typing import Any
 from replayt.exceptions import ApprovalPending, ContextSchemaError, ReplaytError, RunFailed
 from replayt.llm import LLMBridge, LLMSettings, OpenAICompatClient
 from replayt.persistence.base import EventStore
-from replayt.security import missing_actor_fields, normalize_name_list, redact_named_fields, trust_boundary_checks
+from replayt.security import (
+    approval_reason_missing,
+    missing_actor_fields,
+    normalize_name_list,
+    redact_named_fields,
+    sanitize_base_url_for_output,
+    trust_boundary_checks,
+)
 from replayt.tools import ToolRegistry
 from replayt.types import LogMode
 from replayt.workflow import Workflow
@@ -206,6 +213,7 @@ class Runner:
         before_step: Callable[[RunContext, str], None] | None = None,
         after_step: Callable[[RunContext, str, str | None], None] | None = None,
         redact_keys: list[str] | tuple[str, ...] | None = None,
+        policy_hooks: dict[str, Any] | None = None,
     ) -> None:
         self.workflow = workflow
         self.store = store
@@ -225,6 +233,7 @@ class Runner:
         self._before_step = before_step
         #: Called after a successful handler return, before ``state_exited`` / ``transition`` events.
         self._after_step = after_step
+        self._policy_hooks = copy.deepcopy(policy_hooks) if policy_hooks else None
 
     def close(self) -> None:
         if self._owns_client:
@@ -250,7 +259,7 @@ class Runner:
             llm_payload.update(
                 {
                     "provider": settings.provider,
-                    "base_url": settings.base_url,
+                    "base_url": sanitize_base_url_for_output(settings.base_url),
                     "model": settings.model,
                     "timeout_seconds": settings.timeout_seconds,
                     "top_p": settings.top_p,
@@ -259,6 +268,7 @@ class Runner:
                     "seed": settings.seed,
                     "max_tokens": settings.max_tokens,
                     "stop": list(settings.stop) if settings.stop else None,
+                    "extra_body_keys": sorted((settings.extra_body or {}).keys()),
                     "max_response_bytes": settings.max_response_bytes,
                     "max_parse_response_chars": settings.max_parse_response_chars,
                     "max_schema_json_chars": settings.max_schema_json_chars,
@@ -267,7 +277,7 @@ class Runner:
                 }
             )
             trust_checks = trust_boundary_checks(base_url=settings.base_url, log_mode=self.log_mode)
-        return {
+        runtime = {
             "engine": {
                 "log_mode": self.log_mode.value,
                 "max_steps": self.max_steps,
@@ -285,6 +295,9 @@ class Runner:
                 "warnings": [check.detail for check in trust_checks if not check.ok],
             },
         }
+        if self._policy_hooks:
+            runtime["policy_hooks"] = copy.deepcopy(self._policy_hooks)
+        return runtime
 
     def _load_approval_state_from_events(self, events: list[dict[str, Any]]) -> None:
         self._approval_outcomes.clear()
@@ -583,6 +596,8 @@ def resolve_approval_on_store(
     reason: str | None = None,
     actor: dict[str, Any] | None = None,
     required_actor_keys: list[str] | tuple[str, ...] | None = None,
+    require_reason: bool = False,
+    policy_hook: dict[str, Any] | None = None,
 ) -> None:
     """Append an `approval_resolved` event; resume execution via `Runner.run(..., resume=True)`."""
     events = store.load_events(run_id)
@@ -608,6 +623,8 @@ def resolve_approval_on_store(
     if missing:
         joined = ", ".join(missing)
         raise ValueError(f"approval actor is missing required keys: {joined}")
+    if approval_reason_missing(reason, required=require_reason):
+        raise ValueError("approval reason is required")
 
     payload: dict[str, Any] = {
         "approval_id": str(approval_id),
@@ -618,6 +635,8 @@ def resolve_approval_on_store(
         payload["reason"] = reason
     if actor:
         payload["actor"] = dict(actor)
+    if policy_hook:
+        payload["policy_hook"] = copy.deepcopy(policy_hook)
 
     event: dict[str, Any] = {
         "ts": _utcnow_iso(),

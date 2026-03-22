@@ -61,6 +61,130 @@ def done(ctx):
     assert start_step["outgoing_transitions"] == ["done"]
 
 
+def test_cli_contract_snapshot_out_writes_json(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "contract_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("contract_flow", version="3")
+wf.set_initial("start")
+wf.note_transition("start", "done")
+
+@wf.step("start")
+def start(ctx):
+    return "done"
+
+@wf.step("done")
+def done(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    snapshot_path = tmp_path / "contracts" / "workflow.contract.json"
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["contract", str(workflow_path), "--snapshot-out", str(snapshot_path)])
+
+    assert result.exit_code == 0
+    assert snapshot_path.is_file()
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+    assert payload["schema"] == "replayt.workflow_contract.v1"
+    assert payload["workflow"]["name"] == "contract_flow"
+    assert f"wrote {snapshot_path}" in result.stdout
+
+
+def test_cli_contract_check_matches_snapshot(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "contract_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("contract_flow", version="3")
+wf.set_initial("start")
+wf.note_transition("start", "done")
+
+@wf.step("start")
+def start(ctx):
+    return "done"
+
+@wf.step("done")
+def done(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    snapshot_path = tmp_path / "workflow.contract.json"
+    runner = CliRunner()
+    write = runner.invoke(app, ["contract", str(workflow_path), "--snapshot-out", str(snapshot_path)])
+    assert write.exit_code == 0
+
+    check = runner.invoke(app, ["contract", str(workflow_path), "--check", str(snapshot_path)])
+
+    assert check.exit_code == 0
+    assert f"contract matches {snapshot_path}" in check.stdout
+
+
+def test_cli_contract_check_json_reports_drift(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "contract_flow.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("contract_flow", version="3")
+wf.set_initial("start")
+wf.note_transition("start", "done")
+
+@wf.step("start")
+def start(ctx):
+    return "done"
+
+@wf.step("done")
+def done(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    snapshot_path = tmp_path / "workflow.contract.json"
+    runner = CliRunner()
+    write = runner.invoke(app, ["contract", str(workflow_path), "--snapshot-out", str(snapshot_path)])
+    assert write.exit_code == 0
+
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("contract_flow", version="4")
+wf.set_initial("start")
+wf.note_transition("start", "done")
+wf.note_transition("done", "archive")
+
+@wf.step("start")
+def start(ctx):
+    return "done"
+
+@wf.step("done")
+def done(ctx):
+    return "archive"
+
+@wf.step("archive")
+def archive(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+
+    check = runner.invoke(app, ["contract", str(workflow_path), "--check", str(snapshot_path), "--format", "json"])
+
+    assert check.exit_code == 1
+    payload = json.loads(check.stdout)
+    assert payload["schema"] == "replayt.workflow_contract_check.v1"
+    assert payload["ok"] is False
+    assert payload["snapshot_path"] == str(snapshot_path)
+    assert payload["workflow"]["version"] == "4"
+    assert any(line.startswith("@@") for line in payload["diff"])
+
+
 def test_cli_inspect_unknown_run_id_shows_runs_hint(tmp_path: Path) -> None:
     runner = CliRunner()
     r = runner.invoke(app, ["inspect", "00000000-0000-0000-0000-000000000000", "--log-dir", str(tmp_path)])
@@ -392,8 +516,10 @@ def start(ctx):
         ],
     )
     assert result.exit_code == 0
-    assert '"status": "completed"' in result.stdout
-    assert '"run_id"' in result.stdout
+    data = json.loads(result.stdout)
+    assert data["schema"] == "replayt.run_result.v1"
+    assert data["status"] == "completed"
+    assert data["run_id"]
 
 
 def test_cli_run_dry_run_json_output_is_machine_readable(tmp_path: Path) -> None:
@@ -426,6 +552,7 @@ def start(ctx):
     )
     assert result.exit_code == 0
     data = json.loads(result.stdout)
+    assert data["schema"] == "replayt.run_result.v1"
     assert data["status"] == "completed"
     assert data["workflow"] == "json_dry_run@1"
 
@@ -442,7 +569,10 @@ def test_cli_init_scaffold(tmp_path: Path) -> None:
     gi = tmp_path / ".gitignore"
     assert gi.is_file()
     assert ".replayt/" in gi.read_text(encoding="utf-8")
-    assert "--inputs-json @inputs.example.json" in r.stdout
+    assert "PowerShell: .\\.venv\\Scripts\\Activate.ps1" in r.stdout
+    assert "replayt doctor --skip-connectivity --target workflow.py" in r.stdout
+    assert "replayt run workflow.py --dry-check --inputs-file inputs.example.json" in r.stdout
+    assert "replayt run workflow.py --inputs-file inputs.example.json" in r.stdout
     r2 = runner.invoke(app, ["init", "--path", str(tmp_path)])
     assert r2.exit_code == 1
     r3 = runner.invoke(app, ["init", "--path", str(tmp_path), "--force"])
@@ -485,6 +615,7 @@ def test_cli_init_scaffold_richer_templates(
     assert inputs_file.is_file()
     assert json.loads(inputs_file.read_text(encoding="utf-8")) == expected_inputs
     assert expected_snippet in wf_file.read_text(encoding="utf-8")
+    assert "replayt run workflow.py --dry-run --inputs-file inputs.example.json" in r.stdout
 
     dry_check = runner.invoke(
         app,
@@ -660,6 +791,24 @@ def test_cli_try_smoke(tmp_path: Path) -> None:
     assert "workflow=hello_world_tutorial@1" in r.stdout
 
 
+def test_cli_try_input_override_merges_with_packaged_defaults(tmp_path: Path) -> None:
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        ["try", "--log-dir", str(tmp_path), "--input", "customer_name=Pat"],
+    )
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    inspect = runner.invoke(app, ["inspect", run_id, "--log-dir", str(tmp_path), "--output", "json"])
+    assert inspect.exit_code == 0
+    payload = json.loads(inspect.stdout)
+    assert payload["schema"] == "replayt.inspect_report.v1"
+    assert payload["run_id"] == run_id
+    started = next(event for event in payload["events"] if event["type"] == "run_started")
+    assert started["payload"]["inputs"] == {"customer_name": "Pat"}
+
+
 def test_cli_try_lists_packaged_examples() -> None:
     runner = CliRunner()
     r = runner.invoke(app, ["try", "--list"])
@@ -683,6 +832,9 @@ def test_cli_try_copy_to_writes_workflow_and_inputs(tmp_path: Path) -> None:
     assert loaded.get("customer_name") == "Sam"
     assert "Next steps:" in r.stdout
     assert str(wf) in r.stdout
+    assert "replayt doctor --skip-connectivity --target workflow.py" in r.stdout
+    assert "replayt run workflow.py --dry-check --inputs-file inputs.example.json" in r.stdout
+    assert "replayt run workflow.py --inputs-file inputs.example.json" in r.stdout
 
 
 def test_cli_try_copy_to_json_schema(tmp_path: Path) -> None:
@@ -722,11 +874,24 @@ def test_cli_try_copy_to_force_overwrites(tmp_path: Path) -> None:
     assert "Workflow" in (dest / "workflow.py").read_text(encoding="utf-8")
 
 
+def test_cli_try_copy_to_llm_backed_example_suggests_dry_run(tmp_path: Path) -> None:
+    dest = tmp_path / "triage"
+    runner = CliRunner()
+    r = runner.invoke(app, ["try", "--example", "issue-triage", "--copy-to", str(dest)])
+    assert r.exit_code == 0
+    assert "replayt run workflow.py --dry-run --inputs-file inputs.example.json" in r.stdout
+    assert "replayt run workflow.py --inputs-file inputs.example.json" in r.stdout
+
+
 def test_cli_try_copy_to_rejects_live_and_inputs(tmp_path: Path) -> None:
     runner = CliRunner()
     r = runner.invoke(app, ["try", "--copy-to", str(tmp_path), "--live"])
     assert r.exit_code == 2
     assert "Cannot combine --copy-to" in (r.stderr or r.stdout or "")
+
+    r2 = runner.invoke(app, ["try", "--copy-to", str(tmp_path), "--input", "customer_name=Pat"])
+    assert r2.exit_code == 2
+    assert "Cannot combine --copy-to" in (r2.stderr or r2.stdout or "")
 
 
 def test_cli_try_runs_selected_example_with_inputs_file_override(tmp_path: Path) -> None:
@@ -762,6 +927,8 @@ def test_cli_try_runs_selected_example_with_inputs_file_override(tmp_path: Path)
     inspect = runner.invoke(app, ["inspect", run_id, "--log-dir", str(tmp_path), "--output", "json"])
     assert inspect.exit_code == 0
     payload = json.loads(inspect.stdout)
+    assert payload["schema"] == "replayt.inspect_report.v1"
+    assert payload["run_id"] == run_id
     started = next(event for event in payload["events"] if event["type"] == "run_started")
     assert started["payload"]["workflow_name"] == "github_issue_triage"
     assert started["payload"]["inputs"]["issue"]["title"] == "Checkout bug on mobile"
@@ -1074,6 +1241,7 @@ def compose(ctx):
     inspect = runner.invoke(app, ["inspect", run_id, "--log-dir", str(tmp_path), "--output", "json"])
     assert inspect.exit_code == 0
     inspect_payload = json.loads(inspect.stdout)
+    assert inspect_payload["schema"] == "replayt.inspect_report.v1"
     assert inspect_payload["summary"]["notes"] == 1
 
     inspect_notes = runner.invoke(
@@ -1091,9 +1259,30 @@ def compose(ctx):
     )
     assert inspect_notes.exit_code == 0
     notes_payload = json.loads(inspect_notes.stdout)
+    assert notes_payload["schema"] == "replayt.inspect_report.v1"
     assert notes_payload["event_type_filter"] == ["step_note"]
     assert [e["type"] for e in notes_payload["events"]] == ["step_note"]
     assert notes_payload["summary"]["notes"] == 1
+
+    inspect_note_kind = runner.invoke(
+        app,
+        [
+            "inspect",
+            run_id,
+            "--log-dir",
+            str(tmp_path),
+            "--output",
+            "json",
+            "--note-kind",
+            "framework_summary",
+        ],
+    )
+    assert inspect_note_kind.exit_code == 0
+    note_kind_payload = json.loads(inspect_note_kind.stdout)
+    assert note_kind_payload["schema"] == "replayt.inspect_report.v1"
+    assert note_kind_payload["note_kind_filter"] == ["framework_summary"]
+    assert [e["type"] for e in note_kind_payload["events"]] == ["step_note"]
+    assert note_kind_payload["events"][0]["payload"]["kind"] == "framework_summary"
 
     inspect_or = runner.invoke(
         app,
@@ -1112,13 +1301,38 @@ def compose(ctx):
     )
     assert inspect_or.exit_code == 0
     or_payload = json.loads(inspect_or.stdout)
+    assert or_payload["schema"] == "replayt.inspect_report.v1"
     assert set(or_payload["event_type_filter"]) == {"run_started", "step_note"}
     assert {e["type"] for e in or_payload["events"]} <= {"run_started", "step_note"}
     assert len(or_payload["events"]) >= 2
 
+    inspect_or_note_kind = runner.invoke(
+        app,
+        [
+            "inspect",
+            run_id,
+            "--log-dir",
+            str(tmp_path),
+            "--output",
+            "json",
+            "--event-type",
+            "step_note",
+            "--event-type",
+            "run_started",
+            "--note-kind",
+            "framework_summary",
+        ],
+    )
+    assert inspect_or_note_kind.exit_code == 0
+    or_note_kind_payload = json.loads(inspect_or_note_kind.stdout)
+    assert or_note_kind_payload["schema"] == "replayt.inspect_report.v1"
+    assert set(or_note_kind_payload["event_type_filter"]) == {"run_started", "step_note"}
+    assert or_note_kind_payload["note_kind_filter"] == ["framework_summary"]
+    assert {e["type"] for e in or_note_kind_payload["events"]} == {"run_started", "step_note"}
+
     inspect_text = runner.invoke(
         app,
-        ["inspect", run_id, "--log-dir", str(tmp_path), "--event-type", "step_note"],
+        ["inspect", run_id, "--log-dir", str(tmp_path), "--note-kind", "framework_summary"],
     )
     assert inspect_text.exit_code == 0
     assert "shown=1" in inspect_text.stdout
@@ -1273,7 +1487,9 @@ def start(ctx):
     assert run.exit_code == 0
     stats = runner.invoke(app, ["stats", "--log-dir", str(tmp_path), "--output", "json"])
     assert stats.exit_code == 0
-    assert '"runs_included"' in stats.stdout
+    stats_payload = json.loads(stats.stdout)
+    assert stats_payload["schema"] == "replayt.stats_report.v1"
+    assert stats_payload["runs_included"] == 1
     run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
     html_out = runner.invoke(
         app,
@@ -1586,6 +1802,8 @@ def test_cli_config_reports_effective_project_defaults(tmp_path: Path, monkeypat
     assert data["seal"]["hook_timeout_source"] == "project_config:seal_hook_timeout"
     assert data["resume"]["required_actor_keys"] == ["email", "ticket_id"]
     assert data["resume"]["required_actor_keys_source"] == "project_config:approval_actor_required_keys"
+    assert data["resume"]["required_reason"] is False
+    assert data["resume"]["required_reason_source"] == "unset"
     assert any(check["name"] == "log_dir_ready" for check in data["filesystem"]["checks"])
     assert any(
         warning == "full log mode stores raw LLM request and response bodies on disk"
@@ -1620,6 +1838,37 @@ def test_cli_config_reports_unknown_project_config_keys(tmp_path: Path, monkeypa
     assert text.exit_code == 0
     assert "project_config_unknown_keys" in text.stdout
     assert "log-mode" in text.stdout
+
+
+def test_cli_config_reports_ci_artifact_env_preview(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    junit = tmp_path / "artifacts" / "junit.xml"
+    summary = tmp_path / "artifacts" / "summary.json"
+    github = tmp_path / "artifacts" / "github.md"
+    monkeypatch.setenv("REPLAYT_JUNIT_XML", str(junit))
+    monkeypatch.setenv("REPLAYT_SUMMARY_JSON", str(summary))
+    monkeypatch.setenv("REPLAYT_GITHUB_SUMMARY", "1")
+    monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(github))
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["config", "--format", "json"])
+
+    assert result.exit_code == 0
+    data = json.loads(result.stdout)
+    ci_artifacts = data["ci_artifacts"]
+    assert ci_artifacts["junit_xml"]["path"] == str(junit.resolve())
+    assert ci_artifacts["junit_xml"]["source"] == "env:REPLAYT_JUNIT_XML"
+    assert ci_artifacts["summary_json"]["path"] == str(summary.resolve())
+    assert ci_artifacts["summary_json"]["source"] == "env:REPLAYT_SUMMARY_JSON"
+    assert ci_artifacts["github_summary"]["requested"] is True
+    assert ci_artifacts["github_summary"]["requested_source"] == "env:REPLAYT_GITHUB_SUMMARY"
+    assert ci_artifacts["github_summary"]["path"] == str(github.resolve())
+    assert ci_artifacts["github_summary"]["path_source"] == "env:GITHUB_STEP_SUMMARY"
+    readiness = {check["name"]: check for check in data["filesystem"]["checks"]}
+    assert readiness["ci_junit_xml_ready"]["ok"] is True
+    assert readiness["ci_summary_json_ready"]["ok"] is True
+    assert readiness["ci_github_summary_ready"]["ok"] is True
 
 
 def test_cli_doctor_warns_on_unknown_project_config_keys(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2046,6 +2295,7 @@ def start(ctx):
     import json as _json
 
     payload = _json.loads(json_result.stdout)
+    assert payload["schema"] == "replayt.diff_report.v1"
     assert payload["run_a"] == id_a
     assert payload["run_b"] == id_b
     assert "status" in payload
@@ -2121,6 +2371,7 @@ def test_diff_preserves_multiple_structured_outputs_with_same_schema_name(tmp_pa
     result = runner.invoke(app, ["diff", "run-a", "run-b", "--log-dir", str(log_dir), "--output", "json"])
     assert result.exit_code == 0
     payload = json.loads(result.stdout)
+    assert payload["schema"] == "replayt.diff_report.v1"
     assert payload["structured_outputs"]["changed"] is True
     assert payload["structured_outputs"]["a_count"] == 2
     assert payload["structured_outputs"]["b_count"] == 2
@@ -2388,6 +2639,14 @@ def test_cli_export_hook_receives_policy_context(tmp_path: Path, monkeypatch: py
     assert data["seal"] == "1"
     assert int(data["count"]) > 0
     assert data["report_style"] is None
+    with tarfile.open(tar_path, "r:gz") as tf:
+        manifest_member = next(name for name in tf.getnames() if name.endswith("/manifest.json"))
+        manifest = json.loads(tf.extractfile(manifest_member).read().decode("utf-8"))
+    assert manifest["policy_hook"] == {
+        "source": "project_config:export_hook",
+        "argv0": Path(sys.executable).name,
+        "arg_count": 3,
+    }
 
 
 def test_cli_seal_hook_failure_aborts_seal(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -2471,6 +2730,12 @@ def test_cli_seal_hook_receives_policy_context(tmp_path: Path, monkeypatch: pyte
     assert data["jsonl"] == str(jsonl_path)
     assert data["out"] == str(seal_path)
     assert int(data["line_count"]) > 0
+    manifest = json.loads(seal_path.read_text(encoding="utf-8"))
+    assert manifest["policy_hook"] == {
+        "source": "project_config:seal_hook",
+        "argv0": Path(sys.executable).name,
+        "arg_count": 3,
+    }
 
 
 def test_cli_export_run_tarball(tmp_path: Path) -> None:
@@ -2726,6 +2991,110 @@ def test_cli_runs_tool_filter(tmp_path: Path) -> None:
     )
     assert r_stats.exit_code == 0
     stats_payload = json.loads(r_stats.stdout)
+    assert stats_payload["schema"] == "replayt.stats_report.v1"
+    assert stats_payload["runs_included"] == 1
+
+
+def test_cli_runs_and_stats_filter_by_note_kind(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+
+    def _run_with_notes(note_kinds: list[str], rid: str) -> list[dict[str, object]]:
+        lines: list[dict[str, object]] = [
+            {
+                "ts": "2026-03-01T00:00:00+00:00",
+                "run_id": rid,
+                "seq": 1,
+                "type": "run_started",
+                "payload": {"workflow_name": "w", "workflow_version": "1"},
+            }
+        ]
+        seq = 2
+        for kind in note_kinds:
+            lines.append(
+                {
+                    "ts": f"2026-03-01T00:00:0{seq-1}+00:00",
+                    "run_id": rid,
+                    "seq": seq,
+                    "type": "step_note",
+                    "payload": {"state": "compose", "kind": kind, "summary": f"{kind} done"},
+                }
+            )
+            seq += 1
+        lines.append(
+            {
+                "ts": "2026-03-01T00:00:09+00:00",
+                "run_id": rid,
+                "seq": seq,
+                "type": "run_completed",
+                "payload": {"status": "completed"},
+            }
+        )
+        return lines
+
+    for lines, name in (
+        (_run_with_notes(["framework_summary"], "rid-a"), "rid-a"),
+        (_run_with_notes(["subrun_link"], "rid-b"), "rid-b"),
+        (
+            [
+                {
+                    "ts": "2026-03-01T00:00:00+00:00",
+                    "run_id": "rid-c",
+                    "seq": 1,
+                    "type": "run_started",
+                    "payload": {"workflow_name": "w", "workflow_version": "1"},
+                },
+                {
+                    "ts": "2026-03-01T00:00:01+00:00",
+                    "run_id": "rid-c",
+                    "seq": 2,
+                    "type": "run_completed",
+                    "payload": {"status": "completed"},
+                },
+            ],
+            "rid-c",
+        ),
+    ):
+        (log_dir / f"{name}.jsonl").write_text(
+            "\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8"
+        )
+
+    runner = CliRunner()
+    inspect = runner.invoke(
+        app,
+        ["inspect", "rid-a", "--log-dir", str(log_dir), "--output", "json", "--note-kind", "framework_summary"],
+    )
+    assert inspect.exit_code == 0
+    inspect_payload = json.loads(inspect.stdout)
+    assert inspect_payload["schema"] == "replayt.inspect_report.v1"
+    assert inspect_payload["note_kind_filter"] == ["framework_summary"]
+    assert [e["type"] for e in inspect_payload["events"]] == ["step_note"]
+
+    r_one = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--note-kind", "framework_summary"])
+    assert r_one.exit_code == 0
+    assert "rid-a" in r_one.stdout
+    assert "rid-b" not in r_one.stdout
+    assert "rid-c" not in r_one.stdout
+
+    r_or = runner.invoke(
+        app,
+        ["runs", "--log-dir", str(log_dir), "--note-kind", "framework_summary", "--note-kind", "subrun_link"],
+    )
+    assert r_or.exit_code == 0
+    assert "rid-a" in r_or.stdout and "rid-b" in r_or.stdout
+    assert "rid-c" not in r_or.stdout
+
+    bad = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--note-kind", ""])
+    assert bad.exit_code != 0
+    assert "Empty --note-kind" in (bad.stdout + (bad.stderr or ""))
+
+    r_stats = runner.invoke(
+        app,
+        ["stats", "--log-dir", str(log_dir), "--note-kind", "framework_summary", "--output", "json"],
+    )
+    assert r_stats.exit_code == 0
+    stats_payload = json.loads(r_stats.stdout)
+    assert stats_payload["schema"] == "replayt.stats_report.v1"
     assert stats_payload["runs_included"] == 1
 
 
@@ -2907,6 +3276,115 @@ def test_cli_report_diff_preserves_repeated_outputs_and_approvals(tmp_path: Path
     assert diff.stdout.count("different") >= 2
 
 
+def test_cli_report_diff_markdown_preserves_repeated_outputs_and_approvals(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    run_a = [
+        {
+            "ts": "2026-03-21T10:00:00+00:00",
+            "run_id": "dup-a",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "dup", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-21T10:00:01+00:00",
+            "run_id": "dup-a",
+            "seq": 2,
+            "type": "structured_output",
+            "payload": {"schema_name": "Decision", "state": "classify", "data": {"result": "accept"}},
+        },
+        {
+            "ts": "2026-03-21T10:00:02+00:00",
+            "run_id": "dup-a",
+            "seq": 3,
+            "type": "structured_output",
+            "payload": {"schema_name": "Decision", "state": "review", "data": {"result": "ship"}},
+        },
+        {
+            "ts": "2026-03-21T10:00:03+00:00",
+            "run_id": "dup-a",
+            "seq": 4,
+            "type": "approval_requested",
+            "payload": {"state": "review", "approval_id": "ship", "summary": "First approval"},
+        },
+        {
+            "ts": "2026-03-21T10:00:04+00:00",
+            "run_id": "dup-a",
+            "seq": 5,
+            "type": "approval_requested",
+            "payload": {"state": "review", "approval_id": "ship", "summary": "Second approval"},
+        },
+        {
+            "ts": "2026-03-21T10:00:05+00:00",
+            "run_id": "dup-a",
+            "seq": 6,
+            "type": "run_completed",
+            "payload": {"status": "paused"},
+        },
+    ]
+    run_b = [
+        {
+            "ts": "2026-03-21T10:05:00+00:00",
+            "run_id": "dup-b",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "dup", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-21T10:05:01+00:00",
+            "run_id": "dup-b",
+            "seq": 2,
+            "type": "structured_output",
+            "payload": {"schema_name": "Decision", "state": "classify", "data": {"result": "accept"}},
+        },
+        {
+            "ts": "2026-03-21T10:05:02+00:00",
+            "run_id": "dup-b",
+            "seq": 3,
+            "type": "structured_output",
+            "payload": {"schema_name": "Decision", "state": "review", "data": {"result": "hold"}},
+        },
+        {
+            "ts": "2026-03-21T10:05:03+00:00",
+            "run_id": "dup-b",
+            "seq": 4,
+            "type": "approval_requested",
+            "payload": {"state": "review", "approval_id": "ship", "summary": "First approval"},
+        },
+        {
+            "ts": "2026-03-21T10:05:04+00:00",
+            "run_id": "dup-b",
+            "seq": 5,
+            "type": "approval_requested",
+            "payload": {"state": "review", "approval_id": "ship", "summary": "Second approval changed"},
+        },
+        {
+            "ts": "2026-03-21T10:05:05+00:00",
+            "run_id": "dup-b",
+            "seq": 6,
+            "type": "run_completed",
+            "payload": {"status": "paused"},
+        },
+    ]
+    for rid, events in (("dup-a", run_a), ("dup-b", run_b)):
+        (log_dir / f"{rid}.jsonl").write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n",
+            encoding="utf-8",
+        )
+
+    runner = CliRunner()
+    diff = runner.invoke(app, ["report-diff", "dup-a", "dup-b", "--log-dir", str(log_dir), "--format", "markdown"])
+
+    assert diff.exit_code == 0
+    assert "# Run comparison" in diff.stdout
+    assert "### Decision #1" in diff.stdout
+    assert "### Decision #2" in diff.stdout
+    assert "### ship #1" in diff.stdout
+    assert "### ship #2" in diff.stdout
+    assert diff.stdout.count("- Match: no") >= 2
+
+
 def test_cli_report_diff_includes_context_and_failure_sections(tmp_path: Path) -> None:
     log_dir = tmp_path / "runs"
     log_dir.mkdir()
@@ -3002,6 +3480,120 @@ def test_cli_report_diff_includes_context_and_failure_sections(tmp_path: Path) -
     assert "Workflow metadata" in diff.stdout
     assert "Run failure" in diff.stdout
     assert "Latest structured parse failure" in diff.stdout
+
+
+def test_cli_report_diff_markdown_writes_context_and_failure_sections(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    run_a = [
+        {
+            "ts": "2026-03-21T12:00:00+00:00",
+            "run_id": "ctx-a",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {
+                "workflow_name": "ctx",
+                "workflow_version": "1",
+                "run_metadata": {"tenant": "acme"},
+                "experiment": {"lane": "a"},
+                "workflow_meta": {"surface": "support"},
+            },
+        },
+        {
+            "ts": "2026-03-21T12:00:01+00:00",
+            "run_id": "ctx-a",
+            "seq": 2,
+            "type": "run_failed",
+            "payload": {"state": "classify", "error": {"type": "RuntimeError", "message": "bad input"}},
+        },
+        {
+            "ts": "2026-03-21T12:00:02+00:00",
+            "run_id": "ctx-a",
+            "seq": 3,
+            "type": "structured_output_failed",
+            "payload": {
+                "state": "classify",
+                "schema_name": "Decision",
+                "stage": "json_decode",
+                "structured_output_mode": "prompt_only",
+                "error": {"type": "JSONDecodeError", "message": "bad json"},
+            },
+        },
+        {
+            "ts": "2026-03-21T12:00:03+00:00",
+            "run_id": "ctx-a",
+            "seq": 4,
+            "type": "run_completed",
+            "payload": {"status": "failed"},
+        },
+    ]
+    run_b = [
+        {
+            "ts": "2026-03-21T12:10:00+00:00",
+            "run_id": "ctx-b",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {
+                "workflow_name": "ctx",
+                "workflow_version": "1",
+                "run_metadata": {"tenant": "globex"},
+                "experiment": {"lane": "b"},
+                "workflow_meta": {"surface": "product"},
+            },
+        },
+        {
+            "ts": "2026-03-21T12:10:01+00:00",
+            "run_id": "ctx-b",
+            "seq": 2,
+            "type": "retry_scheduled",
+            "payload": {
+                "state": "classify",
+                "attempt": 1,
+                "max_attempts": 2,
+                "error": {"type": "TimeoutError", "message": "slow upstream"},
+            },
+        },
+        {
+            "ts": "2026-03-21T12:10:02+00:00",
+            "run_id": "ctx-b",
+            "seq": 3,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    for rid, events in (("ctx-a", run_a), ("ctx-b", run_b)):
+        (log_dir / f"{rid}.jsonl").write_text(
+            "\n".join(json.dumps(event) for event in events) + "\n",
+            encoding="utf-8",
+        )
+
+    out_path = tmp_path / "diff.md"
+    runner = CliRunner()
+    diff = runner.invoke(
+        app,
+        [
+            "report-diff",
+            "ctx-a",
+            "ctx-b",
+            "--log-dir",
+            str(log_dir),
+            "--format",
+            "markdown",
+            "--out",
+            str(out_path),
+        ],
+    )
+
+    assert diff.exit_code == 0
+    assert out_path.is_file()
+    body = out_path.read_text(encoding="utf-8")
+    assert "## Run context" in body
+    assert "## Failure and pause signals" in body
+    assert "### Experiment" in body
+    assert "### Run failure" in body
+    assert "### Latest structured parse failure" in body
+    assert '"tenant": "acme"' in body
+    assert '"tenant": "globex"' in body
 
 
 def test_replayt_log_dir_env_default(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -3170,7 +3762,11 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
         "'target': os.environ.get('REPLAYT_TARGET'), "
         "'dry_run': os.environ.get('REPLAYT_DRY_RUN'), "
         "'log_dir': os.environ.get('REPLAYT_LOG_DIR'), "
-        "'log_mode': os.environ.get('REPLAYT_LOG_MODE')"
+        "'log_mode': os.environ.get('REPLAYT_LOG_MODE'), "
+        "'inputs': json.loads(os.environ['REPLAYT_RUN_INPUTS_JSON']), "
+        "'tags': json.loads(os.environ['REPLAYT_RUN_TAGS_JSON']), "
+        "'metadata': json.loads(os.environ['REPLAYT_RUN_METADATA_JSON']), "
+        "'experiment': json.loads(os.environ['REPLAYT_RUN_EXPERIMENT_JSON'])"
         "}), encoding='utf-8')"
     )
     pyproject = tmp_path / "pyproject.toml"
@@ -3194,7 +3790,17 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
             "--log-dir",
             str(tmp_path / "logs"),
             "--inputs-json",
-            '{"customer_name":"Sam"}',
+            '{"customer_name":"Sam","policy":{"env":"dev"}}',
+            "--input",
+            "policy.env=prod",
+            "--tag",
+            "deployment=prod",
+            "--tag",
+            "team=platform",
+            "--metadata-json",
+            '{"change_ticket":"CHG-123","deployment_tier":"prod"}',
+            "--experiment-json",
+            '{"cohort":"enterprise-policy"}',
             "--dry-run",
         ],
     )
@@ -3205,8 +3811,28 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
     assert data["mode"] == "run"
     assert data["target"] == "replayt_examples.e01_hello_world:wf"
     assert data["dry_run"] == "1"
+    assert Path(data["log_dir"]) == (tmp_path / "logs").resolve()
+    assert data["log_mode"] == "redacted"
+    assert data["inputs"] == {"customer_name": "Sam", "policy": {"env": "prod"}}
+    assert data["tags"] == {"deployment": "prod", "team": "platform"}
+    assert data["metadata"] == {"change_ticket": "CHG-123", "deployment_tier": "prod"}
+    assert data["experiment"] == {"cohort": "enterprise-policy"}
+    assert data["mode"] == "run"
+    assert data["target"] == "replayt_examples.e01_hello_world:wf"
+    assert data["dry_run"] == "1"
     assert data["log_mode"] == "redacted"
     assert data["log_dir"] == str((tmp_path / "logs").resolve())
+    events = [
+        json.loads(line)
+        for line in (tmp_path / "logs" / f"{run_id}.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    started = next(event for event in events if event["type"] == "run_started")
+    assert started["payload"]["runtime"]["policy_hooks"]["run"] == {
+        "source": "project_config:run_hook",
+        "argv0": Path(sys.executable).name,
+        "arg_count": 3,
+    }
 
 
 def test_cli_validate_format_json_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3448,6 +4074,135 @@ def a(ctx):
     assert "@inputs.json" in _strip_ansi(r.stdout + r.stderr)
 
 
+def test_cli_run_input_flags_build_nested_inputs_and_coerce_json_scalars(tmp_path: Path) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    assert isinstance(ctx.get("count"), int)
+    assert isinstance(ctx.get("enabled"), bool)
+    assert isinstance(ctx.get("issue"), dict)
+    assert isinstance(ctx.get("config"), dict)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            str(wf_path),
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--input",
+            "customer_name=Sam",
+            "--input",
+            "count=2",
+            "--input",
+            "enabled=false",
+            "--input",
+            "issue.title=Crash on save",
+            "--input",
+            'config.tags=["alpha","beta"]',
+        ],
+    )
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    inspect = runner.invoke(app, ["inspect", run_id, "--log-dir", str(tmp_path / "logs"), "--output", "json"])
+    assert inspect.exit_code == 0
+    payload = json.loads(inspect.stdout)
+    started = next(event for event in payload["events"] if event["type"] == "run_started")
+    assert started["payload"]["inputs"] == {
+        "customer_name": "Sam",
+        "count": 2,
+        "enabled": False,
+        "issue": {"title": "Crash on save"},
+        "config": {"tags": ["alpha", "beta"]},
+    }
+
+
+def test_cli_run_input_flags_merge_and_override_inputs_json(tmp_path: Path) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            str(wf_path),
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--inputs-json",
+            '{"issue":{"title":"Old","keep":"yes"},"priority":1}',
+            "--input",
+            "issue.title=New",
+            "--input",
+            "issue.body=Stacktrace attached",
+            "--input",
+            "priority=2",
+        ],
+    )
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    inspect = runner.invoke(app, ["inspect", run_id, "--log-dir", str(tmp_path / "logs"), "--output", "json"])
+    assert inspect.exit_code == 0
+    payload = json.loads(inspect.stdout)
+    started = next(event for event in payload["events"] if event["type"] == "run_started")
+    assert started["payload"]["inputs"] == {
+        "issue": {"title": "New", "keep": "yes", "body": "Stacktrace attached"},
+        "priority": 2,
+    }
+
+
+def test_cli_run_input_flags_reject_non_object_path_conflict(tmp_path: Path) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    run = runner.invoke(
+        app,
+        [
+            "run",
+            str(wf_path),
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--inputs-json",
+            '{"issue":"oops"}',
+            "--input",
+            "issue.title=Crash",
+        ],
+    )
+    assert run.exit_code == 2
+    text = _strip_ansi(run.stdout + run.stderr)
+    assert "cannot descend into 'issue'" in text
+
+
 def test_cli_supports_python_file_target_with_single_nonstandard_workflow_name(tmp_path: Path) -> None:
     workflow_path = tmp_path / "mini_flow.py"
     workflow_path.write_text(
@@ -3557,6 +4312,38 @@ def a(ctx):
     data = json.loads(r.stdout)
     assert data["ok"] is False
     assert any("inputs" in err.lower() for err in data["errors"])
+
+
+def test_cli_validate_accepts_repeatable_input_flags(tmp_path: Path) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        [
+            "validate",
+            str(wf_path),
+            "--input",
+            "issue.title=Crash",
+            "--input",
+            "priority=2",
+            "--format",
+            "json",
+        ],
+    )
+    assert r.exit_code == 0
+    data = json.loads(r.stdout)
+    assert data["ok"] is True
 
 
 def test_cli_ci_appends_github_step_summary(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -3723,6 +4510,9 @@ def test_cli_doctor_format_json_healthy(monkeypatch: pytest.MonkeyPatch) -> None
     assert data["schema"] == "replayt.doctor_report.v1"
     assert data["healthy"] is True
     assert data["resolved_paths"]["log_dir"]
+    approval_reason = next(check for check in data["checks"] if check["name"] == "approval_reason_policy")
+    assert approval_reason["ok"] is False
+    assert "written justification" in approval_reason["detail"]
     cred = data["credential_env"]
     assert isinstance(cred, list) and cred
     assert len(cred) == len({r["name"] for r in cred})
@@ -3787,6 +4577,13 @@ def test_cli_version_format_json() -> None:
     assert schemas["version_report"] == "replayt.version_report.v1"
     assert schemas["validate_report"] == "replayt.validate_report.v1"
     assert schemas["workflow_contract"] == "replayt.workflow_contract.v1"
+    assert schemas["workflow_contract_check"] == "replayt.workflow_contract_check.v1"
+    assert schemas["run_result"] == "replayt.run_result.v1"
+    assert schemas["inspect_report"] == "replayt.inspect_report.v1"
+    assert schemas["stats_report"] == "replayt.stats_report.v1"
+    assert schemas["diff_report"] == "replayt.diff_report.v1"
+    assert schemas["try_examples"] == "replayt.try_examples.v1"
+    assert schemas["try_copy"] == "replayt.try_copy.v1"
 
 
 def test_cli_doctor_target_preflight_reports_validation(tmp_path: Path) -> None:
@@ -3882,6 +4679,30 @@ def test_cli_doctor_reports_soft_trust_boundary_warnings(monkeypatch: pytest.Mon
     assert "query params token" in embedded["detail"].lower()
 
 
+def test_cli_doctor_reports_policy_hooks_as_soft_warning(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.replayt]\nrun_hook = [{json.dumps(sys.executable)}, \"-c\", \"print('ok')\"]\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    import replayt.cli.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_UNKNOWN_KEYS", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_CWD", None)
+
+    runner = CliRunner()
+    r = runner.invoke(app, ["doctor", "--skip-connectivity", "--format", "json"])
+    assert r.exit_code == 0
+    data = json.loads(r.stdout)
+    assert data["healthy"] is True
+    policy_hooks = next(check for check in data["checks"] if check["name"] == "policy_hooks_external_code")
+    assert policy_hooks["ok"] is False
+    assert "run_hook" in policy_hooks["detail"]
+    assert Path(sys.executable).name in policy_hooks["detail"]
+
+
 def test_cli_doctor_reports_unusable_log_dir_from_project_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3904,6 +4725,36 @@ def test_cli_doctor_reports_unusable_log_dir_from_project_config(
     log_dir_ready = next(check for check in data["checks"] if check["name"] == "log_dir_ready")
     assert log_dir_ready["ok"] is False
     assert "not a directory" in log_dir_ready["detail"].lower()
+
+
+def test_cli_doctor_reports_unusable_summary_json_env_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    blocked = tmp_path / "blocked-parent"
+    blocked.write_text("not a dir", encoding="utf-8")
+    monkeypatch.setenv("REPLAYT_SUMMARY_JSON", str(blocked / "summary.json"))
+    runner = CliRunner()
+    r = runner.invoke(app, ["doctor", "--skip-connectivity", "--format", "json"])
+    assert r.exit_code == 1
+    data = json.loads(r.stdout)
+    check = next(item for item in data["checks"] if item["name"] == "ci_summary_json_ready")
+    assert check["ok"] is False
+    assert "not a directory" in check["detail"].lower()
+    assert data["ci_artifacts"]["summary_json"]["source"] == "env:REPLAYT_SUMMARY_JSON"
+
+
+def test_cli_doctor_reports_missing_github_step_summary_sink(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("REPLAYT_GITHUB_SUMMARY", "1")
+    monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    runner = CliRunner()
+    r = runner.invoke(app, ["doctor", "--skip-connectivity", "--format", "json"])
+    assert r.exit_code == 1
+    data = json.loads(r.stdout)
+    check = next(item for item in data["checks"] if item["name"] == "ci_github_summary_ready")
+    assert check["ok"] is False
+    assert "gITHUB_STEP_SUMMARY".lower() in check["detail"].lower()
+    assert data["ci_artifacts"]["github_summary"]["requested"] is True
+    assert data["ci_artifacts"]["github_summary"]["path"] is None
 
 
 def test_cli_bundle_export_creates_tarball(tmp_path: Path) -> None:
@@ -4001,6 +4852,10 @@ def test_cli_bundle_export_can_include_seal(tmp_path: Path) -> None:
 
 
 def test_cli_resume_reason_and_actor_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        f"[tool.replayt]\nresume_hook = [{json.dumps(sys.executable)}, \"-c\", \"print('ok')\"]\n",
+        encoding="utf-8",
+    )
     module_path = tmp_path / "approval_flow.py"
     module_path.write_text(
         """
@@ -4022,7 +4877,14 @@ def done(ctx):
 """.strip(),
         encoding="utf-8",
     )
+    monkeypatch.chdir(tmp_path)
     monkeypatch.syspath_prepend(str(tmp_path))
+    import replayt.cli.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_UNKNOWN_KEYS", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_CWD", None)
     runner = CliRunner()
     run = runner.invoke(app, ["run", "approval_flow:wf", "--log-dir", str(tmp_path)])
     assert run.exit_code == 2
@@ -4053,6 +4915,11 @@ def done(ctx):
     assert p["reason"] == "ticket-1"
     assert p["resolver"] == "bridge"
     assert p["actor"] == {"email": "a@example.com"}
+    assert p["policy_hook"] == {
+        "source": "project_config:resume_hook",
+        "argv0": Path(sys.executable).name,
+        "arg_count": 3,
+    }
 
 
 def test_cli_resume_invalid_actor_json_reports_bad_parameter(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -4169,6 +5036,175 @@ def done(ctx):
     assert ok.exit_code == 0
 
 
+def test_cli_resume_require_reason_flag_enforces_non_empty_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    module_path = tmp_path / "approval_flow.py"
+    module_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("approval_flow")
+wf.set_initial("gate")
+wf.note_transition("gate", "done")
+
+@wf.step("gate")
+def gate(ctx):
+    if ctx.is_approved("ship"):
+        return "done"
+    ctx.request_approval("ship", summary="Ship it?")
+
+@wf.step("done")
+def done(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(tmp_path))
+
+    runner = CliRunner()
+    run = runner.invoke(app, ["run", "approval_flow:wf", "--log-dir", str(tmp_path / "logs")])
+    assert run.exit_code == 2
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    missing = runner.invoke(
+        app,
+        [
+            "resume",
+            "approval_flow:wf",
+            run_id,
+            "--approval",
+            "ship",
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--require-reason",
+        ],
+    )
+    assert missing.exit_code == 1
+    assert "approval reason is required" in _strip_ansi(missing.stdout + missing.stderr).lower()
+
+    blank = runner.invoke(
+        app,
+        [
+            "resume",
+            "approval_flow:wf",
+            run_id,
+            "--approval",
+            "ship",
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--require-reason",
+            "--reason",
+            "   ",
+        ],
+    )
+    assert blank.exit_code == 1
+    assert "approval reason is required" in _strip_ansi(blank.stdout + blank.stderr).lower()
+
+    ok = runner.invoke(
+        app,
+        [
+            "resume",
+            "approval_flow:wf",
+            run_id,
+            "--approval",
+            "ship",
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--require-reason",
+            "--reason",
+            "Approved after CAB review",
+        ],
+    )
+    assert ok.exit_code == 0
+
+
+def test_cli_resume_enforces_required_reason_from_project_config(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "pyproject.toml").write_text(
+        '[tool.replayt]\napproval_reason_required = true\n',
+        encoding="utf-8",
+    )
+    module_path = tmp_path / "approval_flow.py"
+    module_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("approval_flow")
+wf.set_initial("gate")
+wf.note_transition("gate", "done")
+
+@wf.step("gate")
+def gate(ctx):
+    if ctx.is_approved("ship"):
+        return "done"
+    ctx.request_approval("ship", summary="Ship it?")
+
+@wf.step("done")
+def done(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    import replayt.cli.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
+
+    runner = CliRunner()
+    doctor = runner.invoke(app, ["doctor", "--skip-connectivity", "--format", "json"])
+    assert doctor.exit_code == 0
+    doctor_data = json.loads(doctor.stdout)
+    approval_reason = next(check for check in doctor_data["checks"] if check["name"] == "approval_reason_policy")
+    assert approval_reason["ok"] is True
+    assert "project_config:approval_reason_required" in approval_reason["detail"]
+
+    config = runner.invoke(app, ["config", "--format", "json"])
+    assert config.exit_code == 0
+    config_data = json.loads(config.stdout)
+    assert config_data["resume"]["required_reason"] is True
+    assert config_data["resume"]["required_reason_source"] == "project_config:approval_reason_required"
+
+    run = runner.invoke(app, ["run", "approval_flow:wf", "--log-dir", str(tmp_path / "logs")])
+    assert run.exit_code == 2
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+
+    missing = runner.invoke(
+        app,
+        [
+            "resume",
+            "approval_flow:wf",
+            run_id,
+            "--approval",
+            "ship",
+            "--log-dir",
+            str(tmp_path / "logs"),
+        ],
+    )
+    assert missing.exit_code == 1
+    assert "approval reason is required" in _strip_ansi(missing.stdout + missing.stderr).lower()
+
+    ok = runner.invoke(
+        app,
+        [
+            "resume",
+            "approval_flow:wf",
+            run_id,
+            "--approval",
+            "ship",
+            "--log-dir",
+            str(tmp_path / "logs"),
+            "--reason",
+            "Approved under change ticket CAB-42",
+        ],
+    )
+    assert ok.exit_code == 0
+
+
 def test_cli_init_ci_github_writes_workflow(tmp_path: Path) -> None:
     runner = CliRunner()
     r = runner.invoke(app, ["init", "--path", str(tmp_path), "--ci", "github"])
@@ -4210,6 +5246,7 @@ def test_cli_stats_includes_run_when_summary_last_ts_unparseable(tmp_path: Path)
     out = runner.invoke(app, ["stats", "--log-dir", str(log_dir), "--days", "1", "--output", "json"])
     assert out.exit_code == 0
     data = json.loads(out.stdout)
+    assert data["schema"] == "replayt.stats_report.v1"
     assert data["runs_included"] == 1
 
 
@@ -4294,6 +5331,67 @@ def test_cli_gc_rejects_missing_sqlite_without_creating_database(tmp_path: Path)
     assert out.exit_code == 1
     assert "sqlite store not found" in (out.stdout + out.stderr).lower()
     assert not missing_db.exists()
+
+
+def test_cli_read_store_uses_read_only_sqlite_store(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from replayt.cli import stores as stores_mod
+
+    db = tmp_path / "events.sqlite3"
+    db.write_text("", encoding="utf-8")
+    calls: list[tuple[Path, bool]] = []
+
+    class _FakeStore:
+        def __init__(self, path: Path, *, read_only: bool = False) -> None:
+            calls.append((path, read_only))
+
+        def close(self) -> None:
+            return None
+
+    monkeypatch.setattr(stores_mod, "SQLiteStore", _FakeStore)
+
+    with stores_mod.read_store(tmp_path, db):
+        pass
+
+    assert calls == [(db, True)]
+
+
+def test_cli_config_and_doctor_sanitize_base_url_with_embedded_credentials(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    secret = "super-secret"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("REPLAYT_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_BASE_URL", f"https://user:{secret}@api.example.test/v1?token={secret}")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+
+    import replayt.cli.config as cfg_mod
+
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_PATH", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_UNKNOWN_KEYS", None)
+    monkeypatch.setattr(cfg_mod, "_PROJECT_CONFIG_CWD", None)
+
+    runner = CliRunner()
+
+    config = runner.invoke(app, ["config", "--format", "json"])
+    assert config.exit_code == 0
+    assert secret not in config.stdout
+    config_data = json.loads(config.stdout)
+    assert config_data["llm"]["base_url"] == "https://api.example.test/v1"
+    config_warnings = config_data["trust_boundary"]["warnings"]
+    assert any("user-info credentials" in warning for warning in config_warnings)
+    assert any("query params token" in warning.lower() for warning in config_warnings)
+
+    doctor = runner.invoke(app, ["doctor", "--skip-connectivity", "--format", "json"])
+    assert doctor.exit_code == 0
+    assert secret not in doctor.stdout
+    doctor_data = json.loads(doctor.stdout)
+    openai_base_url = next(check for check in doctor_data["checks"] if check["name"] == "openai_base_url")
+    embedded = next(check for check in doctor_data["checks"] if check["name"] == "trust_base_url_credentials")
+    assert openai_base_url["detail"] == "https://api.example.test/v1 (env:OPENAI_BASE_URL)"
+    assert embedded["ok"] is False
+    assert "user-info credentials" in embedded["detail"]
+    assert "query params token" in embedded["detail"].lower()
 
 
 def test_cli_run_timeout_appends_run_interrupted_to_sqlite_mirror(tmp_path: Path, monkeypatch) -> None:

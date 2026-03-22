@@ -190,6 +190,22 @@ def parse_tool_name_filters(raw: list[str] | None) -> frozenset[str] | None:
     return frozenset(normalized)
 
 
+def parse_note_kind_filters(raw: list[str] | None) -> frozenset[str] | None:
+    """Normalize repeatable `--note-kind` CLI values (exact kind match; OR semantics across values)."""
+    if not raw:
+        return None
+    normalized: list[str] = []
+    for item in raw:
+        kind = str(item).strip()
+        if not kind:
+            raise typer.BadParameter(
+                "Empty --note-kind is not allowed; omit the flag or pass a step_note `kind` "
+                "(exact match against JSONL `step_note` payload `kind`; repeat for OR)."
+            )
+        normalized.append(kind)
+    return frozenset(normalized)
+
+
 def run_matches_tool_name_filter(events: list[dict[str, Any]], wanted: frozenset[str] | None) -> bool:
     if wanted is None:
         return True
@@ -199,6 +215,19 @@ def run_matches_tool_name_filter(events: list[dict[str, Any]], wanted: frozenset
         payload = e.get("payload") or {}
         n = payload.get("name")
         if isinstance(n, str) and n in wanted:
+            return True
+    return False
+
+
+def run_matches_note_kind_filter(events: list[dict[str, Any]], wanted: frozenset[str] | None) -> bool:
+    if wanted is None:
+        return True
+    for e in events:
+        if e.get("type") != "step_note":
+            continue
+        payload = e.get("payload") or {}
+        kind = payload.get("kind")
+        if isinstance(kind, str) and kind in wanted:
             return True
     return False
 

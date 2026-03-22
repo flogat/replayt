@@ -16,9 +16,7 @@ import typer
 
 from replayt.cli.ci_artifacts import (
     parse_ci_metadata_from_env,
-    resolve_ci_junit_path,
-    resolve_ci_summary_json_path,
-    should_write_github_step_summary,
+    resolve_ci_artifacts,
     write_ci_artifacts,
 )
 from replayt.cli.config import (
@@ -26,6 +24,7 @@ from replayt.cli.config import (
     get_project_config,
     parse_log_mode,
     resolve_approval_actor_required_keys,
+    resolve_approval_reason_required,
     resolve_cli_target,
     resolve_llm_settings,
     resolve_log_dir,
@@ -46,7 +45,9 @@ from replayt.cli.run_support import (
     invoke_resume_hook,
     invoke_run_hook,
     resume_hook_argv,
+    resume_hook_audit,
     run_hook_argv,
+    run_hook_audit,
     run_result_payload,
     subprocess_env_child,
 )
@@ -59,7 +60,7 @@ from replayt.cli.validation import (
     validation_report,
 )
 from replayt.runner import Runner, resolve_approval_on_store
-from replayt.security import missing_actor_fields
+from replayt.security import approval_reason_missing, missing_actor_fields
 from replayt_examples.catalog import (
     copy_packaged_example_to_directory,
     get_packaged_example,
@@ -81,6 +82,67 @@ def merge_gitignore(directory: Path) -> None:
     extra = "\n\n# replayt init\n" + "\n".join(to_add) + "\n"
     path.write_text(path.read_text(encoding="utf-8").rstrip() + extra, encoding="utf-8")
     typer.echo(f"Updated {path} ({', '.join(to_add)})")
+
+
+def _display_shell_arg(value: str) -> str:
+    if not value or any(ch.isspace() for ch in value) or '"' in value:
+        return '"' + value.replace('"', '\\"') + '"'
+    return value
+
+
+def _display_path_arg(path: Path, *, relative_to: Path | None = None) -> str:
+    display_path = path
+    if relative_to is not None:
+        try:
+            display_path = path.resolve().relative_to(relative_to.resolve())
+        except ValueError:
+            display_path = path.resolve()
+    return _display_shell_arg(str(display_path))
+
+
+def _print_local_workflow_next_steps(
+    *,
+    work_dir: Path,
+    workflow_file: Path,
+    inputs_file: Path,
+    include_setup: bool,
+    requires_yaml_extra: bool,
+    llm_backed: bool,
+) -> None:
+    resolved_dir = work_dir.resolve()
+    workflow_arg = _display_path_arg(workflow_file, relative_to=resolved_dir)
+    inputs_arg = _display_path_arg(inputs_file, relative_to=resolved_dir)
+    step = 1
+    typer.echo("Next steps:")
+    if resolved_dir != Path.cwd().resolve():
+        typer.echo(f"  {step}) cd {_display_shell_arg(str(resolved_dir))}")
+        step += 1
+    if include_setup:
+        typer.echo(f"  {step}) python -m venv .venv")
+        step += 1
+        typer.echo(f"  {step}) Activate the venv for your shell:")
+        typer.echo(r"     PowerShell: .\.venv\Scripts\Activate.ps1")
+        typer.echo(r"     cmd.exe: .\.venv\Scripts\activate.bat")
+        typer.echo("     POSIX: source .venv/bin/activate")
+        step += 1
+        package_name = "replayt[yaml]" if requires_yaml_extra else "replayt"
+        typer.echo(f"  {step}) pip install {package_name}")
+        step += 1
+    typer.echo(f"  {step}) replayt doctor --skip-connectivity --target {workflow_arg}")
+    step += 1
+    typer.echo(f"  {step}) replayt run {workflow_arg} --dry-check --inputs-file {inputs_arg}")
+    step += 1
+    if llm_backed:
+        typer.echo(f"  {step}) replayt run {workflow_arg} --dry-run --inputs-file {inputs_arg}")
+        step += 1
+        typer.echo(f"  {step}) replayt run {workflow_arg} --inputs-file {inputs_arg}")
+        step += 1
+    else:
+        typer.echo(f"  {step}) replayt run {workflow_arg} --inputs-file {inputs_arg}")
+        step += 1
+    typer.echo(f"  {step}) replayt inspect <run_id>")
+    step += 1
+    typer.echo(f"  {step}) replayt replay <run_id>")
 
 
 def cmd_init(
@@ -134,15 +196,14 @@ def cmd_init(
         gh_workflow.parent.mkdir(parents=True, exist_ok=True)
         gh_workflow.write_text(INIT_GITHUB_REPLAYT_WORKFLOW, encoding="utf-8")
         typer.echo(f"Wrote {gh_workflow} (edit CHANGE_ME_MODULE:wf)")
-    typer.echo("Next steps:")
-    typer.echo("  1) python -m venv .venv && activate   # then: pip install replayt")
-    typer.echo("  2) replayt doctor                     # see docs/QUICKSTART.md if anything is WARN")
-    typer.echo("  3) replayt try --list                  # packaged examples, offline by default (--live for LLM)")
-    typer.echo(f"  4) replayt run {wf_file} --dry-check # validate graph without executing")
-    typer.echo(
-        f"  5) replayt run {wf_file} --inputs-json @{inputs_file.name}  # same as: --inputs-file {inputs_file.name}"
+    _print_local_workflow_next_steps(
+        work_dir=path,
+        workflow_file=wf_file,
+        inputs_file=inputs_file,
+        include_setup=True,
+        requires_yaml_extra=template_spec.filename.endswith((".yaml", ".yml")),
+        llm_backed=template_spec.llm_backed,
     )
-    typer.echo("  6) replayt inspect <run_id> && replayt replay <run_id>   # after step 5, copy run_id from output")
 
 
 def cmd_run(
@@ -165,6 +226,14 @@ def cmd_run(
         None,
         "--inputs-file",
         help="Read inputs JSON object from this file (mutually exclusive with --inputs-json).",
+    ),
+    input_value: list[str] | None = typer.Option(
+        None,
+        "--input",
+        help=(
+            "Repeatable key=value input override. Dotted keys build nested objects "
+            "(for example issue.title=Crash); values are parsed as JSON scalars/objects when possible."
+        ),
     ),
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR, help="Directory for JSONL run logs."),
     log_subdir: str | None = typer.Option(
@@ -244,7 +313,7 @@ def cmd_run(
         typer.echo("When using --resume, you must pass --run-id", err=True)
         raise typer.Exit(code=1)
 
-    inputs_resolved = inputs_json_from_options(inputs_json, inputs_file)
+    inputs_resolved = inputs_json_from_options(inputs_json, inputs_file, input_value)
 
     in_child = os.environ.get("REPLAYT_SUBPROCESS_RUN") == "1"
     cfg, cfg_path, _ = get_project_config()
@@ -312,9 +381,14 @@ def cmd_run(
     if run_id is None:
         run_id = str(uuid.uuid4())
 
-    junit_for_ci = resolve_ci_junit_path(replayt_internal_junit_xml)
-    summary_json_for_ci = resolve_ci_summary_json_path(replayt_internal_summary_json)
-    github_summary_for_ci = should_write_github_step_summary(replayt_internal_github_summary)
+    ci_artifacts = resolve_ci_artifacts(
+        explicit_junit_xml=replayt_internal_junit_xml,
+        explicit_summary_json=replayt_internal_summary_json,
+        explicit_github_summary=replayt_internal_github_summary,
+    )
+    junit_for_ci = ci_artifacts.junit_xml
+    summary_json_for_ci = ci_artifacts.summary_json
+    github_summary_for_ci = ci_artifacts.github_summary_requested
 
     ci_metadata_for_summary: dict[str, Any] | None = None
     if summary_json_for_ci is not None:
@@ -408,6 +482,10 @@ def cmd_run(
                 dry_run=dry_run,
                 resume=resume,
                 sqlite=sqlite,
+                inputs_json=inputs_resolved,
+                tags_json=json.dumps(tags_dict, sort_keys=True) if tags_dict is not None else None,
+                metadata_json=json.dumps(run_meta, sort_keys=True) if run_meta is not None else None,
+                experiment_json=json.dumps(experiment, sort_keys=True) if experiment is not None else None,
                 timeout_seconds=hook_timeout,
             )
         except subprocess.TimeoutExpired as exc:
@@ -421,6 +499,13 @@ def cmd_run(
         except subprocess.CalledProcessError as exc:
             typer.echo(f"run_hook exited with code {exc.returncode}", err=True)
             raise typer.Exit(code=1) from exc
+    policy_hooks: dict[str, Any] = {}
+    run_policy_hook = run_hook_audit(cfg)
+    if run_policy_hook is not None:
+        policy_hooks["run"] = run_policy_hook
+    resume_policy_hook = resume_hook_audit(cfg)
+    if resume_policy_hook is not None:
+        policy_hooks["resume"] = resume_policy_hook
     lm = parse_log_mode(log_mode)
     with open_store(log_dir, sqlite, strict_mirror=strict_mirror) as store:
         if dry_run:
@@ -434,12 +519,20 @@ def cmd_run(
                 log_mode=lm,
                 llm_client=DryRunLLMClient(settings=llm_settings),
                 redact_keys=redact_keys,
+                policy_hooks=policy_hooks or None,
             )
         else:
             if llm_settings is None:
                 typer.echo(llm_report.get("error") or "Invalid LLM provider configuration", err=True)
                 raise typer.Exit(code=1)
-            runner = Runner(wf, store, log_mode=lm, llm_settings=llm_settings, redact_keys=redact_keys)
+            runner = Runner(
+                wf,
+                store,
+                log_mode=lm,
+                llm_settings=llm_settings,
+                redact_keys=redact_keys,
+                policy_hooks=policy_hooks or None,
+            )
         t0 = time.perf_counter()
         try:
             result = runner.run(
@@ -528,6 +621,14 @@ def cmd_try(
         "--inputs-file",
         help="Read packaged-example inputs JSON from this file (mutually exclusive with --inputs-json).",
     ),
+    input_value: list[str] | None = typer.Option(
+        None,
+        "--input",
+        help=(
+            "Repeatable key=value override for packaged-example inputs. Dotted keys build nested objects "
+            "(for example issue.title=Crash)."
+        ),
+    ),
     output: Literal["text", "json"] = typer.Option(
         "text",
         "--output",
@@ -577,9 +678,9 @@ def cmd_try(
         raise typer.BadParameter(str(exc), param_hint="--example") from exc
 
     if copy_to is not None:
-        if live or dry_check or inputs_json is not None or inputs_file is not None:
+        if live or dry_check or inputs_json is not None or inputs_file is not None or input_value:
             raise typer.BadParameter(
-                "Cannot combine --copy-to with --live, --dry-check, --inputs-json, or --inputs-file"
+                "Cannot combine --copy-to with --live, --dry-check, --inputs-json, --inputs-file, or --input"
             )
         if run_id is not None or timeout is not None:
             raise typer.BadParameter("Cannot combine --copy-to with --run-id or --timeout")
@@ -607,9 +708,14 @@ def cmd_try(
             typer.echo(f"Copied packaged example {spec.key!r} to {copy_to.resolve()}")
             typer.echo(f"  {wf_path}")
             typer.echo(f"  {inputs_path}")
-            typer.echo("Next steps:")
-            typer.echo(f"  replayt run {wf_path} --dry-check")
-            typer.echo(f"  replayt run {wf_path} --inputs-json @{inputs_path.name}")
+            _print_local_workflow_next_steps(
+                work_dir=copy_to,
+                workflow_file=wf_path,
+                inputs_file=inputs_path,
+                include_setup=False,
+                requires_yaml_extra=False,
+                llm_backed=spec.llm_backed,
+            )
         raise typer.Exit(code=0)
 
     inputs_resolved = inputs_json_from_options(inputs_json, inputs_file)
@@ -618,6 +724,7 @@ def cmd_try(
         if spec.key == "hello-world":
             default_inputs["customer_name"] = customer_name
         inputs_resolved = json.dumps(default_inputs)
+    inputs_resolved = inputs_json_from_options(inputs_resolved, None, input_value)
 
     return ctx.invoke(
         cmd_run,
@@ -625,6 +732,7 @@ def cmd_try(
         run_id=run_id,
         inputs_json=inputs_resolved,
         inputs_file=None,
+        input_value=None,
         log_dir=log_dir,
         log_subdir=None,
         sqlite=sqlite,
@@ -666,6 +774,14 @@ def cmd_ci(
         None,
         "--inputs-file",
         help="Read inputs JSON object from this file (mutually exclusive with --inputs-json).",
+    ),
+    input_value: list[str] | None = typer.Option(
+        None,
+        "--input",
+        help=(
+            "Repeatable key=value input override. Dotted keys build nested objects "
+            "(for example issue.title=Crash); values are parsed as JSON scalars/objects when possible."
+        ),
     ),
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR, help="Directory for JSONL run logs."),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file mirrored alongside JSONL."),
@@ -745,6 +861,7 @@ def cmd_ci(
         run_id=run_id,
         inputs_json=inputs_json,
         inputs_file=inputs_file,
+        input_value=input_value,
         log_dir=log_dir,
         log_subdir=None,
         sqlite=sqlite,
@@ -789,6 +906,11 @@ def cmd_resume(
         "--require-actor-key",
         help="Require these keys on approval_resolved.actor (repeatable; defaults from project config).",
     ),
+    require_reason: bool = typer.Option(
+        False,
+        "--require-reason",
+        help="Require a non-empty --reason before replayt writes approval_resolved.",
+    ),
     log_dir: Path = typer.Option(DEFAULT_LOG_DIR),
     log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None),
@@ -808,9 +930,11 @@ def cmd_resume(
         log_mode = cfg["log_mode"]
     redact_keys, _redact_keys_source = resolve_redact_keys(redact_key, cfg)
     required_actor_keys, _required_actor_keys_source = resolve_approval_actor_required_keys(require_actor_key, cfg)
+    require_reason, _required_reason_source = resolve_approval_reason_required(require_reason, cfg)
     wf = load_target(target)
     lm = parse_log_mode(log_mode)
     hook = resume_hook_argv(cfg)
+    resume_policy_hook = resume_hook_audit(cfg) if hook else None
     if hook:
         hook_timeout = resume_hook_timeout_seconds(cfg)
         try:
@@ -840,6 +964,9 @@ def cmd_resume(
     if missing:
         typer.echo("approval actor is missing required keys: " + ", ".join(missing), err=True)
         raise typer.Exit(code=1)
+    if approval_reason_missing(reason, required=require_reason):
+        typer.echo("approval reason is required", err=True)
+        raise typer.Exit(code=1)
     with open_store(log_dir, sqlite, strict_mirror=strict_mirror) as store:
         resolve_approval_on_store(
             store,
@@ -850,6 +977,8 @@ def cmd_resume(
             reason=reason,
             actor=actor,
             required_actor_keys=required_actor_keys,
+            require_reason=require_reason,
+            policy_hook=resume_policy_hook,
         )
         runner = Runner(wf, store, log_mode=lm, redact_keys=redact_keys)
         try:

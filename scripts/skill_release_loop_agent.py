@@ -17,7 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
-# Ralph-style pipeline: archetype ideation (×10) → design-fidelity gate → review → remediation → doc tone.
+# Ralph-style pipeline: archetype ideation (×12) → design-fidelity gate → review → remediation → doc tone.
 # Each feat_* skill voices one developer archetype; together they replace the old createfeatures
 # monolith. The shared rejection blocklist (.cursor/skills/REJECTION_BLOCKLIST.md) prevents
 # duplicate/rejected ideas from being re-proposed across runs.
@@ -34,16 +34,19 @@ DEFAULT_SKILLS = (
     "feat_startup_ic",
     "feat_enterprise_integrator",
     "feat_framework_enthusiast",
+    "feat_mcp_tooling",
+    "feat_agent_harness_engineer",
     "review_design_fidelity",
     "improvedoc",
     "deslopdoc",
     "reviewcodebase",
 )
 DEFAULT_TASK = (
-    "Run the repository skill loop: ten archetype-specific feature implementation skills "
+    "Run the repository skill loop: twelve archetype-specific feature implementation skills "
     "(feat_staff_engineer, feat_junior_onboarding, feat_security_compliance, feat_ml_llm_engineer, "
     "feat_devops_sre, feat_product_engineer, feat_oss_maintainer, feat_startup_ic, "
-    "feat_enterprise_integrator, feat_framework_enthusiast), then review_design_fidelity (audit "
+    "feat_enterprise_integrator, feat_framework_enthusiast, feat_mcp_tooling, "
+    "feat_agent_harness_engineer), then review_design_fidelity (audit "
     "new code against the 7 design principles and SCOPE.md, fix violations), then improvedoc "
     "(docs and repo improvements), deslopdoc (de-AI / humanize documentation), reviewcodebase "
     "(comprehensive review plus apply fixes in-repo). Each feat_* skill reads "
@@ -179,7 +182,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "The script is backend-agnostic. --skill-command runs once per skill and can use placeholders:\n"
-            "  {skill} {skill_path} {prompt_file} {log_file} {repo} {iteration} {max_iterations}\n"
+            "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {repo} {iteration} {max_iterations}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
             "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
             "Progress: prints configuration, a decision-tree summary, each command and log path, streamed "
@@ -188,8 +191,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "'try again at' with a time within --usage-limit-max-wait-seconds, the loop sleeps (status heartbeats "
             "continue) and retries the same skill; use --no-wait-on-codex-usage-limit to fail fast.\n"
             "Resume: use --resume to reuse a run directory and skip skills/checks whose logs already end with "
-            "### skill_release_loop: exit_code=0. --resume with no argument picks the newest resumable folder under "
-            "--log-dir. Resume allows a dirty git worktree (same as --allow-dirty for preflight only). "
+            "### skill_release_loop: exit_code=0. --resume with no argument picks the newest YYYYMMDD-HHMMSS folder "
+            "under --log-dir that contains iter-*.log. Resume allows a dirty git worktree (same as --allow-dirty "
+            "for preflight only). "
             "Logs from older runs without that footer are not skipped (re-run) unless you append "
             "`### skill_release_loop: exit_code=0` to finished skill logs manually.\n"
             "External monitor: updates .replayt/skill-release/current.json and <run-dir>/status.json (heartbeat "
@@ -229,6 +233,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Maximum number of full skill cycles before failing (default: 3).",
     )
     parser.add_argument(
+        "--release-count",
+        type=int,
+        default=1,
+        help="Number of consecutive successful releases to create before exiting (default: 1).",
+    )
+    parser.add_argument(
+        "--light",
+        action="store_true",
+        help="Run only dummy_changelog (smoke test); sets --max-iterations to 1 if still default 3.",
+    )
+    parser.add_argument(
         "--remote",
         default="origin",
         help="Remote used for the final push (default: origin).",
@@ -256,6 +271,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--skip-push",
         action="store_true",
         help="Create the release commit and tag locally but do not push them.",
+    )
+    parser.add_argument(
+        "--no-pre-tag-github-ci",
+        action="store_true",
+        help="Skip verify_github_action after the release commit (before tag). For tests/offline.",
     )
     parser.add_argument(
         "--dry-run",
@@ -312,14 +332,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         metavar="RUN_DIR",
         help=(
             "Reuse a previous run directory: skip skills/checks whose logs end with exit_code=0. "
-            "With no value, select the newest resumable YYYYMMDD-HHMMSS folder under --log-dir. "
+            "With no value, select the newest YYYYMMDD-HHMMSS folder under --log-dir that contains iter-*.log. "
             "Otherwise RUN_DIR is relative to --log-dir unless it is an absolute path. "
             "Implies allowing a dirty worktree for git preflight (same as --allow-dirty)."
         ),
     )
     args = parser.parse_args(argv)
+    if getattr(args, "light", False):
+        if not args.skills:
+            args.skills = ["dummy_changelog"]
+        args.task = "Create a dummy changelog entry under ## Unreleased to test the release loop."
+        if args.max_iterations == 3:
+            args.max_iterations = 1
     if args.max_iterations < 1:
         parser.error("--max-iterations must be >= 1")
+    if args.release_count < 1:
+        parser.error("--release-count must be >= 1")
     if args.status_interval < 0:
         parser.error("--status-interval must be >= 0")
     if args.usage_limit_max_wait_seconds <= 0:
@@ -375,12 +403,19 @@ def default_skill_command(repo: Path) -> str:
     )
 
 
+def default_pre_tag_github_ci_command(repo: Path) -> str:
+    python_exe = quote_for_shell(str(repo_python(repo)))
+    verify_script = quote_for_shell(str(repo / "scripts" / "verify_github_action.py"))
+    return f"{python_exe} {verify_script}"
+
+
 def default_check_commands(repo: Path) -> list[str]:
     python_exe = quote_for_shell(str(repo_python(repo)))
     ruff_exe = repo_ruff(repo)
     return [
         f"{ruff_exe} check src tests scripts",
         f"{python_exe} -m pytest",
+        default_pre_tag_github_ci_command(repo),
     ]
 
 
@@ -447,7 +482,12 @@ def render_command(template: str, context: dict[str, str]) -> str:
 
 
 def progress_line(message: str, *, dest: TextIO = sys.stdout, end: str = "\n") -> None:
-    print(message, file=dest, end=end, flush=True)
+    try:
+        print(message, file=dest, end=end, flush=True)
+    except UnicodeEncodeError:
+        enc = getattr(dest, "encoding", None) or "utf-8"
+        safe_msg = message.encode(enc, errors="replace").decode(enc)
+        print(safe_msg, file=dest, end=end, flush=True)
 
 
 def progress_banner(title: str, *, dest: TextIO = sys.stdout) -> None:
@@ -458,6 +498,7 @@ def progress_banner(title: str, *, dest: TextIO = sys.stdout) -> None:
 def describe_skill_env_snippet(env: dict[str, str], *, task_max: int = 160) -> str:
     keys = (
         "REPO_ROOT",
+        "SKILL_ROOT",
         "SKILL_NAME",
         "SKILL_ITERATION",
         "SKILL_PROMPT_FILE",
@@ -532,22 +573,32 @@ def find_latest_resumable_run_dir(
     return None
 
 
+def find_latest_stamp_run_dir(log_root: Path) -> Path | None:
+    """Newest ``YYYYMMDD-HHMMSS`` directory under *log_root* that has at least one ``iter-*.log`` file."""
+    if not log_root.is_dir():
+        return None
+    candidates = sorted(
+        (
+            p
+            for p in log_root.iterdir()
+            if p.is_dir() and RUN_DIR_STAMP_RE.match(p.name) and any(p.glob("iter-*.log"))
+        ),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    return candidates[0] if candidates else None
+
+
 def resolve_run_directory(repo: Path, args: argparse.Namespace, skill_names: list[str]) -> Path:
     log_dir_resolved = (repo / args.log_dir).resolve()
     if args.resume is None:
         return (log_dir_resolved / dt.datetime.now().strftime("%Y%m%d-%H%M%S")).resolve()
     if args.resume == "":
-        found = find_latest_resumable_run_dir(
-            log_dir_resolved,
-            skill_names,
-            args.max_iterations,
-            len(args.checks),
-        )
+        found = find_latest_stamp_run_dir(log_dir_resolved)
         if found is None:
             raise LoopError(
-                f"No resumable run directory under {log_dir_resolved} "
-                "(expected YYYYMMDD-HHMMSS folders with iter-* logs where no full iteration passed all skills "
-                "and checks)."
+                f"No prior run directory under {log_dir_resolved} "
+                "(expected YYYYMMDD-HHMMSS folders with at least one iter-*.log file)."
             )
         return found
     run_candidate = Path(args.resume)
@@ -711,7 +762,8 @@ def run_shell_command(
                     encoding="utf-8",
                     errors="replace",
                 )
-                assert proc.stdout is not None
+                if proc.stdout is None:
+                    raise LoopError("Command stdout pipe was not captured; cannot stream child output to the log.")
                 for line in proc.stdout:
                     handle.write(line)
                     if stream_to_terminal:
@@ -763,6 +815,7 @@ def run_skill_iteration(
         prompt_path.write_text(build_prompt(skill, args.task, repo, iteration, args.max_iterations), encoding="utf-8")
         env = os.environ.copy()
         repo_resolved = str(repo.resolve())
+        skill_root_resolved = str((repo / args.skill_root).resolve())
         # Inject safe.directory so child processes (e.g. Codex sandbox running as a
         # different OS user) can run git commands against the repo without
         # "dubious ownership" errors.  GIT_CONFIG_COUNT + KEY/VALUE is the
@@ -771,6 +824,7 @@ def run_skill_iteration(
         env.update(
             {
                 "REPO_ROOT": repo_resolved,
+                "SKILL_ROOT": skill_root_resolved,
                 "SKILL_NAME": skill.name,
                 "SKILL_REQUESTED_NAME": skill.requested_name,
                 "SKILL_PATH": str(skill.path),
@@ -786,6 +840,7 @@ def run_skill_iteration(
             {
                 "skill": skill.name,
                 "skill_path": str(skill.path),
+                "skill_root": skill_root_resolved,
                 "prompt_file": str(prompt_path),
                 "log_file": str(log_path),
                 "repo": str(repo),
@@ -924,56 +979,140 @@ def run_checks(
         env["REPO_ROOT"] = str(repo)
         command = render_command(template, {"repo": str(repo), "iteration": str(iteration)})
         progress_banner(f"Check {index}/{len(args.checks)}")
-        if tracker is not None:
-            tracker.update(
-                phase="check",
-                iteration=iteration,
-                max_iterations=args.max_iterations,
-                check_index=index,
-                checks_total=len(args.checks),
-                log_file=log_path,
-                command_preview=command[:500],
-            )
-        if args.dry_run:
-            run_shell_command(
+        attempt = 0
+        max_fix_attempts = 3
+        chk_append = bool(resume and log_path.exists() and log_path.stat().st_size > 0)
+
+        while True:
+            if tracker is not None:
+                tracker.update(
+                    phase="check",
+                    iteration=iteration,
+                    max_iterations=args.max_iterations,
+                    check_index=index,
+                    checks_total=len(args.checks),
+                    log_file=log_path,
+                    command_preview=command[:500],
+                )
+            if args.dry_run:
+                run_shell_command(
+                    command,
+                    repo,
+                    env,
+                    log_path=log_path,
+                    dry_run=True,
+                    progress_label=f"check:{iteration:02d}-{index:02d}",
+                    tracker=tracker,
+                    heartbeat_interval=0.0,
+                )
+                progress_line("Decision: dry-run assumes this check would pass.")
+                break
+            chk_banner: str | None = LOG_BANNER_RESUME if chk_append else None
+            completed = run_shell_command(
                 command,
                 repo,
                 env,
                 log_path=log_path,
-                dry_run=True,
+                log_append=chk_append,
+                log_section_banner=chk_banner,
+                stream_to_terminal=not args.quiet,
                 progress_label=f"check:{iteration:02d}-{index:02d}",
+                expect_success=False,
                 tracker=tracker,
-                heartbeat_interval=0.0,
+                heartbeat_interval=args.status_interval,
             )
-            progress_line("Decision: dry-run assumes this check would pass.")
-            continue
-        chk_append = bool(resume and log_path.exists() and log_path.stat().st_size > 0)
-        chk_banner: str | None = LOG_BANNER_RESUME if chk_append else None
-        completed = run_shell_command(
-            command,
-            repo,
-            env,
-            log_path=log_path,
-            log_append=chk_append,
-            log_section_banner=chk_banner,
-            stream_to_terminal=not args.quiet,
-            progress_label=f"check:{iteration:02d}-{index:02d}",
-            expect_success=False,
-            tracker=tracker,
-            heartbeat_interval=args.status_interval,
-        )
-        if completed.returncode != 0:
+            if completed.returncode == 0:
+                progress_line(f"Decision: check {index}/{len(args.checks)} passed -> continue.")
+                break
+
             progress_line(
-                f"Decision: check {index}/{len(args.checks)} failed (exit {completed.returncode}) -> "
-                "stop this iteration without releasing."
+                f"Decision: check {index}/{len(args.checks)} failed (exit {completed.returncode})."
             )
-            if iteration < args.max_iterations:
-                progress_line(f"Next: start iteration {iteration + 1} (skills run again from the top).")
-            else:
-                progress_line("Next: no further iterations allowed (--max-iterations exhausted).")
-            progress_line(f"Full output: {log_path}")
-            return False
-        progress_line(f"Decision: check {index}/{len(args.checks)} passed -> continue.")
+            if attempt >= max_fix_attempts:
+                progress_line(
+                    f"Decision: max fix attempts ({max_fix_attempts}) reached. "
+                    "Stop this iteration without releasing."
+                )
+                if iteration < args.max_iterations:
+                    progress_line(f"Next: start iteration {iteration + 1} (skills run again from the top).")
+                else:
+                    progress_line("Next: no further iterations allowed (--max-iterations exhausted).")
+                progress_line(f"Full output: {log_path}")
+                return False
+
+            progress_line(
+                f"Next: spawning fix agent for check {index} (attempt {attempt + 1}/{max_fix_attempts})..."
+            )
+
+            log_text = log_path.read_text(encoding="utf-8", errors="replace")
+            tail_log = log_text[-4000:] if len(log_text) > 4000 else log_text
+
+            fix_prompt_path = run_dir / f"iter-{iteration:02d}-check-{index:02d}-fix-{attempt+1}.prompt.md"
+            fix_log_path = run_dir / f"iter-{iteration:02d}-check-{index:02d}-fix-{attempt+1}.log"
+
+            fix_prompt_text = (
+                f"The following check command failed with exit code {completed.returncode}:\n"
+                f"`{command}`\n\n"
+                f"Log output (tail):\n```text\n{tail_log}\n```\n\n"
+                "Please analyze the failure and modify the codebase to fix the issues so the check passes.\n"
+                "Apply repository changes directly in the working tree. Do not commit, tag, or push."
+            )
+            fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
+
+            fix_command = render_command(
+                args.skill_command,
+                {
+                    "skill": "fix_check",
+                    "skill_path": "fix_check",
+                    "skill_root": str((repo / args.skill_root).resolve()),
+                    "prompt_file": str(fix_prompt_path),
+                    "log_file": str(fix_log_path),
+                    "repo": str(repo),
+                    "iteration": str(iteration),
+                    "max_iterations": str(args.max_iterations),
+                },
+            )
+
+            fix_env = os.environ.copy()
+            _inject_git_safe_directory(fix_env, str(repo))
+            fix_env.update(
+                {
+                    "REPO_ROOT": str(repo),
+                    "SKILL_ROOT": str((repo / args.skill_root).resolve()),
+                    "SKILL_NAME": "fix_check",
+                    "SKILL_PROMPT_FILE": str(fix_prompt_path),
+                    "SKILL_LOG_FILE": str(fix_log_path),
+                    "SKILL_ITERATION": str(iteration),
+                    "SKILL_MAX_ITERATIONS": str(args.max_iterations),
+                    "SKILL_TASK": "Fix the failing check.",
+                }
+            )
+
+            if tracker is not None:
+                tracker.update(
+                    phase="skill",
+                    iteration=iteration,
+                    max_iterations=args.max_iterations,
+                    skill="fix_check",
+                    prompt_file=str(fix_prompt_path),
+                    log_file=str(fix_log_path),
+                    command_preview=fix_command[:500],
+                )
+
+            run_shell_command(
+                fix_command,
+                repo,
+                fix_env,
+                log_path=fix_log_path,
+                stream_to_terminal=not args.quiet,
+                progress_label=f"fix_check:{iteration:02d}-{index:02d}-{attempt+1}",
+                expect_success=False,
+                tracker=tracker,
+                heartbeat_interval=args.status_interval,
+            )
+
+            chk_append = True
+            attempt += 1
     progress_line(
         f"Decision: all checks passed on iteration {iteration} -> exit skill/check loop "
         "(proceed to dry-run summary or release gates)."
@@ -1112,7 +1251,10 @@ def ensure_remote(repo: Path, remote: str) -> None:
     run_git(repo, ["remote", "get-url", remote], capture_output=True)
 
 
-def ensure_tag_absent(repo: Path, tag_name: str) -> None:
+_MAX_LOCAL_TAG_COLLISION_SKIPS = 512
+
+
+def tag_exists_locally(repo: Path, tag_name: str) -> bool:
     repo_resolved = repo.resolve()
     result = subprocess.run(
         [
@@ -1131,7 +1273,26 @@ def ensure_tag_absent(repo: Path, tag_name: str) -> None:
         text=True,
         capture_output=True,
     )
-    if result.returncode == 0:
+    return result.returncode == 0
+
+
+def next_patch_version_without_local_tag(repo: Path, base_version: str) -> str:
+    candidate = bump_patch(base_version)
+    collisions = 0
+    while tag_exists_locally(repo, f"v{candidate}"):
+        collisions += 1
+        if collisions > _MAX_LOCAL_TAG_COLLISION_SKIPS:
+            raise LoopError(
+                "Could not find an unused local v* tag after "
+                f"{_MAX_LOCAL_TAG_COLLISION_SKIPS} patch bump(s) starting from {bump_patch(base_version)!r}"
+            )
+        progress_line(f"Local tag v{candidate} already exists; bumping patch to next candidate.")
+        candidate = bump_patch(candidate)
+    return candidate
+
+
+def ensure_tag_absent(repo: Path, tag_name: str) -> None:
+    if tag_exists_locally(repo, tag_name):
         raise LoopError(f"Tag {tag_name} already exists")
 
 
@@ -1160,27 +1321,38 @@ def main(argv: list[str] | None = None) -> int:
         args.checks = default_check_commands(repo)
     skills = [load_skill(skill_root, name) for name in args.skills]
     skill_names = [s.name for s in skills]
-    try:
-        run_dir = resolve_run_directory(repo, args, skill_names)
-    except LoopError as exc:
-        print(f"skill_release_loop: {exc}", file=sys.stderr)
-        return 1
 
-    tracker = RunTracker(repo, run_dir, Path(args.log_dir))
+    for release_index in range(1, args.release_count + 1):
+        if args.release_count > 1:
+            progress_banner(f"Release loop {release_index}/{args.release_count}")
 
-    try:
-        _main_run(repo, skill_root, run_dir, skills, args, tracker)
-    except LoopError as exc:
-        tracker.finalize(outcome="failed", error=str(exc))
-        raise
-    except KeyboardInterrupt:
-        if tracker.state.get("active", False):
-            tracker.finalize(outcome="interrupted", error="keyboard interrupt")
-        raise
-    except Exception as exc:
-        if tracker.state.get("active", False):
-            tracker.finalize(outcome="interrupted", error=f"{type(exc).__name__}: {exc}")
-        raise
+        try:
+            run_dir = resolve_run_directory(repo, args, skill_names)
+        except LoopError as exc:
+            print(f"skill_release_loop: {exc}", file=sys.stderr)
+            return 1
+
+        tracker = RunTracker(repo, run_dir, Path(args.log_dir))
+
+        try:
+            _main_run(repo, skill_root, run_dir, skills, args, tracker)
+        except LoopError as exc:
+            tracker.finalize(outcome="failed", error=str(exc))
+            raise
+        except KeyboardInterrupt:
+            if tracker.state.get("active", False):
+                tracker.finalize(outcome="interrupted", error="keyboard interrupt")
+            raise
+        except Exception as exc:
+            if tracker.state.get("active", False):
+                tracker.finalize(outcome="interrupted", error=f"{type(exc).__name__}: {exc}")
+            raise
+
+        if release_index < args.release_count:
+            if args.resume is not None:
+                args.resume = None
+            time.sleep(1.2)
+
     return 0
 
 
@@ -1308,9 +1480,16 @@ def _main_run(
     progress_line("Gate 2: CHANGELOG.md is among changed paths -> OK")
 
     version = current_version(repo)
-    new_version = bump_patch(version)
+    first_bump = bump_patch(version)
+    new_version = next_patch_version_without_local_tag(repo, version)
     tag_name = f"v{new_version}"
-    progress_line(f"Gate 3: bump {version!r} -> {new_version!r}; tag {tag_name!r} must not exist yet.")
+    if new_version != first_bump:
+        progress_line(
+            f"Gate 3: bump {version!r} -> {new_version!r} (skipped occupied local tags through v{first_bump!r}); "
+            f"tag {tag_name!r} must not exist yet."
+        )
+    else:
+        progress_line(f"Gate 3: bump {version!r} -> {new_version!r}; tag {tag_name!r} must not exist yet.")
     ensure_tag_absent(repo, tag_name)
     progress_line("Gate 3: OK")
 
@@ -1319,6 +1498,35 @@ def _main_run(
     finalize_changelog(repo, new_version, dt.date.today())
     replace_version(repo, new_version)
     create_release_commit(repo, new_version, args.commit_message)
+
+    if not args.no_pre_tag_github_ci:
+        progress_banner("Pre-tag GitHub Actions CI")
+        pre_tag_log = run_dir / f"pre-tag-iter-{passed_iteration:02d}-github-ci.log"
+        verify_cmd = render_command(
+            default_pre_tag_github_ci_command(repo),
+            {"repo": str(repo), "iteration": str(passed_iteration)},
+        )
+        gate_env = os.environ.copy()
+        _inject_git_safe_directory(gate_env, str(repo))
+        gate_env["REPO_ROOT"] = str(repo)
+        if tracker is not None:
+            tracker.update(phase="pre_tag_github_ci", pre_tag_log_file=str(pre_tag_log))
+        completed = run_shell_command(
+            verify_cmd,
+            repo,
+            gate_env,
+            log_path=pre_tag_log,
+            stream_to_terminal=not args.quiet,
+            progress_label=f"pre_tag_github_ci:{passed_iteration:02d}",
+            expect_success=False,
+            tracker=tracker,
+            heartbeat_interval=args.status_interval,
+        )
+        if completed.returncode != 0:
+            raise LoopError(
+                f"Pre-tag GitHub Actions verification failed (exit {completed.returncode}); see {pre_tag_log}."
+            )
+
     create_tag(repo, tag_name)
     if not args.skip_push:
         branch = args.branch or current_branch(repo)

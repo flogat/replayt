@@ -16,11 +16,15 @@ class SQLiteStore:
         instance, or external synchronisation must be provided.
     """
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: Path, *, read_only: bool = False) -> None:
         self.db_path = db_path
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._cx = sqlite3.connect(db_path)
-        self._init_db()
+        self._read_only = read_only
+        if read_only:
+            self._cx = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+        else:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
+            self._cx = sqlite3.connect(db_path)
+            self._init_db()
 
     def close(self) -> None:
         self._cx.close()
@@ -47,7 +51,12 @@ class SQLiteStore:
         )
         self._cx.commit()
 
+    def _ensure_writable(self) -> None:
+        if self._read_only:
+            raise RuntimeError("SQLiteStore is read-only")
+
     def append_event(self, run_id: str, *, ts: str, typ: str, payload: dict[str, Any]) -> dict[str, Any]:
+        self._ensure_writable()
         run_id = _validate_run_id(run_id)
         payload_json = json.dumps(payload, default=str)
         try:
@@ -69,6 +78,7 @@ class SQLiteStore:
         return {"ts": ts, "run_id": run_id, "seq": seq, "type": typ, "payload": payload}
 
     def append(self, run_id: str, event: dict[str, Any]) -> None:
+        self._ensure_writable()
         run_id = _validate_run_id(run_id)
         seq = int(event["seq"])
         typ = str(event["type"])
@@ -118,6 +128,7 @@ class SQLiteStore:
 
     def delete_run(self, run_id: str) -> int:
         """Delete all events for *run_id*. Returns the number of rows deleted."""
+        self._ensure_writable()
         run_id = _validate_run_id(run_id)
         cursor = self._cx.execute("DELETE FROM events WHERE run_id = ?", (run_id,))
         self._cx.commit()

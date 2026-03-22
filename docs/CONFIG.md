@@ -21,15 +21,16 @@ So you get one config file: the nearest ancestor that defines either `.replaytrc
 | `target` | Default workflow target for **`replayt run`** / **`replayt ci`** when you omit the **`TARGET`** positional argument: a `module:variable` string or a path to `workflow.py` / YAML (same forms as the CLI). Env **`REPLAYT_TARGET`** overrides this when set. Other commands (**`resume`**, **`validate`**, **`graph`**, **`contract`**, **`doctor --target`**) still require an explicit target. |
 | `timeout` | LLM HTTP timeout (seconds). |
 | `strict_mirror` | If true, any SQLite mirror write failure aborts the run after logging. This is not cross-store atomicity: the JSONL primary may already contain the event that SQLite missed, so repair or re-sync may still be required. If false, the JSONL primary still records events but the mirror may miss rows until you repair or re-sync. Do not treat SQLite as authoritative until you understand this mode. Default: when omitted, the CLI uses strict mirroring whenever `--sqlite` is set (or `sqlite` is set in project config); set `strict_mirror = false` explicitly to allow a lenient mirror. |
-| `run_hook` | Optional argv list for a subprocess run before `replayt run` / `replayt ci` starts execution. replayt passes `REPLAYT_TARGET`, `REPLAYT_RUN_ID`, `REPLAYT_RUN_MODE`, `REPLAYT_LOG_DIR`, `REPLAYT_LOG_MODE`, `REPLAYT_DRY_RUN`, and optional `REPLAYT_SQLITE` in the environment. Override with env `REPLAYT_RUN_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). Treat like shell commands: trusted config only, not untrusted user input. |
+| `run_hook` | Optional argv list for a subprocess run before `replayt run` / `replayt ci` starts execution. replayt passes `REPLAYT_TARGET`, `REPLAYT_RUN_ID`, `REPLAYT_RUN_MODE`, `REPLAYT_LOG_DIR`, `REPLAYT_LOG_MODE`, `REPLAYT_DRY_RUN`, optional `REPLAYT_SQLITE`, and normalized JSON object strings in `REPLAYT_RUN_INPUTS_JSON`, `REPLAYT_RUN_TAGS_JSON`, `REPLAYT_RUN_METADATA_JSON`, and `REPLAYT_RUN_EXPERIMENT_JSON` when those values are present. Override with env `REPLAYT_RUN_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). Successful runs record a compact breadcrumb under `run_started.runtime.policy_hooks.run`. Treat like shell commands: trusted config only, not untrusted user input. |
 | `run_hook_timeout` | Wall-clock seconds for that subprocess (default 120 if unset). Env `REPLAYT_RUN_HOOK_TIMEOUT` overrides; value `<= 0` means no limit. |
-| `resume_hook` | Optional argv list for a subprocess run before `replayt resume` appends `approval_resolved` (policy gate). Example: `["python", "scripts/check_resume.py"]`. Override with env `REPLAYT_RESUME_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). Treat like shell commands: trusted config only, not untrusted user input. |
+| `resume_hook` | Optional argv list for a subprocess run before `replayt resume` appends `approval_resolved` (policy gate). Example: `["python", "scripts/check_resume.py"]`. Override with env `REPLAYT_RESUME_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). Successful resumes record a compact breadcrumb under `approval_resolved.policy_hook`. Treat like shell commands: trusted config only, not untrusted user input. |
 | `resume_hook_timeout` | Wall-clock seconds for that subprocess (default 120 if unset). Env `REPLAYT_RESUME_HOOK_TIMEOUT` overrides; value `<= 0` means no limit. |
-| `export_hook` | Optional argv list for a subprocess run before `replayt export-run` or `replayt bundle-export` writes the archive (policy / DLP gate). replayt passes `REPLAYT_RUN_ID`, `REPLAYT_EXPORT_KIND` (`export_run` or `bundle_export`), `REPLAYT_LOG_DIR`, `REPLAYT_EXPORT_MODE`, `REPLAYT_EXPORT_OUT`, `REPLAYT_EXPORT_SEAL`, `REPLAYT_EXPORT_EVENT_COUNT`, optional `REPLAYT_SQLITE`, and `REPLAYT_BUNDLE_REPORT_STYLE` for bundle exports. Override with env `REPLAYT_EXPORT_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). Trusted config only, not untrusted user input. |
+| `export_hook` | Optional argv list for a subprocess run before `replayt export-run` or `replayt bundle-export` writes the archive (policy / DLP gate). replayt passes `REPLAYT_RUN_ID`, `REPLAYT_EXPORT_KIND` (`export_run` or `bundle_export`), `REPLAYT_LOG_DIR`, `REPLAYT_EXPORT_MODE`, `REPLAYT_EXPORT_OUT`, `REPLAYT_EXPORT_SEAL`, `REPLAYT_EXPORT_EVENT_COUNT`, optional `REPLAYT_SQLITE`, and `REPLAYT_BUNDLE_REPORT_STYLE` for bundle exports. Override with env `REPLAYT_EXPORT_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). Successful exports record a compact `policy_hook` object in the export manifest. Trusted config only, not untrusted user input. |
 | `export_hook_timeout` | Wall-clock seconds for that subprocess (default 120 if unset). Env `REPLAYT_EXPORT_HOOK_TIMEOUT` overrides; value `<= 0` means no limit. |
-| `seal_hook` | Optional argv list for a subprocess run after the JSONL is read and digests are computed but **before** `replayt seal` writes the manifest (policy gate for standalone seals; tarball exports still use `export_hook`). replayt passes `REPLAYT_RUN_ID`, `REPLAYT_LOG_DIR`, `REPLAYT_SEAL_JSONL`, `REPLAYT_SEAL_OUT`, and `REPLAYT_SEAL_LINE_COUNT`. Override with env `REPLAYT_SEAL_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). Trusted config only, not untrusted user input. |
+| `seal_hook` | Optional argv list for a subprocess run after the JSONL is read and digests are computed but **before** `replayt seal` writes the manifest (policy gate for standalone seals; tarball exports still use `export_hook`). replayt passes `REPLAYT_RUN_ID`, `REPLAYT_LOG_DIR`, `REPLAYT_SEAL_JSONL`, `REPLAYT_SEAL_OUT`, and `REPLAYT_SEAL_LINE_COUNT`. Override with env `REPLAYT_SEAL_HOOK` (shell tokenized; see [`CLI.md`](CLI.md)). Successful seals record a compact `policy_hook` object in the seal manifest. Trusted config only, not untrusted user input. |
 | `seal_hook_timeout` | Wall-clock seconds for that subprocess (default 120 if unset). Env `REPLAYT_SEAL_HOOK_TIMEOUT` overrides; value `<= 0` means no limit. |
 | `approval_actor_required_keys` | Optional list of keys that must exist on `replayt resume --actor-json ...` before replayt will append `approval_resolved`. Use this for audit fields such as `email`, `ticket_id`, or change-control ids. |
+| `approval_reason_required` | Optional boolean. When `true`, `replayt resume` requires a non-empty `--reason` before replayt will append `approval_resolved`. Use this when every approval or rejection needs a written justification in the audit trail. |
 
 ## Unknown keys
 
@@ -45,7 +46,7 @@ replayt config --format json | python -c "import json,sys; u=json.load(sys.stdin
 
 ## `Workflow.meta` and `llm_defaults`
 
-If you set `meta={"llm_defaults": {"experiment": {"cohort": "A"}, "stop": ["###"], ...}}` on `Workflow`, those keys merge into `LLMBridge` defaults (and appear under `effective` on `llm_request` events). The `llm_defaults` key is not copied into `workflow_meta` on `run_started` so audit metadata stays separate from workflow labels.
+If you set `meta={"llm_defaults": {"experiment": {"cohort": "A"}, "stop": ["###"], "extra_body": {"reasoning": {"effort": "low"}}, ...}}` on `Workflow`, those keys merge into `LLMBridge` defaults (and appear under `effective` on `llm_request` events). The `llm_defaults` key is not copied into `workflow_meta` on `run_started` so audit metadata stays separate from workflow labels.
 
 You can also pass `Workflow(..., llm_defaults={...})` in Python; same merge rules.
 
@@ -66,11 +67,12 @@ timeout = 120
 log_dir = "var/replayt"
 strict_mirror = false
 approval_actor_required_keys = ["email", "ticket_id"]
+approval_reason_required = true
 ```
 
 Environment variables and explicit CLI flags still override these defaults when you pass them.
 
-Run `replayt config --format json` to inspect the resolved values, best-effort filesystem readiness for the effective `log_dir` / `sqlite` paths, and where each setting came from (`project_config:*`, `env:*`, or a built-in default/preset). That is the quickest way to confirm what a CI job or repo-local shell will actually use before the workflow starts writing logs.
+Run `replayt config --format json` to inspect the resolved values, best-effort filesystem readiness for the effective `log_dir` / `sqlite` paths, env-driven CI artifact sinks (`REPLAYT_JUNIT_XML`, `REPLAYT_SUMMARY_JSON`, `REPLAYT_GITHUB_SUMMARY` / `GITHUB_STEP_SUMMARY`), and where each setting came from (`project_config:*`, `env:*`, or a built-in default/preset). That is the quickest way to confirm what a CI job or repo-local shell will actually use before the workflow starts writing logs.
 
 For path-valued config keys such as `log_dir` and `sqlite`, relative paths are interpreted relative to the config file that declared them, not the shell's current working directory. That keeps runs launched from subdirectories writing to the same project-owned locations.
 
@@ -103,6 +105,22 @@ Upper bound on the serialized JSON Schema size embedded in `LLMBridge.parse` sys
 When **`replayt run`** / **`replayt ci`** writes a machine-readable summary (**`--summary-json`** or env **`REPLAYT_SUMMARY_JSON`**), you may set this variable to a JSON **object** (string keys, JSON-serializable values). replayt parses it before the workflow starts; invalid JSON or a non-object (array, string, `null`, …) aborts with exit code **`1`** and does not run the workflow. Parsed content is copied into the summary file under **`ci_metadata`** so downstream alerts and ticket bots can correlate **`run_id`** with pipeline identifiers you choose (for example **`CI_PIPELINE_URL`** / **`GITHUB_SHA`** mapped in shell).
 
 If no summary path is configured, this variable is ignored even when set.
+
+## `REPLAYT_JUNIT_XML`
+
+When set to a non-empty path, **`replayt run`** writes the same minimal JUnit XML artifact as **`replayt ci --junit-xml PATH`**. `replayt config --format json` exposes the resolved path under **`ci_artifacts.junit_xml`**, and `replayt doctor --format json` adds **`ci_junit_xml_ready`** so a CI shell can catch a missing or unwritable parent directory before the workflow starts.
+
+## `REPLAYT_SUMMARY_JSON`
+
+When set to a non-empty path, **`replayt run`** writes the same **`replayt.ci_run_summary.v1`** JSON artifact as **`replayt ci --summary-json PATH`**. `replayt config --format json` exposes the resolved path under **`ci_artifacts.summary_json`**, and `replayt doctor --format json` adds **`ci_summary_json_ready`** so a broken artifact path fails preflight instead of only failing after execution.
+
+## `REPLAYT_GITHUB_SUMMARY`
+
+Set to **`1`** to request the same markdown summary behavior as **`replayt ci --github-summary`**. replayt only appends when the CI runner also exports **`GITHUB_STEP_SUMMARY`** with a writable file path. `replayt config --format json` shows both the request bit and the sink path under **`ci_artifacts.github_summary`**, while `replayt doctor --format json` reports **`ci_github_summary_ready`** when the request is enabled but the sink env var is missing or unusable.
+
+## `GITHUB_STEP_SUMMARY`
+
+GitHub Actions populates this env var with the markdown summary file path for the current step. replayt does not invent a fallback path when it is absent: if you request GitHub summaries via **`--github-summary`** or **`REPLAYT_GITHUB_SUMMARY=1`**, export **`GITHUB_STEP_SUMMARY`** from the runner (GitHub does this automatically inside Actions). `replayt config --format json` shows the resolved sink path under **`ci_artifacts.github_summary.path`**.
 
 ## `REPLAYT_TARGET`
 

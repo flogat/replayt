@@ -2,7 +2,7 @@
 
 These recipes are **not** built into replayt core. Use them to wire up queues, UIs, other SDKs, and analytics around explicit states and local logs.
 
-**Tutorial first:** work through sections 1–14 in [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) in order. Return here when you need a reference pattern.
+**Tutorial first:** work through sections 1-14 in [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) in order. Return here when you need a reference pattern.
 
 ---
 
@@ -105,7 +105,7 @@ In Python, the same shape is `Runner.run(..., run_metadata={"deployment_tier": "
 
 #### Sub-pattern: strict JSON exit shape (`response_format`)
 
-Use the official client’s `response_format={"type": "json_object"}` (or newer JSON-schema modes) when available; map the assistant string into **one** Pydantic model before transitioning.
+Use the official client's `response_format={"type": "json_object"}` (or newer JSON-schema modes) when available; map the assistant string into **one** Pydantic model before transitioning.
 
 ```python
 from openai import OpenAI
@@ -159,7 +159,7 @@ def screen_review(ctx):
 
 #### Sub-pattern: streaming + structured summary
 
-Stream for UX inside the step; accumulate text; then derive **one** structured summary (second API call with `ctx.llm.parse`, or strict JSON parse of the final buffer). replayt’s timeline should show **decisions**, not per-token deltas (see also **Pattern: stream inside step, log structured summary** below).
+Stream for UX inside the step; accumulate text; then derive **one** structured summary (second API call with `ctx.llm.parse`, or strict JSON parse of the final buffer). replayt's timeline should show **decisions**, not per-token deltas (see also **Pattern: stream inside step, log structured summary** below).
 
 ```python
 from openai import OpenAI
@@ -206,7 +206,7 @@ def stream_then_struct(ctx):
 
 ### Pattern: golden path test (pytest)
 
-**Scenario:** You want regression tests and “eval-like” checks without a built-in `replayt eval` command.
+**Scenario:** You want regression tests and "eval-like" checks without a built-in `replayt eval` command.
 
 **Approach:** Call **`Runner.run`** from pytest with **fixed inputs**. Prefer **mocking** `httpx` or, for graph-level tests without touching transports, use **`MockLLMClient`** with **`run_with_mock`** and **`assert_events`** (`from replayt.testing import ...` or `from replayt import MockLLMClient, run_with_mock`). Assert on `result.status`, final context keys, or `structured_output` events in JSONL. For human-readable debugging after a failed CI run, point people at **`replayt replay RUN_ID`** with a saved log directory.
 
@@ -228,7 +228,7 @@ def require_env(name: str) -> str:
     return v
 
 require_env("OPENAI_API_KEY")
-# then: replayt run … or Runner.run(...)
+# then: replayt run ... or Runner.run(...)
 ```
 
 ### Pattern: DuckDB ad-hoc analytics
@@ -283,7 +283,7 @@ Use **`ctx.note(...)`** for explicit sub-run breadcrumbs, then narrow a run with
 
 ### Pattern: reusable workflow package
 
-**Scenario:** Many services should import the same workflow without a “plugin registry.”
+**Scenario:** Many services should import the same workflow without a "plugin registry."
 
 **Approach:** Publish an internal package (e.g. `my_org_replayt`) that defines `wf: Workflow` in a module. Consumers run `replayt run my_org_replayt.support:wf ...` after `pip install my-org-replayt==1.3.0`. Skip dynamic `importlib` loaders; pin versions like any other dependency.
 
@@ -306,7 +306,7 @@ wf = Workflow("support", version=dist_version("my_org_replayt"))
 
 **Scenario:** You run Ollama, Groq, OpenRouter, or a corporate gateway. You want sensible defaults without hunting for base URLs.
 
-**Approach:** In Python, `LLMSettings.for_provider("ollama")` (also: `openai`, `groq`, `together`, `openrouter`, `anthropic`). In the shell, set `REPLAYT_PROVIDER`; `OPENAI_BASE_URL` and `REPLAYT_MODEL` still **override** the preset defaults when set. Native **Anthropic** HTTP APIs are not OpenAI-`/chat/completions`-compatible; point `OPENAI_BASE_URL` at an **OpenAI-compatible proxy** (LiteLLM, corporate gateway) or call `anthropic`’s SDK **inside one step** and validate with Pydantic:
+**Approach:** In Python, `LLMSettings.for_provider("ollama")` (also: `openai`, `groq`, `together`, `openrouter`, `anthropic`). In the shell, set `REPLAYT_PROVIDER`; `OPENAI_BASE_URL` and `REPLAYT_MODEL` still **override** the preset defaults when set. Native **Anthropic** HTTP APIs are not OpenAI-`/chat/completions`-compatible; point `OPENAI_BASE_URL` at an **OpenAI-compatible proxy** (LiteLLM, corporate gateway) or call `anthropic`'s SDK **inside one step** and validate with Pydantic:
 
 ```python
 # Inside a @wf.step (illustrative; pip install anthropic)
@@ -430,9 +430,9 @@ def scrub_file(path: Path) -> None:
 
 ### Pattern: workflow composition via explicit sub-run
 
-**Scenario:** Multiple workflows share a validation phase; you do not want a hidden “meta-planner.”
+**Scenario:** Multiple workflows share a validation phase; you do not want a hidden "meta-planner."
 
-**Approach:** From a parent step, call **`Runner.run`** on a **child** `Workflow` with a **deterministic** child `run_id` (for example ``f"{parent_run_id}__validate"``). Inspect the child’s JSONL or `RunResult` in Python, then **return an explicit next state** on the parent. Never let the child model choose the parent transition string without your code mapping it.
+**Approach:** From a parent step, call **`Runner.run`** on a **child** `Workflow` with a **deterministic** child `run_id` (for example ``f"{parent_run_id}__validate"``). Inspect the child's JSONL or `RunResult` in Python, then **return an explicit next state** on the parent. Never let the child model choose the parent transition string without your code mapping it.
 
 ```python
 import uuid
@@ -443,7 +443,7 @@ from replayt.persistence import JSONLStore
 
 parent = Workflow("parent", version="1")
 child = Workflow("child_validate", version="1")
-# … define child wf …
+# ... define child wf ...
 
 @parent.step("start")
 def start(ctx):

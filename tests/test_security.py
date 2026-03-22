@@ -8,12 +8,14 @@ from unittest.mock import MagicMock
 import pytest
 
 from replayt.security import (
+    approval_reason_missing,
     extraneous_llm_credential_env_names,
     llm_credential_env_presence,
     log_directory_permission_trust_checks,
     missing_actor_fields,
     normalize_name_list,
     redact_named_fields,
+    sanitize_base_url_for_output,
     trust_boundary_checks,
 )
 from replayt.types import LogMode
@@ -137,6 +139,11 @@ def test_trust_boundary_checks_secretish_query_key_surfaces_key_not_value() -> N
     assert "supersecret" not in cred.detail
 
 
+def test_sanitize_base_url_for_output_strips_userinfo_and_query() -> None:
+    safe = sanitize_base_url_for_output("https://user:secret@example.com/v1?token=secret&x=1")
+    assert safe == "https://example.com/v1"
+
+
 def test_normalize_name_list_dedupes_case_insensitive() -> None:
     assert normalize_name_list(["A", "a", " b ", ""]) == ("A", "b")
 
@@ -150,6 +157,13 @@ def test_redact_named_fields_nested() -> None:
 
 def test_missing_actor_fields_reports_empty_strings() -> None:
     assert missing_actor_fields({"email": " "}, required_fields=["email"]) == ["email"]
+
+
+def test_approval_reason_missing_rejects_blank_required_reason() -> None:
+    assert approval_reason_missing(None, required=True) is True
+    assert approval_reason_missing("   ", required=True) is True
+    assert approval_reason_missing("approved under CAB-7", required=True) is False
+    assert approval_reason_missing(None, required=False) is False
 
 
 def test_llm_credential_env_presence_never_includes_values(

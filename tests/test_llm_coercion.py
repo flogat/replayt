@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from replayt.llm_coercion import (
+    coerce_llm_extra_body,
     coerce_llm_seed,
     coerce_llm_stop_sequences,
     coerce_max_tokens_for_api,
@@ -77,6 +78,19 @@ def test_coerce_llm_stop_sequences() -> None:
         coerce_llm_stop_sequences([1])
     with pytest.raises(TypeError, match="stop must be str"):
         coerce_llm_stop_sequences(123)
+
+
+def test_coerce_llm_extra_body() -> None:
+    assert coerce_llm_extra_body(None) is None
+    assert coerce_llm_extra_body({}) is None
+    assert coerce_llm_extra_body({" reasoning ": {"effort": "high"}, "tags": ("a", "b")}) == {
+        "reasoning": {"effort": "high"},
+        "tags": ["a", "b"],
+    }
+    with pytest.raises(ValueError, match="conflicts with core chat fields"):
+        coerce_llm_extra_body({"model": "x"}, reserved_keys={"model"})
+    with pytest.raises(TypeError, match="JSON-serializable"):
+        coerce_llm_extra_body({"fn": object()})
 
 
 def test_coerce_llm_seed() -> None:

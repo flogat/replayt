@@ -22,6 +22,10 @@ PACKAGE_BY_TARGET = {
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prompt-file", required=True, help="Path to the generated skill prompt file.")
+    parser.add_argument(
+        "--skill-root",
+        help="Optional skill directory forwarded to `codex exec --skill-root`.",
+    )
     parser.add_argument("--model", help="Optional Codex model override.")
     parser.add_argument(
         "--dangerously-bypass-approvals-and-sandbox",
@@ -37,6 +41,29 @@ def repo_root() -> Path:
 
 def codex_install_root() -> Path:
     return repo_root() / ".replayt" / "tools" / "codex-cli"
+
+
+def default_skill_root() -> Path:
+    return repo_root() / ".cursor" / "skills"
+
+
+def resolve_skill_root(raw_path: str | None) -> Path | None:
+    candidate = (raw_path or os.environ.get("SKILL_ROOT", "")).strip()
+    if candidate:
+        path = Path(candidate).expanduser()
+        if not path.is_absolute():
+            path = (repo_root() / path).resolve()
+        else:
+            path = path.resolve()
+    else:
+        path = default_skill_root().resolve()
+        if not path.exists():
+            return None
+    if not path.exists():
+        raise FileNotFoundError(f"Skill root not found: {path}")
+    if not path.is_dir():
+        raise NotADirectoryError(f"Skill root is not a directory: {path}")
+    return path
 
 
 def codex_binary_path() -> Path:
@@ -92,6 +119,7 @@ def main(argv: list[str] | None = None) -> int:
     if not prompt_path.exists():
         raise FileNotFoundError(f"Prompt file not found: {prompt_path}")
     prompt = prompt_path.read_text(encoding="utf-8")
+    skill_root = resolve_skill_root(args.skill_root)
     binary = ensure_codex_installed()
     env = os.environ.copy()
     extra_path = codex_path_entries(binary)
@@ -104,6 +132,8 @@ def main(argv: list[str] | None = None) -> int:
     command = ["exec", "-C", str(repo_root()), "--skip-git-repo-check"]
     if args.model:
         command += ["--model", args.model]
+    if skill_root is not None:
+        command += ["--skill-root", str(skill_root)]
     if args.dangerously_bypass_approvals_and_sandbox:
         command.append("--dangerously-bypass-approvals-and-sandbox")
     else:

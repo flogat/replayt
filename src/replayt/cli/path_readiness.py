@@ -134,3 +134,64 @@ def readiness_checks(*, log_dir: Path, sqlite: Path | None) -> list[PathReadines
     else:
         checks.append(_file_check(sqlite, name="sqlite_ready", label="sqlite path"))
     return checks
+
+
+def ci_artifact_readiness_checks(
+    *,
+    junit_xml: Path | None,
+    summary_json: Path | None,
+    github_summary_requested: bool,
+    github_step_summary: Path | None,
+) -> list[PathReadinessCheck]:
+    checks: list[PathReadinessCheck] = []
+    if junit_xml is None:
+        checks.append(
+            PathReadinessCheck(
+                name="ci_junit_xml_ready",
+                ok=True,
+                detail="JUnit XML artifact not configured",
+                path=None,
+            )
+        )
+    else:
+        checks.append(_file_check(junit_xml, name="ci_junit_xml_ready", label="JUnit XML artifact"))
+
+    if summary_json is None:
+        checks.append(
+            PathReadinessCheck(
+                name="ci_summary_json_ready",
+                ok=True,
+                detail="CI summary JSON artifact not configured",
+                path=None,
+            )
+        )
+    else:
+        checks.append(_file_check(summary_json, name="ci_summary_json_ready", label="CI summary JSON artifact"))
+
+    if not github_summary_requested:
+        checks.append(
+            PathReadinessCheck(
+                name="ci_github_summary_ready",
+                ok=True,
+                detail="GitHub step summary not requested",
+                path=None,
+            )
+        )
+    elif github_step_summary is None:
+        checks.append(
+            PathReadinessCheck(
+                name="ci_github_summary_ready",
+                ok=False,
+                detail="GitHub step summary requested but GITHUB_STEP_SUMMARY is unset",
+                path=None,
+            )
+        )
+    else:
+        checks.append(
+            _file_check(
+                github_step_summary,
+                name="ci_github_summary_ready",
+                label="GitHub step summary path",
+            )
+        )
+    return checks

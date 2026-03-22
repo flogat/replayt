@@ -9,7 +9,7 @@ from typing import Any
 import typer
 
 from replayt.llm import LLMSettings
-from replayt.security import llm_credential_env_presence, normalize_name_list
+from replayt.security import llm_credential_env_presence, normalize_name_list, sanitize_base_url_for_output
 from replayt.types import LogMode
 
 SUPPORTED_CONFIG_KEYS = frozenset(
@@ -32,6 +32,7 @@ SUPPORTED_CONFIG_KEYS = frozenset(
         "seal_hook",
         "seal_hook_timeout",
         "approval_actor_required_keys",
+        "approval_reason_required",
     }
 )
 
@@ -209,6 +210,14 @@ def resolve_approval_actor_required_keys(
     return (), "unset"
 
 
+def resolve_approval_reason_required(cli_require_reason: bool, cfg: dict[str, Any]) -> tuple[bool, str]:
+    if cli_require_reason:
+        return True, "cli:--require-reason"
+    if "approval_reason_required" in cfg:
+        return bool(cfg.get("approval_reason_required")), "project_config:approval_reason_required"
+    return False, "unset"
+
+
 def resolve_timeout_setting(
     timeout: int | None,
     cfg: dict[str, Any],
@@ -279,12 +288,12 @@ def resolve_llm_settings(cfg: dict[str, Any]) -> tuple[LLMSettings | None, dict[
     except ValueError as exc:
         report["error"] = str(exc)
         if env_base_url:
-            report["base_url"] = env_base_url
+            report["base_url"] = sanitize_base_url_for_output(env_base_url)
         if model:
             report["model"] = model
         return None, report
 
-    report["base_url"] = settings.base_url
+    report["base_url"] = sanitize_base_url_for_output(settings.base_url)
     report["model"] = settings.model
     return settings, report
 

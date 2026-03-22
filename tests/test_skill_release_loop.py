@@ -60,6 +60,8 @@ _ALL_DEFAULT_SKILLS = (
     "feat_startup_ic",
     "feat_enterprise_integrator",
     "feat_framework_enthusiast",
+    "feat_mcp_tooling",
+    "feat_agent_harness_engineer",
     "review_design_fidelity",
     "improvedoc",
     "deslopdoc",
@@ -299,8 +301,56 @@ def test_resolve_run_directory_auto_empty_raises(tmp_path: Path, monkeypatch) ->
     monkeypatch.chdir(repo)
     args = mod.parse_args(["--resume"])
     args.checks = ["true"]
-    with pytest.raises(mod.LoopError, match="No resumable"):
+    with pytest.raises(mod.LoopError, match="No prior run directory"):
         mod.resolve_run_directory(repo, args, ["x"])
+
+
+def test_find_latest_stamp_run_dir(tmp_path: Path) -> None:
+    mod = _load_script()
+    root = tmp_path / "rel"
+    root.mkdir()
+    empty_stamp = root / "20260101-100000"
+    with_logs = root / "20260102-100000"
+    newer = root / "20260103-100000"
+    empty_stamp.mkdir()
+    with_logs.mkdir()
+    newer.mkdir()
+    (with_logs / "iter-01-a.log").write_text("x\n", encoding="utf-8")
+    (newer / "iter-01-a.log").write_text("y\n", encoding="utf-8")
+    assert mod.find_latest_stamp_run_dir(root) == newer
+
+
+def test_resolve_run_directory_auto_picks_newest_with_logs_even_when_iteration_complete(
+    tmp_path: Path, monkeypatch
+) -> None:
+    mod = _load_script()
+    repo = tmp_path / "r"
+    repo.mkdir()
+    log_root = repo / ".replayt" / "skill-release"
+    log_root.mkdir(parents=True)
+    older = log_root / "20260101-100000"
+    newer = log_root / "20260102-100000"
+    older.mkdir()
+    newer.mkdir()
+    skills = ["a", "b"]
+    checks = 2
+    for name in skills:
+        (newer / f"iter-01-{name}.log").write_text(
+            "ok\n### skill_release_loop: exit_code=0\n", encoding="utf-8"
+        )
+    for j in range(1, checks + 1):
+        (newer / f"iter-01-check-{j:02d}.log").write_text(
+            "ok\n### skill_release_loop: exit_code=0\n", encoding="utf-8"
+        )
+    (older / "iter-01-a.log").write_text(
+        "fail\n### skill_release_loop: exit_code=1\n", encoding="utf-8"
+    )
+
+    monkeypatch.chdir(repo)
+    args = mod.parse_args(["--resume"])
+    args.checks = ["c1", "c2"]
+    got = mod.resolve_run_directory(repo, args, skills)
+    assert got == newer.resolve()
 
 
 def test_dry_run_completes_without_worktree_changes(tmp_path: Path, monkeypatch) -> None:
@@ -367,6 +417,56 @@ def test_default_task_and_skill_command(tmp_path: Path, monkeypatch) -> None:
     assert args.checks is None
 
 
+def test_default_skill_command_passes_skill_root_placeholder(tmp_path: Path) -> None:
+    mod = _load_script()
+    command = mod.default_skill_command(tmp_path)
+    assert "--skill-root {skill_root_q}" in command
+
+
+def test_describe_skill_env_snippet_includes_skill_root() -> None:
+    mod = _load_script()
+    snippet = mod.describe_skill_env_snippet(
+        {
+            "REPO_ROOT": "repo",
+            "SKILL_ROOT": "skills",
+            "SKILL_NAME": "demo",
+            "SKILL_ITERATION": "1",
+            "SKILL_PROMPT_FILE": "prompt.md",
+            "SKILL_LOG_FILE": "skill.log",
+            "SKILL_TASK": "task",
+        }
+    )
+    assert "SKILL_ROOT=skills" in snippet
+
+
+def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    skill_root = repo / ".cursor" / "skills"
+    _write(skill_root / "demo" / "SKILL.md", "# demo\n")
+    run_dir = repo / ".replayt" / "skill-release"
+    run_dir.mkdir(parents=True)
+    args = mod.parse_args(["--skill-command", "echo {skill_root}"])
+    captured: dict[str, object] = {}
+
+    def fake_run_shell_command(command, repo_path, env, **kwargs):
+        captured["command"] = command
+        captured["repo"] = repo_path
+        captured["env"] = env
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(mod, "run_shell_command", fake_run_shell_command)
+
+    skill = mod.load_skill(skill_root, "demo")
+    mod.run_skill_iteration(repo, [skill], args, run_dir, 1, None)
+
+    assert captured["command"] == f"echo {skill_root.resolve()}"
+    assert captured["repo"] == repo
+    env = captured["env"]
+    assert isinstance(env, dict)
+    assert env["SKILL_ROOT"] == str(skill_root.resolve())
+
+
 def test_preflight_rejects_dirty_worktree(tmp_path: Path) -> None:
     mod = _load_script()
     repo = tmp_path / "repo"
@@ -427,6 +527,7 @@ def test_release_loop_runs_until_checks_pass_and_tags_release(tmp_path: Path, mo
             "--max-iterations",
             "3",
             "--skip-push",
+            "--no-pre-tag-github-ci",
         ]
     )
 
@@ -444,6 +545,8 @@ def test_release_loop_runs_until_checks_pass_and_tags_release(tmp_path: Path, mo
     for iteration in (1, 2):
         for skill in _ALL_DEFAULT_SKILLS:
             expected_order.append(f"{iteration}:{skill}")
+        if iteration == 1:
+            expected_order.extend(["1:fix_check", "1:fix_check", "1:fix_check"])
     assert order == expected_order
 
     assert _git(repo, "log", "-1", "--pretty=%s") == "release: v0.4.1"
@@ -547,3 +650,58 @@ def test_ensure_tag_absent_marks_repo_safe_directory(tmp_path: Path, monkeypatch
         "--verify",
         "refs/tags/v1.2.3",
     ]
+
+
+def _minimal_git_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "tag_repo"
+    repo.mkdir()
+    _write(repo / "f.txt", "x\n")
+    _git(repo, "init")
+    _git(repo, "branch", "-M", "main")
+    _git(repo, "config", "user.name", "Test")
+    _git(repo, "config", "user.email", "test@example.com")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "initial")
+    return repo
+
+
+def test_next_patch_version_without_local_tag_no_collision(tmp_path: Path) -> None:
+    mod = _load_script()
+    repo = _minimal_git_repo(tmp_path)
+    assert mod.next_patch_version_without_local_tag(repo, "1.2.3") == "1.2.4"
+
+
+def test_next_patch_version_without_local_tag_skips_existing(tmp_path: Path) -> None:
+    mod = _load_script()
+    repo = _minimal_git_repo(tmp_path)
+    _git(repo, "tag", "-a", "v1.2.4", "-m", "v1.2.4")
+    assert mod.next_patch_version_without_local_tag(repo, "1.2.3") == "1.2.5"
+
+
+def test_next_patch_version_without_local_tag_max_collisions(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    monkeypatch.setattr(mod, "_MAX_LOCAL_TAG_COLLISION_SKIPS", 3)
+    monkeypatch.setattr(mod, "tag_exists_locally", lambda _r, _t: True)
+    with pytest.raises(mod.LoopError, match="Could not find an unused local"):
+        mod.next_patch_version_without_local_tag(tmp_path / "noop", "1.0.0")
+
+
+def test_run_shell_command_requires_stdout_pipe(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+
+    class _FakeProc:
+        stdout = None
+
+        def wait(self) -> int:
+            return 0
+
+    monkeypatch.setattr(mod.subprocess, "Popen", lambda *args, **kwargs: _FakeProc())
+
+    with pytest.raises(mod.LoopError, match="stdout pipe was not captured"):
+        mod.run_shell_command(
+            "python -c \"print('x')\"",
+            tmp_path,
+            {},
+            log_path=tmp_path / "cmd.log",
+            stream_to_terminal=False,
+        )

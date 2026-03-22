@@ -50,7 +50,7 @@ runner = Runner(
 )
 ```
 
-**Per-call** - override one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., top_p=..., timeout_seconds=..., max_tokens=..., provider=..., base_url=..., native_response_format=True, extra_headers={...}, experiment={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events (use `experiment` for prompt hashes, dataset ids, or A/B labels, not as a full eval product; see [`SCOPE.md`](SCOPE.md)).
+**Per-call** - override one step without forking the library: `ctx.llm.with_settings(model=..., temperature=..., top_p=..., timeout_seconds=..., max_tokens=..., provider=..., base_url=..., native_response_format=True, extra_headers={...}, extra_body={...}, experiment={...})`. Overrides appear under `effective` on `llm_request` / `llm_response` events (use `experiment` for prompt hashes, dataset ids, or A/B labels, not as a full eval product; see [`SCOPE.md`](SCOPE.md)).
 
 ```python
 decision = (
@@ -110,7 +110,7 @@ replayt ci mypkg.workflow:wf --summary-json .replayt/ci-summary.json
 # jq '.ci_metadata' .replayt/ci-summary.json
 ```
 
-For one-command preflight before the real job, **`replayt doctor --skip-connectivity --target TARGET --strict-graph`** now loads the workflow, validates its graph/input flags, and checks that the resolved log / SQLite destinations are usable without executing the run.
+For one-command preflight before the real job, **`replayt doctor --skip-connectivity --target TARGET --strict-graph`** now loads the workflow, validates its graph/input flags, and checks that the resolved log / SQLite destinations are usable without executing the run. If the shell also sets **`REPLAYT_JUNIT_XML`**, **`REPLAYT_SUMMARY_JSON`**, or **`REPLAYT_GITHUB_SUMMARY=1`**, the same doctor report now preflights those artifact sinks too, including a missing **`GITHUB_STEP_SUMMARY`** export.
 
 ### GitHub Actions and exit code `2`
 

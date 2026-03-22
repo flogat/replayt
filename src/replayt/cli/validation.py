@@ -32,17 +32,74 @@ def _json_parse_hint(label: str) -> str:
 def inputs_json_from_options(
     inputs_json: str | None,
     inputs_file: Path | None,
+    input_value: list[str] | None = None,
 ) -> str | None:
     if inputs_json is not None and inputs_file is not None:
         raise typer.BadParameter("Use only one of --inputs-json or --inputs-file")
+    base_raw: str | None = None
     if inputs_file is not None:
-        return _read_json_text_file(inputs_file, label="--inputs-file")
-    if inputs_json is not None and inputs_json.startswith("@"):
+        base_raw = _read_json_text_file(inputs_file, label="--inputs-file")
+    elif inputs_json is not None and inputs_json.startswith("@"):
         file_ref = inputs_json[1:].strip()
         if not file_ref:
             raise typer.BadParameter("--inputs-json @path form requires a file path, e.g. --inputs-json @inputs.json")
-        return _read_json_text_file(Path(file_ref), label="--inputs-json @path")
-    return inputs_json
+        base_raw = _read_json_text_file(Path(file_ref), label="--inputs-json @path")
+    else:
+        base_raw = inputs_json
+    if not input_value:
+        return base_raw
+    merged: dict[str, Any] = {}
+    if base_raw is not None:
+        merged = parse_json_object_option(base_raw, label="inputs")
+    for raw_item in input_value:
+        path, value = _parse_input_assignment(raw_item)
+        _assign_input_value(merged, path, value)
+    return json.dumps(merged)
+
+
+def _parse_input_assignment(raw_item: str) -> tuple[list[str], Any]:
+    if "=" not in raw_item:
+        raise typer.BadParameter(f"--input must be key=value, got: {raw_item!r}")
+    raw_key, raw_value = raw_item.split("=", 1)
+    key = raw_key.strip()
+    if not key:
+        raise typer.BadParameter(f"--input must use a non-empty key before '=', got: {raw_item!r}")
+    path = [part.strip() for part in key.split(".")]
+    if any(not part for part in path):
+        raise typer.BadParameter(
+            f"--input dotted paths cannot contain empty segments, got: {raw_key!r}"
+        )
+    return path, _coerce_input_value(raw_value)
+
+
+def _coerce_input_value(raw_value: str) -> Any:
+    stripped = raw_value.strip()
+    if not stripped:
+        return raw_value
+    try:
+        return json.loads(stripped)
+    except json.JSONDecodeError:
+        return raw_value
+
+
+def _assign_input_value(target: dict[str, Any], path: list[str], value: Any) -> None:
+    current: dict[str, Any] = target
+    walked: list[str] = []
+    for part in path[:-1]:
+        walked.append(part)
+        existing = current.get(part)
+        if existing is None:
+            child: dict[str, Any] = {}
+            current[part] = child
+            current = child
+            continue
+        if not isinstance(existing, dict):
+            dotted = ".".join(walked)
+            raise typer.BadParameter(
+                f"--input path {'.'.join(path)!r} cannot descend into {dotted!r} because that value is not an object"
+            )
+        current = existing
+    current[path[-1]] = value
 
 
 def check_json_object_string(raw: str | None, *, label: str) -> tuple[bool, str | None]:

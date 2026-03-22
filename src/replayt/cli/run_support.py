@@ -14,6 +14,8 @@ import typer
 from replayt.runner import RunResult
 from replayt.workflow import Workflow
 
+RUN_RESULT_SCHEMA = "replayt.run_result.v1"
+
 
 def dry_check_suggested_command(
     *,
@@ -55,6 +57,27 @@ def _hook_argv(cfg: dict[str, Any], *, env_var: str, config_key: str) -> list[st
     return None
 
 
+def _hook_source(cfg: dict[str, Any], *, env_var: str, config_key: str) -> str:
+    env_hook = os.environ.get(env_var, "").strip()
+    if env_hook:
+        return f"env:{env_var}"
+    if cfg.get(config_key):
+        return f"project_config:{config_key}"
+    return "unset"
+
+
+def _hook_audit_payload(argv: list[str] | None, *, source: str) -> dict[str, Any] | None:
+    if not argv:
+        return None
+    raw_argv0 = str(argv[0]).strip()
+    argv0 = Path(raw_argv0).name or raw_argv0
+    return {
+        "source": source,
+        "argv0": argv0,
+        "arg_count": len(argv),
+    }
+
+
 def run_hook_argv(cfg: dict[str, Any]) -> list[str] | None:
     """Argv for the optional pre-run policy subprocess (trusted project config / env only)."""
 
@@ -84,6 +107,38 @@ def seal_hook_argv(cfg: dict[str, Any]) -> list[str] | None:
     return _hook_argv(cfg, env_var="REPLAYT_SEAL_HOOK", config_key="seal_hook")
 
 
+def run_hook_source(cfg: dict[str, Any]) -> str:
+    return _hook_source(cfg, env_var="REPLAYT_RUN_HOOK", config_key="run_hook")
+
+
+def resume_hook_source(cfg: dict[str, Any]) -> str:
+    return _hook_source(cfg, env_var="REPLAYT_RESUME_HOOK", config_key="resume_hook")
+
+
+def export_hook_source(cfg: dict[str, Any]) -> str:
+    return _hook_source(cfg, env_var="REPLAYT_EXPORT_HOOK", config_key="export_hook")
+
+
+def seal_hook_source(cfg: dict[str, Any]) -> str:
+    return _hook_source(cfg, env_var="REPLAYT_SEAL_HOOK", config_key="seal_hook")
+
+
+def run_hook_audit(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    return _hook_audit_payload(run_hook_argv(cfg), source=run_hook_source(cfg))
+
+
+def resume_hook_audit(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    return _hook_audit_payload(resume_hook_argv(cfg), source=resume_hook_source(cfg))
+
+
+def export_hook_audit(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    return _hook_audit_payload(export_hook_argv(cfg), source=export_hook_source(cfg))
+
+
+def seal_hook_audit(cfg: dict[str, Any]) -> dict[str, Any] | None:
+    return _hook_audit_payload(seal_hook_argv(cfg), source=seal_hook_source(cfg))
+
+
 def invoke_hook(argv: list[str], *, extra_env: dict[str, str], timeout_seconds: float | None) -> None:
     """Run *argv* with extra env vars; *argv* must come from trusted config."""
 
@@ -101,6 +156,10 @@ def invoke_run_hook(
     dry_run: bool,
     resume: bool,
     sqlite: Path | None,
+    inputs_json: str | None,
+    tags_json: str | None,
+    metadata_json: str | None,
+    experiment_json: str | None,
     timeout_seconds: float | None,
 ) -> None:
     """Run a pre-run policy hook before the workflow starts writing events."""
@@ -115,6 +174,14 @@ def invoke_run_hook(
     }
     if sqlite is not None:
         extra_env["REPLAYT_SQLITE"] = str(sqlite.resolve())
+    if inputs_json is not None:
+        extra_env["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
+    if tags_json is not None:
+        extra_env["REPLAYT_RUN_TAGS_JSON"] = tags_json
+    if metadata_json is not None:
+        extra_env["REPLAYT_RUN_METADATA_JSON"] = metadata_json
+    if experiment_json is not None:
+        extra_env["REPLAYT_RUN_EXPERIMENT_JSON"] = experiment_json
     invoke_hook(argv, extra_env=extra_env, timeout_seconds=timeout_seconds)
 
 
@@ -293,6 +360,7 @@ def exit_for_run_result(result: RunResult) -> None:
 
 def run_result_payload(wf: Workflow, result: RunResult) -> dict[str, Any]:
     return {
+        "schema": RUN_RESULT_SCHEMA,
         "run_id": result.run_id,
         "workflow": f"{wf.name}@{wf.version}",
         "status": result.status,
