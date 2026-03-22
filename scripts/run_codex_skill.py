@@ -24,7 +24,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--prompt-file", required=True, help="Path to the generated skill prompt file.")
     parser.add_argument(
         "--skill-root",
-        help="Optional skill directory forwarded to `codex exec --skill-root`.",
+        help=(
+            "Optional skill directory (validated and used for defaults). "
+            "Skill text is already embedded in generated prompts; current `codex exec` does not take "
+            "`--skill-root`, so this is not forwarded to the Codex CLI."
+        ),
     )
     parser.add_argument("--model", help="Optional Codex model override.")
     parser.add_argument(
@@ -132,8 +136,13 @@ def main(argv: list[str] | None = None) -> int:
     command = ["exec", "-C", str(repo_root()), "--skip-git-repo-check"]
     if args.model:
         command += ["--model", args.model]
+    # `codex exec` no longer supports `--skill-root` (removed in recent Codex CLI). Skills are either
+    # inlined in the prompt by skill_release_loop or read from paths under the repo working root.
     if skill_root is not None:
-        command += ["--skill-root", str(skill_root)]
+        try:
+            skill_root.resolve().relative_to(repo_root().resolve())
+        except ValueError:
+            command += ["--add-dir", str(skill_root)]
     if args.dangerously_bypass_approvals_and_sandbox:
         command.append("--dangerously-bypass-approvals-and-sandbox")
     else:
