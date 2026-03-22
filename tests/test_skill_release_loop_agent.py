@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import datetime as dt
 import importlib.util
 import json
@@ -168,6 +169,18 @@ def test_bump_patch_and_alias() -> None:
     mod = _load_script()
     assert mod.normalize_skill_name("createfeature") == "createfeatures"
     assert mod.bump_patch("1.2.3") == "1.2.4"
+
+
+def test_unreleased_changelog_item_count(tmp_path: Path) -> None:
+    mod = _load_script()
+    repo = tmp_path / "r"
+    repo.mkdir()
+    cl = repo / "CHANGELOG.md"
+    cl.write_text("# Log\n\n## Unreleased\n\n- A\n- B\n\n## 1.0\n", encoding="utf-8")
+    assert mod.unreleased_changelog_item_count(repo) == 2
+    cl.write_text("# Log\n\n## Unreleased\n\n\n## 1.0\n", encoding="utf-8")
+    assert mod.unreleased_changelog_item_count(repo) == 0
+    assert mod.unreleased_changelog_item_count(tmp_path / "no_repo") is None
 
 
 def test_codex_usage_limit_detection() -> None:
@@ -565,6 +578,140 @@ def test_push_release_uses_explicit_branch_and_tag(monkeypatch) -> None:
     assert calls == [
         ["push", "origin", "HEAD:refs/heads/main", "refs/tags/v1.2.3"],
     ]
+
+
+def _pre_tag_fix_args(mod, repo: Path, *, max_fix: int) -> argparse.Namespace:
+    return argparse.Namespace(
+        pre_tag_github_ci_max_fix_attempts=max_fix,
+        quiet=True,
+        skill_command=mod.default_skill_command(repo),
+        skill_root=".cursor/skills",
+        max_iterations=3,
+        status_interval=0.0,
+    )
+
+
+def test_run_pre_tag_github_ci_with_fixes_zero_max_fails_fast(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    pre_tag_log = run_dir / "pre-tag-iter-01-github-ci.log"
+    pre_tag_log.write_text("fail\n", encoding="utf-8")
+    args = _pre_tag_fix_args(mod, repo, max_fix=0)
+
+    def fake_run_shell(command, r, env, *, log_path=None, **kwargs):
+        if log_path and log_path.name.endswith("github-ci.log") and "fix" not in log_path.name:
+            return subprocess.CompletedProcess(command, 1, "", "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(mod, "run_shell_command", fake_run_shell)
+    with pytest.raises(mod.LoopError, match="Pre-tag GitHub Actions verification failed \\(exit 1\\)"):
+        mod.run_pre_tag_github_ci_with_fixes(
+            repo, args, run_dir, 1, None, "verify-cmd", pre_tag_log, {}
+        )
+
+
+def test_run_pre_tag_github_ci_with_fixes_retries_after_fix(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    pre_tag_log = run_dir / "pre-tag-iter-01-github-ci.log"
+    args = _pre_tag_fix_args(mod, repo, max_fix=3)
+    shell_calls: list[tuple[str | None, str]] = []
+
+    def fake_run_shell(command, r, env, *, log_path=None, **kwargs):
+        lp = str(log_path) if log_path else None
+        shell_calls.append((lp, command))
+        if log_path and log_path.name.endswith("github-ci.log") and "fix" not in log_path.name:
+            n = sum(
+                1
+                for lp2, _ in shell_calls
+                if lp2
+                and Path(lp2).name.endswith("github-ci.log")
+                and "fix" not in Path(lp2).name
+            )
+            return subprocess.CompletedProcess(command, 0 if n >= 2 else 1, "", "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(mod, "run_shell_command", fake_run_shell)
+    monkeypatch.setattr(mod, "git_changed_files", lambda _r: ["patched.txt"])
+    monkeypatch.setattr(
+        mod,
+        "run_git",
+        lambda *_a, **_k: subprocess.CompletedProcess([], 0, "", ""),
+    )
+
+    mod.run_pre_tag_github_ci_with_fixes(repo, args, run_dir, 1, None, "verify-cmd", pre_tag_log, {})
+    verify_calls = sum(
+        1
+        for lp, _ in shell_calls
+        if lp and Path(lp).name.endswith("github-ci.log") and "fix" not in Path(lp).name
+    )
+    assert verify_calls == 2
+    assert any(lp and "github-ci-fix" in lp for lp, _ in shell_calls)
+
+
+def test_run_pre_tag_github_ci_with_fixes_exhausts_max_rounds(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    pre_tag_log = run_dir / "pre-tag-iter-01-github-ci.log"
+    pre_tag_log.write_text("x\n", encoding="utf-8")
+    args = _pre_tag_fix_args(mod, repo, max_fix=1)
+
+    def fake_run_shell(command, r, env, *, log_path=None, **kwargs):
+        if log_path and log_path.name.endswith("github-ci.log") and "fix" not in log_path.name:
+            return subprocess.CompletedProcess(command, 1, "", "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(mod, "run_shell_command", fake_run_shell)
+    monkeypatch.setattr(mod, "git_changed_files", lambda _r: ["patched.txt"])
+    monkeypatch.setattr(
+        mod,
+        "run_git",
+        lambda *_a, **_k: subprocess.CompletedProcess([], 0, "", ""),
+    )
+
+    with pytest.raises(mod.LoopError, match="after 1 fix round"):
+        mod.run_pre_tag_github_ci_with_fixes(
+            repo, args, run_dir, 1, None, "verify-cmd", pre_tag_log, {}
+        )
+
+
+def test_run_pre_tag_github_ci_with_fixes_no_working_tree_change_raises(tmp_path: Path, monkeypatch) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    pre_tag_log = run_dir / "pre-tag-iter-01-github-ci.log"
+    pre_tag_log.write_text("x\n", encoding="utf-8")
+    args = _pre_tag_fix_args(mod, repo, max_fix=3)
+
+    def fake_run_shell(command, r, env, *, log_path=None, **kwargs):
+        if log_path and log_path.name.endswith("github-ci.log") and "fix" not in log_path.name:
+            return subprocess.CompletedProcess(command, 1, "", "")
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    monkeypatch.setattr(mod, "run_shell_command", fake_run_shell)
+    monkeypatch.setattr(mod, "git_changed_files", lambda _r: [])
+
+    with pytest.raises(mod.LoopError, match="no working tree changes"):
+        mod.run_pre_tag_github_ci_with_fixes(
+            repo, args, run_dir, 1, None, "verify-cmd", pre_tag_log, {}
+        )
+
+
+def test_parse_args_pre_tag_github_ci_max_fix_attempts_invalid() -> None:
+    mod = _load_script()
+    with pytest.raises(SystemExit):
+        mod.parse_args(["--pre-tag-github-ci-max-fix-attempts", "-1"])
 
 
 def test_git_stdout_ignores_mis_set_git_dir(tmp_path: Path, monkeypatch) -> None:
