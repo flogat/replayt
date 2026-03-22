@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.4.9 - 2026-03-22
+## 0.4.10 - 2026-03-22
 
 - **Agent harness engineer:** `scripts/skill_release_loop.py` and `scripts/skill_release_loop_agent.py` now expose the resolved skill directory as both `{skill_root}` command placeholder and `SKILL_ROOT` env var so custom backends can consume the same contract as the built-in wrapper. `scripts/run_codex_skill.py` now accepts `--skill-root`, honors `SKILL_ROOT`, falls back to repo-local `.cursor/skills` when present, validates the directory loudly, and forwards it to `codex exec --skill-root`; covered by new regressions in [`tests/test_run_codex_skill.py`](tests/test_run_codex_skill.py), [`tests/test_skill_release_loop.py`](tests/test_skill_release_loop.py), and [`tests/test_skill_release_loop_agent.py`](tests/test_skill_release_loop_agent.py).
 - **MCP / tooling:** version the remaining machine-readable CLI JSON payloads so wrappers can discover and validate them without scraping prose: **`replayt run --output json`** now emits **`replayt.run_result.v1`**, **`replayt inspect --output json`** emits **`replayt.inspect_report.v1`** (with `run_id`), **`replayt stats --output json`** emits **`replayt.stats_report.v1`**, and **`replayt diff --output json`** emits **`replayt.diff_report.v1`**. **`replayt version --format json`** now advertises those schema ids plus packaged-example JSON helpers under `cli_machine_readable_schemas`; documented in [`README.md`](README.md) and [`docs/CLI.md`](docs/CLI.md), with CLI regressions updated in [`tests/test_cli.py`](tests/test_cli.py).

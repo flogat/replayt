@@ -196,6 +196,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "for preflight only). "
             "Logs from older runs without that footer are not skipped (re-run) unless you append "
             "`### skill_release_loop: exit_code=0` to finished skill logs manually.\n"
+            "Pre-tag CI: after the release commit, verify_github_action may run with fix/retry rounds "
+            "(see --pre-tag-github-ci-max-fix-attempts).\n"
             "External monitor: updates .replayt/skill-release/current.json and <run-dir>/status.json (heartbeat "
             "while subprocesses run; see --status-interval)."
         ),
@@ -278,6 +280,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Skip verify_github_action after the release commit (before tag). For tests/offline.",
     )
     parser.add_argument(
+        "--pre-tag-github-ci-max-fix-attempts",
+        type=int,
+        default=3,
+        help=(
+            "If pre-tag GitHub Actions verification fails after the release commit, run --skill-command to fix "
+            "and amend that commit, then retry (default: 3). Use 0 to fail on the first verification failure."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Print the planned commands without executing them.",
@@ -356,6 +367,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         parser.error("--usage-limit-sleep-buffer-seconds must be >= 0")
     if args.usage_limit_max_waits_per_skill < 1:
         parser.error("--usage-limit-max-waits-per-skill must be >= 1")
+    if args.pre_tag_github_ci_max_fix_attempts < 0:
+        parser.error("--pre-tag-github-ci-max-fix-attempts must be >= 0")
     if args.skills is None:
         args.skills = list(DEFAULT_SKILLS)
     return args
@@ -1240,6 +1253,38 @@ def finalize_changelog(repo: Path, new_version: str, today: dt.date) -> None:
     changelog_path.write_text(updated, encoding="utf-8")
 
 
+def parse_unreleased_bullet_items(body: str) -> list[str]:
+    """Parse top-level bullets under ``## Unreleased`` (same rules as ``scripts/changelog_unreleased.py``)."""
+    items: list[str] = []
+    current: list[str] = []
+    for raw_line in body.splitlines():
+        line = raw_line.rstrip()
+        if line.startswith("- "):
+            if current:
+                items.append("\n".join(current))
+            current = [line[2:].strip()]
+            continue
+        if current and line.startswith("  "):
+            current.append(line.strip())
+            continue
+        if current and not line.strip():
+            current.append("")
+    if current:
+        items.append("\n".join(current).rstrip())
+    return [item for item in items if item.strip()]
+
+
+def unreleased_changelog_item_count(repo: Path) -> int | None:
+    """Return bullet count under ``## Unreleased``, or ``None`` if CHANGELOG is missing or has no such section."""
+    path = repo / "CHANGELOG.md"
+    if not path.is_file():
+        return None
+    match = UNRELEASED_RE.search(path.read_text(encoding="utf-8"))
+    if not match:
+        return None
+    return len(parse_unreleased_bullet_items(match.group("body")))
+
+
 def current_branch(repo: Path) -> str:
     branch = git_stdout(repo, ["rev-parse", "--abbrev-ref", "HEAD"]).strip()
     if branch == "HEAD":
@@ -1309,6 +1354,137 @@ def create_tag(repo: Path, tag_name: str) -> None:
 def push_release(repo: Path, remote: str, branch: str, tag_name: str) -> None:
     # One push with both refspecs so the release tag cannot be left behind if a second push is skipped.
     run_git(repo, ["push", remote, f"HEAD:refs/heads/{branch}", f"refs/tags/{tag_name}"])
+
+
+def run_pre_tag_github_ci_with_fixes(
+    repo: Path,
+    args: argparse.Namespace,
+    run_dir: Path,
+    passed_iteration: int,
+    tracker: RunTracker | None,
+    verify_cmd: str,
+    pre_tag_log: Path,
+    gate_env: dict[str, str],
+) -> None:
+    max_fix = args.pre_tag_github_ci_max_fix_attempts
+    fix_round = 0
+    verify_append = False
+
+    while True:
+        if tracker is not None:
+            tracker.update(phase="pre_tag_github_ci", pre_tag_log_file=str(pre_tag_log))
+        completed = run_shell_command(
+            verify_cmd,
+            repo,
+            gate_env,
+            log_path=pre_tag_log,
+            stream_to_terminal=not args.quiet,
+            progress_label=f"pre_tag_github_ci:{passed_iteration:02d}",
+            expect_success=False,
+            tracker=tracker,
+            heartbeat_interval=args.status_interval,
+            log_append=verify_append,
+            log_section_banner=LOG_BANNER_RESUME if verify_append else None,
+        )
+        if completed.returncode == 0:
+            return
+
+        if max_fix == 0:
+            raise LoopError(
+                f"Pre-tag GitHub Actions verification failed (exit {completed.returncode}); see {pre_tag_log}."
+            )
+        if fix_round >= max_fix:
+            raise LoopError(
+                f"Pre-tag GitHub Actions verification failed (exit {completed.returncode}) after "
+                f"{max_fix} fix round(s); see {pre_tag_log}."
+            )
+
+        progress_line(
+            f"Decision: pre-tag verify failed (exit {completed.returncode}); "
+            f"spawning fix agent (round {fix_round + 1}/{max_fix})..."
+        )
+
+        log_text = (
+            pre_tag_log.read_text(encoding="utf-8", errors="replace") if pre_tag_log.is_file() else ""
+        )
+        tail_log = log_text[-4000:] if len(log_text) > 4000 else log_text
+
+        fix_prompt_path = run_dir / f"pre-tag-iter-{passed_iteration:02d}-github-ci-fix-{fix_round + 1}.prompt.md"
+        fix_log_path = run_dir / f"pre-tag-iter-{passed_iteration:02d}-github-ci-fix-{fix_round + 1}.log"
+
+        fix_prompt_text = (
+            f"The following pre-tag GitHub Actions verification command failed with exit code "
+            f"{completed.returncode}:\n"
+            f"`{verify_cmd}`\n\n"
+            f"Log output (tail):\n```text\n{tail_log}\n```\n\n"
+            "Please analyze the failure and modify the codebase so this verification passes when re-run.\n"
+            "Apply repository changes directly in the working tree. Do not commit, tag, or push."
+        )
+        fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
+
+        fix_command = render_command(
+            args.skill_command,
+            {
+                "skill": "fix_pre_tag_ci",
+                "skill_path": "fix_pre_tag_ci",
+                "skill_root": str((repo / args.skill_root).resolve()),
+                "prompt_file": str(fix_prompt_path),
+                "log_file": str(fix_log_path),
+                "repo": str(repo),
+                "iteration": str(passed_iteration),
+                "max_iterations": str(args.max_iterations),
+            },
+        )
+
+        fix_env = os.environ.copy()
+        _inject_git_safe_directory(fix_env, str(repo))
+        fix_env.update(
+            {
+                "REPO_ROOT": str(repo),
+                "SKILL_ROOT": str((repo / args.skill_root).resolve()),
+                "SKILL_NAME": "fix_pre_tag_ci",
+                "SKILL_PROMPT_FILE": str(fix_prompt_path),
+                "SKILL_LOG_FILE": str(fix_log_path),
+                "SKILL_ITERATION": str(passed_iteration),
+                "SKILL_MAX_ITERATIONS": str(args.max_iterations),
+                "SKILL_TASK": "Fix the failure so pre-tag GitHub Actions verification passes.",
+            }
+        )
+
+        if tracker is not None:
+            tracker.update(
+                phase="pre_tag_github_ci_fix",
+                iteration=passed_iteration,
+                max_iterations=args.max_iterations,
+                skill="fix_pre_tag_ci",
+                prompt_file=str(fix_prompt_path),
+                log_file=str(fix_log_path),
+                command_preview=fix_command[:500],
+            )
+
+        run_shell_command(
+            fix_command,
+            repo,
+            fix_env,
+            log_path=fix_log_path,
+            stream_to_terminal=not args.quiet,
+            progress_label=f"fix_pre_tag_ci:{passed_iteration:02d}-{fix_round + 1}",
+            expect_success=False,
+            tracker=tracker,
+            heartbeat_interval=args.status_interval,
+        )
+
+        if not git_changed_files(repo):
+            raise LoopError(
+                f"Pre-tag CI fix produced no working tree changes after verify exit {completed.returncode}; "
+                f"see {fix_log_path}."
+            )
+
+        run_git(repo, ["add", "-A"])
+        run_git(repo, ["commit", "--amend", "--no-edit"])
+
+        fix_round += 1
+        verify_append = True
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1476,8 +1652,25 @@ def _main_run(
     if not changed_files:
         raise LoopError("The skill loop produced no repository changes")
     if "CHANGELOG.md" not in changed_files:
-        raise LoopError("CHANGELOG.md must be updated during the skill loop before a release can be cut")
-    progress_line("Gate 2: CHANGELOG.md is among changed paths -> OK")
+        if args.resume is not None:
+            ur_count = unreleased_changelog_item_count(repo)
+            if ur_count is None:
+                raise LoopError(
+                    "CHANGELOG.md must be updated during the skill loop before a release can be cut "
+                    "(on --resume: missing CHANGELOG.md or ## Unreleased section)."
+                )
+            if ur_count < 1:
+                raise LoopError(
+                    "CHANGELOG.md must be updated during the skill loop before a release can be cut "
+                    "(on --resume: add at least one bullet under ## Unreleased, or edit CHANGELOG.md)."
+                )
+            progress_line(
+                f"Gate 2: resume — CHANGELOG.md unchanged vs HEAD; ## Unreleased has {ur_count} bullet item(s) -> OK"
+            )
+        else:
+            raise LoopError("CHANGELOG.md must be updated during the skill loop before a release can be cut")
+    else:
+        progress_line("Gate 2: CHANGELOG.md is among changed paths -> OK")
 
     version = current_version(repo)
     first_bump = bump_patch(version)
@@ -1509,23 +1702,9 @@ def _main_run(
         gate_env = os.environ.copy()
         _inject_git_safe_directory(gate_env, str(repo))
         gate_env["REPO_ROOT"] = str(repo)
-        if tracker is not None:
-            tracker.update(phase="pre_tag_github_ci", pre_tag_log_file=str(pre_tag_log))
-        completed = run_shell_command(
-            verify_cmd,
-            repo,
-            gate_env,
-            log_path=pre_tag_log,
-            stream_to_terminal=not args.quiet,
-            progress_label=f"pre_tag_github_ci:{passed_iteration:02d}",
-            expect_success=False,
-            tracker=tracker,
-            heartbeat_interval=args.status_interval,
+        run_pre_tag_github_ci_with_fixes(
+            repo, args, run_dir, passed_iteration, tracker, verify_cmd, pre_tag_log, gate_env
         )
-        if completed.returncode != 0:
-            raise LoopError(
-                f"Pre-tag GitHub Actions verification failed (exit {completed.returncode}); see {pre_tag_log}."
-            )
 
     create_tag(repo, tag_name)
     if not args.skip_push:
