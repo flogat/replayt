@@ -13,6 +13,8 @@ from typing import Any
 import typer
 
 import replayt
+from replayt.cli.targets import workflow_trust_audit_paths
+from replayt.persistence.jsonl import validate_run_id
 from replayt.runner import RunResult
 from replayt.workflow import Workflow
 
@@ -47,8 +49,19 @@ def _workflow_contract_hook_env(contract: dict[str, Any]) -> dict[str, str]:
     }
 
 
-def _run_started_payload_json_blobs(payload: dict[str, Any]) -> tuple[str | None, str | None, str | None]:
-    """JSON env strings for run_metadata / tags / experiment (parity with ``run_hook``)."""
+def _workflow_entry_path_hook_env(target: str) -> dict[str, str]:
+    """Absolute workflow entry path for policy hooks (``.py`` / YAML path or imported module ``__file__``)."""
+
+    paths = workflow_trust_audit_paths(target)
+    if not paths:
+        return {}
+    return {"REPLAYT_WORKFLOW_ENTRY_PATH": str(paths[0])}
+
+
+def _run_started_payload_json_blobs(
+    payload: dict[str, Any],
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """JSON env strings for run_metadata / tags / experiment / workflow_meta (parity with ``run_hook``)."""
 
     def _dump(key: str) -> str | None:
         v = payload.get(key)
@@ -56,7 +69,24 @@ def _run_started_payload_json_blobs(payload: dict[str, Any]) -> tuple[str | None
             return json.dumps(v, sort_keys=True)
         return None
 
-    return _dump("run_metadata"), _dump("tags"), _dump("experiment")
+    wm = payload.get("workflow_meta")
+    workflow_meta_json: str | None = None
+    if isinstance(wm, dict) and wm:
+        workflow_meta_json = json.dumps(wm, sort_keys=True)
+    return _dump("run_metadata"), _dump("tags"), _dump("experiment"), workflow_meta_json
+
+
+def workflow_meta_json_for_run_hook(wf: Workflow) -> str | None:
+    """Sorted JSON matching ``run_started.workflow_meta`` (``Workflow.meta`` without ``llm_defaults``)."""
+
+    meta = getattr(wf, "meta", None)
+    if not isinstance(meta, dict) or not meta:
+        return None
+    meta_out = dict(meta)
+    meta_out.pop("llm_defaults", None)
+    if not meta_out:
+        return None
+    return json.dumps(meta_out, sort_keys=True)
 
 
 def first_jsonl_event_with_type(path: Path, *, event_type: str) -> dict[str, Any] | None:
@@ -84,28 +114,30 @@ def first_jsonl_event_with_type(path: Path, *, event_type: str) -> dict[str, Any
     return None
 
 
-def run_started_hook_json_blobs_from_events(events: list[dict[str, Any]]) -> tuple[str | None, str | None, str | None]:
-    """Read ``run_metadata``, ``tags``, and ``experiment`` from the first ``run_started`` event."""
+def run_started_hook_json_blobs_from_events(
+    events: list[dict[str, Any]],
+) -> tuple[str | None, str | None, str | None, str | None]:
+    """Read hook JSON blobs from the first ``run_started`` event."""
 
     for event in events:
         if event.get("type") != "run_started":
             continue
         payload = event.get("payload") or {}
         if not isinstance(payload, dict):
-            return (None, None, None)
+            return (None, None, None, None)
         return _run_started_payload_json_blobs(payload)
-    return (None, None, None)
+    return (None, None, None, None)
 
 
-def run_started_hook_json_blobs_from_jsonl_path(path: Path) -> tuple[str | None, str | None, str | None]:
+def run_started_hook_json_blobs_from_jsonl_path(path: Path) -> tuple[str | None, str | None, str | None, str | None]:
     """Same as :func:`run_started_hook_json_blobs_from_events` but scans the JSONL file on disk."""
 
     event = first_jsonl_event_with_type(path, event_type="run_started")
     if event is None:
-        return (None, None, None)
+        return (None, None, None, None)
     payload = event.get("payload") or {}
     if not isinstance(payload, dict):
-        return (None, None, None)
+        return (None, None, None, None)
     return _run_started_payload_json_blobs(payload)
 
 
@@ -115,6 +147,7 @@ def _merge_optional_hook_json_env(
     metadata_json: str | None,
     tags_json: str | None,
     experiment_json: str | None,
+    workflow_meta_json: str | None = None,
 ) -> None:
     if metadata_json is not None:
         extra["REPLAYT_RUN_METADATA_JSON"] = metadata_json
@@ -122,6 +155,8 @@ def _merge_optional_hook_json_env(
         extra["REPLAYT_RUN_TAGS_JSON"] = tags_json
     if experiment_json is not None:
         extra["REPLAYT_RUN_EXPERIMENT_JSON"] = experiment_json
+    if workflow_meta_json is not None:
+        extra["REPLAYT_WORKFLOW_META_JSON"] = workflow_meta_json
 
 
 def dry_check_suggested_command(
@@ -377,10 +412,12 @@ def invoke_run_hook(
     tags_json: str | None,
     metadata_json: str | None,
     experiment_json: str | None,
+    workflow_meta_json: str | None = None,
     timeout_seconds: float | None,
 ) -> None:
     """Run a pre-run policy hook before the workflow starts writing events."""
 
+    run_id = validate_run_id(run_id)
     root = log_dir.resolve()
     extra_env = {
         "REPLAYT_TARGET": target,
@@ -406,6 +443,9 @@ def invoke_run_hook(
         extra_env["REPLAYT_RUN_METADATA_JSON"] = metadata_json
     if experiment_json is not None:
         extra_env["REPLAYT_RUN_EXPERIMENT_JSON"] = experiment_json
+    if workflow_meta_json is not None:
+        extra_env["REPLAYT_WORKFLOW_META_JSON"] = workflow_meta_json
+    extra_env.update(_workflow_entry_path_hook_env(target))
     invoke_hook(argv, extra_env=extra_env, timeout_seconds=timeout_seconds)
 
 
@@ -425,9 +465,11 @@ def invoke_resume_hook(
     metadata_json: str | None = None,
     tags_json: str | None = None,
     experiment_json: str | None = None,
+    workflow_meta_json: str | None = None,
 ) -> None:
     """Run *argv* with extra ``REPLAYT_*`` env vars; *argv* must come from trusted config."""
 
+    run_id = validate_run_id(run_id)
     root = log_dir.resolve()
     extra = {
         "REPLAYT_TARGET": target,
@@ -448,7 +490,9 @@ def invoke_resume_hook(
         metadata_json=metadata_json,
         tags_json=tags_json,
         experiment_json=experiment_json,
+        workflow_meta_json=workflow_meta_json,
     )
+    extra.update(_workflow_entry_path_hook_env(target))
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -473,6 +517,7 @@ def invoke_export_hook(
     metadata_json: str | None = None,
     tags_json: str | None = None,
     experiment_json: str | None = None,
+    workflow_meta_json: str | None = None,
 ) -> None:
     """Run *argv* before ``export-run`` / ``bundle-export`` writes the archive; *argv* is trusted config only."""
 
@@ -497,11 +542,13 @@ def invoke_export_hook(
         extra["REPLAYT_BUNDLE_REPORT_STYLE"] = report_style
     if cli_target:
         extra["REPLAYT_TARGET"] = cli_target
+        extra.update(_workflow_entry_path_hook_env(cli_target))
     _merge_optional_hook_json_env(
         extra,
         metadata_json=metadata_json,
         tags_json=tags_json,
         experiment_json=experiment_json,
+        workflow_meta_json=workflow_meta_json,
     )
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
@@ -522,6 +569,7 @@ def invoke_seal_hook(
     metadata_json: str | None = None,
     tags_json: str | None = None,
     experiment_json: str | None = None,
+    workflow_meta_json: str | None = None,
 ) -> None:
     """Run *argv* before ``replayt seal`` writes the manifest; *argv* is trusted config only."""
 
@@ -543,6 +591,7 @@ def invoke_seal_hook(
         metadata_json=metadata_json,
         tags_json=tags_json,
         experiment_json=experiment_json,
+        workflow_meta_json=workflow_meta_json,
     )
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
@@ -565,6 +614,7 @@ def invoke_verify_seal_hook(
     metadata_json: str | None = None,
     tags_json: str | None = None,
     experiment_json: str | None = None,
+    workflow_meta_json: str | None = None,
 ) -> None:
     """Run *argv* after ``replayt verify-seal`` digests match; *argv* is trusted config only."""
 
@@ -588,6 +638,7 @@ def invoke_verify_seal_hook(
         metadata_json=metadata_json,
         tags_json=tags_json,
         experiment_json=experiment_json,
+        workflow_meta_json=workflow_meta_json,
     )
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
@@ -617,6 +668,8 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_SQLITE",
                     "REPLAYT_TARGET",
                     "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_ENTRY_PATH",
+                    "REPLAYT_WORKFLOW_META_JSON",
                     "REPLAYT_WORKFLOW_NAME",
                     "REPLAYT_WORKFLOW_VERSION",
                 }
@@ -641,6 +694,8 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_TARGET",
                     "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_ENTRY_PATH",
+                    "REPLAYT_WORKFLOW_META_JSON",
                     "REPLAYT_WORKFLOW_NAME",
                     "REPLAYT_WORKFLOW_VERSION",
                 }
@@ -669,6 +724,8 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_SQLITE",
                     "REPLAYT_TARGET",
                     "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_ENTRY_PATH",
+                    "REPLAYT_WORKFLOW_META_JSON",
                     "REPLAYT_WORKFLOW_NAME",
                     "REPLAYT_WORKFLOW_VERSION",
                 }
@@ -692,6 +749,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_SEAL_LINE_COUNT",
                     "REPLAYT_SEAL_OUT",
                     "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_META_JSON",
                     "REPLAYT_WORKFLOW_NAME",
                     "REPLAYT_WORKFLOW_VERSION",
                 }
@@ -717,6 +775,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_VERIFY_SEAL_MANIFEST",
                     "REPLAYT_VERIFY_SEAL_SCHEMA",
                     "REPLAYT_WORKFLOW_CONTRACT_SHA256",
+                    "REPLAYT_WORKFLOW_META_JSON",
                     "REPLAYT_WORKFLOW_NAME",
                     "REPLAYT_WORKFLOW_VERSION",
                 }
@@ -915,7 +974,8 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "trust_profiles for subprocess/MCP allowlists. replayt log-schema always prints the bundled "
             "Draft JSON Schema for one JSONL line (stdout) and is not tied to cli_machine_readable_schemas. "
             "replayt ci still prints a one-line stderr reminder when --output json is used. See "
-            "subprocess_stream_semantics for stdout vs stderr expectations when wrapping the CLI."
+            "subprocess_stream_semantics for stdout vs stderr expectations when wrapping the CLI, and "
+            "typer_pre_dispatch_phase for Typer usage failures vs workflow pause (both may use exit code 2)."
         ),
         "subprocess_stream_semantics": {
             "stdout": {
@@ -942,6 +1002,36 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 "stdout after exit when the JSON route flags in subcommands match, and treat stderr as "
                 "diagnostic unless you explicitly parse it."
             ),
+        },
+        "typer_pre_dispatch_phase": {
+            "summary": (
+                "Typer may exit before a subcommand callback runs (unknown subcommand, missing positional "
+                "arguments, unknown options, or mutually exclusive flags). Those errors are human-oriented "
+                "and usually print to stderr; stdout may be empty."
+            ),
+            "typical_exit_code": 2,
+            "exit_code_overlap": {
+                "summary": (
+                    "The same numeric exit code (2) is used when replayt run / ci / resume / try pauses for "
+                    "approval after the workflow runner starts. Subprocess wrappers cannot rely on exit code "
+                    "alone for those subcommands."
+                ),
+                "disambiguation_for_json_stdout_routes": (
+                    "When --output json is in effect on run, ci, or try and the process pauses for approval, "
+                    "stdout is one JSON object with schema replayt.run_result.v1 and status paused. When Typer "
+                    "rejects argv before dispatch, stdout is typically not parseable JSON; read stderr for "
+                    "Usage / Error panels."
+                ),
+                "disambiguation_for_resume_text_stdout": (
+                    "replayt resume does not offer --output json; pauses still exit 2 after printing text lines "
+                    "such as status=paused. Typer argv failures exit 2 with Usage / Error on stderr and usually "
+                    "without those runner summary lines on stdout."
+                ),
+                "disambiguation_for_text_mode": (
+                    "Prefer JSON routes on run, ci, and try for automation. In text mode, Typer failures usually "
+                    "include 'Usage:' or boxed Error text on stderr."
+                ),
+            },
         },
         "trust_profiles": dict(sorted(CLI_JSON_STDOUT_TRUST_PROFILES.items())),
         "subcommands": {
@@ -1132,6 +1222,20 @@ def build_cli_exit_codes_report() -> dict[str, Any]:
             "Listing, inspection, export, and seal helpers exit 1 on user or lookup errors so exit 2 "
             "stays reserved for paused workflow runs."
         ),
+        "typer_pre_dispatch_failures": {
+            "typical_exit_code": 2,
+            "summary": (
+                "Typer usage failures (bad argv before the subcommand body runs) typically exit 2 with "
+                "human-oriented stderr; stdout is often empty or non-JSON."
+            ),
+            "overlaps_workflow_pause_exit_code_on": ["ci", "resume", "run", "try"],
+            "disambiguation": (
+                "See cli_json_stdout_contract.typer_pre_dispatch_phase.exit_code_overlap in the same "
+                "replayt version --format json payload: for JSON routes on run / ci / try, parse stdout "
+                "for replayt.run_result.v1 with status paused versus a Typer parse failure; resume uses "
+                "text stdout only (see disambiguation_for_resume_text_stdout there)."
+            ),
+        },
     }
 
 

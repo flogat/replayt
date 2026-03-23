@@ -378,6 +378,150 @@ def stakeholder_report_handoff_html(run_id: str, events: list[dict[str, Any]]) -
     )
 
 
+def _llm_model_cli_suffix(llm_model_filter: frozenset[str] | None) -> str:
+    """Space-prefixed repeatable ``--llm-model`` flags for copy-paste handoff lines."""
+
+    if not llm_model_filter:
+        return ""
+    return "".join(f" --llm-model {m}" for m in sorted(llm_model_filter))
+
+
+def _stakeholder_report_diff_handoff_rows(
+    run_a: str,
+    run_b: str,
+    events_a: list[dict[str, Any]],
+    events_b: list[dict[str, Any]],
+    *,
+    style: Literal["stakeholder", "support"],
+    llm_model_filter: frozenset[str] | None = None,
+) -> list[tuple[str, str]]:
+    """Ordered (label, command) lines for stakeholder/support ``replayt report-diff`` handoff panels."""
+
+    suf = _llm_model_cli_suffix(llm_model_filter)
+    rows: list[tuple[str, str]] = [
+        (
+            "Regenerate this comparison (Markdown)",
+            f"replayt report-diff {run_a} {run_b} --format markdown --style {style}{suf}",
+        ),
+        (
+            "Regenerate this comparison (HTML)",
+            f"replayt report-diff {run_a} {run_b} --format html --style {style} --out report-diff.html{suf}",
+        ),
+        (
+            "Machine-readable diff (JSON)",
+            f"replayt diff {run_a} {run_b} --output json{suf}",
+        ),
+        ("Inspect run A (paste-friendly)", f"replayt inspect {run_a} --output markdown"),
+        ("Inspect run B (paste-friendly)", f"replayt inspect {run_b} --output markdown"),
+        (
+            "Stakeholder report (run A, Markdown)",
+            f"replayt report {run_a} --format markdown --style stakeholder{suf}",
+        ),
+        (
+            "Stakeholder report (run B, Markdown)",
+            f"replayt report {run_b} --format markdown --style stakeholder{suf}",
+        ),
+        (
+            "Offline timeline HTML (run A)",
+            f"replayt replay {run_a} --format html --style stakeholder --out run-a.html{suf}",
+        ),
+        (
+            "Offline timeline HTML (run B)",
+            f"replayt replay {run_b} --format html --style stakeholder --out run-b.html{suf}",
+        ),
+    ]
+    sum_a = event_summary(events_a)
+    sum_b = event_summary(events_b)
+    att_a = run_attention_summary(events_a)
+    att_b = run_attention_summary(events_b)
+    if str(sum_a.get("status") or "") == "failed":
+        rows.append(
+            ("Inspect run A (JSON for engineers)", f"replayt inspect {run_a} --output json{suf}"),
+        )
+    if str(sum_b.get("status") or "") == "failed":
+        rows.append(
+            ("Inspect run B (JSON for engineers)", f"replayt inspect {run_b} --output json{suf}"),
+        )
+    for label, cmd in _stakeholder_paused_resume_rows(run_a, sum_a, att_a):
+        rows.append((f"Run A — {label}", cmd))
+    for label, cmd in _stakeholder_paused_resume_rows(run_b, sum_b, att_b):
+        rows.append((f"Run B — {label}", cmd))
+    return rows
+
+
+def stakeholder_report_diff_handoff_markdown(
+    run_a: str,
+    run_b: str,
+    events_a: list[dict[str, Any]],
+    events_b: list[dict[str, Any]],
+    *,
+    style: Literal["stakeholder", "support"],
+    llm_model_filter: frozenset[str] | None = None,
+) -> str:
+    """Markdown section with copy-paste CLI commands for two-run comparison handoffs."""
+
+    lines: list[str] = [
+        "## Stakeholder CLI handoff",
+        "",
+        "Copy-paste commands for operators. Repeat `--log-dir`, `--log-subdir`, or `--sqlite` on each command "
+        "when you are not using the default log store.",
+        "",
+    ]
+    for label, cmd in _stakeholder_report_diff_handoff_rows(
+        run_a,
+        run_b,
+        events_a,
+        events_b,
+        style=style,
+        llm_model_filter=llm_model_filter,
+    ):
+        safe_cmd = cmd.replace("`", "'")
+        lines.append(f"- **{label}:** `{safe_cmd}`")
+    return "\n".join(lines) + "\n"
+
+
+def stakeholder_report_diff_handoff_html(
+    run_a: str,
+    run_b: str,
+    events_a: list[dict[str, Any]],
+    events_b: list[dict[str, Any]],
+    *,
+    style: Literal["stakeholder", "support"],
+    llm_model_filter: frozenset[str] | None = None,
+) -> str:
+    """HTML fragment (section) matching :func:`stakeholder_report_diff_handoff_markdown`."""
+
+    intro = (
+        "Copy-paste commands for operators. Repeat --log-dir, --log-subdir, or --sqlite on each command "
+        "when you are not using the default log store."
+    )
+    row_html: list[str] = [f'        <p class="rp-muted">{html.escape(intro)}</p>']
+    for label, cmd in _stakeholder_report_diff_handoff_rows(
+        run_a,
+        run_b,
+        events_a,
+        events_b,
+        style=style,
+        llm_model_filter=llm_model_filter,
+    ):
+        row_html.append(
+            '        <p class="rp-handoff-row">'
+            f'<span class="rp-label">{html.escape(label)}</span><br/>'
+            '<code class="rp-code rp-pre" style="display:block;margin-top:0.35rem;white-space:pre-wrap;">'
+            f"{html.escape(cmd)}"
+            "</code></p>"
+        )
+    inner = "\n".join(row_html)
+    return (
+        '    <section class="rp-section">\n'
+        '      <h2 class="rp-h2">Stakeholder CLI handoff</h2>\n'
+        '      <div class="rp-card rp-card-tight">\n'
+        f"{inner}\n"
+        "      </div>\n"
+        "    </section>\n"
+    )
+
+
 def _stakeholder_paused_resume_md_bullets(
     run_id: str,
     summary: dict[str, Any],

@@ -101,14 +101,14 @@ In Python, the same shape is `Runner.run(..., run_metadata={"deployment_tier": "
 
 **Scenario:** Compliance wants only CI-approved workflow digests to run or resume in production, without replayt hosting RBAC or reading your IdP.
 
-**Approach:** Pin contracts with **`replayt contract TARGET --check path/to/workflow.contract.json`** in CI. At runtime, read **`REPLAYT_WORKFLOW_CONTRACT_SHA256`** (and optional name/version) inside **`run_hook`** / **`resume_hook`** and compare to your allowlist file or CMDB query; exit non-zero to block before new JSONL events. The same three env vars are also injected into **`export_hook`**, **`seal_hook`**, and **`verify_seal_hook`** (parsed from **`run_started`**; **`export_hook`** also receives **`REPLAYT_TARGET`** when you pass **`--target`** on export) so archival and verify steps can reuse one allowlist script. When **`run_started`** recorded **`run_metadata`**, **`tags`**, or **`experiment`**, those hooks also receive **`REPLAYT_RUN_METADATA_JSON`**, **`REPLAYT_RUN_TAGS_JSON`**, and **`REPLAYT_RUN_EXPERIMENT_JSON`** (same strings as **`run_hook`**) so tier or ticket policy can run without **`jq`**. To detect drift against the original run, parse the first **`run_started`** line in the run's JSONL and compare its **`runtime.workflow.contract_sha256`** to the hook env (or to your allowlist).
+**Approach:** Pin contracts with **`replayt contract TARGET --check path/to/workflow.contract.json`** in CI. At runtime, read **`REPLAYT_WORKFLOW_CONTRACT_SHA256`** (and optional name/version) inside **`run_hook`** / **`resume_hook`** and compare to your allowlist file or CMDB query; exit non-zero to block before new JSONL events. The same three env vars are also injected into **`export_hook`**, **`seal_hook`**, and **`verify_seal_hook`** (parsed from **`run_started`**; **`export_hook`** also receives **`REPLAYT_TARGET`** when you pass **`--target`** on export) so archival and verify steps can reuse one allowlist script. When **`run_started`** recorded **`run_metadata`**, **`tags`**, **`experiment`**, or non-empty **`workflow_meta`** (the **`Workflow.meta`** bag without **`llm_defaults`**), those hooks also receive **`REPLAYT_RUN_METADATA_JSON`**, **`REPLAYT_RUN_TAGS_JSON`**, **`REPLAYT_RUN_EXPERIMENT_JSON`**, and optional **`REPLAYT_WORKFLOW_META_JSON`** (same strings as **`run_hook`**) so tier, ticket, or package-id policy can run without **`jq`**. To detect drift against the original run, parse the first **`run_started`** line in the run's JSONL and compare its **`runtime.workflow.contract_sha256`** to the hook env (or to your allowlist).
 
 ```bash
 # CI: fail when the live workflow drifts from the checked-in contract snapshot
 replayt contract "$TARGET" --check policies/workflow.contract.json
 ```
 
-**Hook env: logging contract.** Every trusted policy subprocess (`run_hook`, `resume_hook`, `export_hook`, `seal_hook`, `verify_seal_hook`) receives **`REPLAYT_LOG_MODE`**, **`REPLAYT_FORBID_LOG_MODE_FULL`** (`1` / `0`), **`REPLAYT_REDACT_KEYS_JSON`** (sorted JSON array of field names from project config / CLI, never secret values), and **`REPLAYT_REPLAYT_VERSION`** (installed **replayt** version string, same as `replayt.__version__`). Use the logging fields when auditors want proof that `log_mode=full` is blocked or that specific structured keys are redacted before you allow resume, export, or seal; compare **`REPLAYT_REPLAYT_VERSION`** to a pinned allowlist when production gates must reject stale CLIs. **`run_hook`** and **`resume_hook`** each receive **`REPLAYT_LOG_DIR`** and **`REPLAYT_RUN_JSONL`** (absolute paths): on a fresh run the JSONL file may not exist until after the hook returns, but the path is stable for mount checks, overwrite policy, or sharing one script with resume gates. The canonical sorted env name list is also in **`replayt version --format json`** → **`policy_hook_env_catalog`**.
+**Hook env: logging contract.** Every trusted policy subprocess (`run_hook`, `resume_hook`, `export_hook`, `seal_hook`, `verify_seal_hook`) receives **`REPLAYT_LOG_MODE`**, **`REPLAYT_FORBID_LOG_MODE_FULL`** (`1` / `0`), **`REPLAYT_REDACT_KEYS_JSON`** (sorted JSON array of field names from project config / CLI, never secret values), and **`REPLAYT_REPLAYT_VERSION`** (installed **replayt** version string, same as `replayt.__version__`). Use the logging fields when auditors want proof that `log_mode=full` is blocked or that specific structured keys are redacted before you allow resume, export, or seal; compare **`REPLAYT_REPLAYT_VERSION`** to a pinned allowlist when production gates must reject stale CLIs. **`run_hook`** and **`resume_hook`** each receive **`REPLAYT_LOG_DIR`** and **`REPLAYT_RUN_JSONL`** (absolute paths): on a fresh run the JSONL file may not exist until after the hook returns, but the path is stable for mount checks, overwrite policy, or sharing one script with resume gates. Those two hooks also receive optional **`REPLAYT_WORKFLOW_ENTRY_PATH`** (absolute path to the workflow `.py` / YAML file or the imported module's `__file__` when replayt can resolve **`REPLAYT_TARGET`**); **`export_hook`** receives the same when you pass **`--target`**, so allowlists can **`stat`** the entry file without parsing JSONL. The canonical sorted env name list is also in **`replayt version --format json`** → **`policy_hook_env_catalog`**.
 
 **Beyond core: stronger digests and control frameworks.** If policy requires FIPS-approved primitives, PKCS#7, or HSM-backed signing, run **`openssl dgst`** / **`openssl cms`** (or your org tool) in **`seal_hook`** / **`export_hook`** on the tarball or manifest path replayt already wrote; do not fork core for module-validation semantics. If auditors want SOC 2 / ISO control ids on each event, add a **`ctx.note`** from application code or append a small sidecar in **your** CI job; replayt keeps JSONL schema stable and avoids embedding vendor-specific control taxonomies in core.
 
@@ -170,6 +170,37 @@ def screen_review(ctx):
     )
     ctx.set("screen_review_text", r.choices[0].message.content or "")
     return "triage"
+```
+
+#### Sub-pattern: OpenAI `tools=` from `ctx.tools`
+
+**Scenario:** You want the official client's native `tool_calls` flow, but the same typed handlers should back both the API declaration and replayt's audited `tool_call` / `tool_result` events.
+
+**Approach:** Register functions on `ctx.tools` as usual, pass `tools=ctx.tools.openai_chat_tools()` to `chat.completions.create`, then for each returned `tool_calls` entry parse `function.arguments` as JSON and invoke `ctx.tools.call(function.name, args_dict)`. This stays **composition**: there is no tool routing on `LLMBridge`.
+
+```python
+import json
+from openai import OpenAI
+
+@wf.step("sdk_tools")
+def sdk_tools(ctx):
+    @ctx.tools.register
+    def lookup(q: str) -> dict:
+        """Search the catalog."""
+        return {"hits": [q]}
+
+    client = OpenAI()
+    r = client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[{"role": "user", "content": "Call lookup for hats."}],
+        tools=ctx.tools.openai_chat_tools(),
+        tool_choice="auto",
+    )
+    msg = r.choices[0].message
+    for tc in msg.tool_calls or []:
+        args = json.loads(tc.function.arguments or "{}")
+        ctx.tools.call(tc.function.name, args)
+    return "done"
 ```
 
 #### Sub-pattern: streaming + structured summary

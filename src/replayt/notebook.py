@@ -21,7 +21,7 @@ except ImportError:
     _IPyHTML = None  # type: ignore[assignment,misc]
     _ipython_display = None  # type: ignore[assignment,misc]
 
-# Embedded styles only — no third-party script CDNs (local-first; see README design principles).
+# Embedded styles only; no third-party script CDNs (local-first; see README design principles).
 _NOTEBOOK_STYLES = """
 .replayt-nb { font-family: ui-sans-serif, system-ui, sans-serif; color: #111827; }
 .replayt-nb-graph-pre {

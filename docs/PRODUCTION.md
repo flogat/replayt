@@ -74,7 +74,7 @@ Preflight with `replayt doctor` in an init container or a separate CI job if you
 
 ## Shareable artifacts
 
-- `replayt replay RUN_ID --format html --out run.html`: self-contained timeline (Tailwind via CDN).
+- `replayt replay RUN_ID --format html --out run.html`: self-contained timeline (embedded CSS, no CDN).
 - `replayt report RUN_ID --out report.html`: summary report for reviews.
 
 For Tailwind conventions when building your own UI, see [`STYLE.md`](STYLE.md).

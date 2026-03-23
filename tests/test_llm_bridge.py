@@ -299,6 +299,67 @@ def test_llm_bridge_complete_text_optional_schema_name() -> None:
     assert "schema_name" not in req2
 
 
+def test_llm_bridge_with_settings_call_label_tags_llm_and_structured_events() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    class StrAnswer(BaseModel):
+        value: str
+
+    settings = LLMSettings(api_key="k", model="m")
+    client = OpenAICompatClient(settings)
+    bridge = (
+        LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+        .with_settings(call_label="  critic  ")
+    )
+    canned = {"choices": [{"message": {"content": '{"value":"ok"}'}}], "usage": {"total_tokens": 3}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        out = bridge.parse(StrAnswer, messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    assert out.value == "ok"
+    req = next(p for t, p in events if t == "llm_request")
+    resp = next(p for t, p in events if t == "llm_response")
+    structured = next(p for t, p in events if t == "structured_output")
+    assert req["call_label"] == "critic"
+    assert resp["call_label"] == "critic"
+    assert structured["call_label"] == "critic"
+    assert req["effective"]["call_label"] == "critic"
+    assert structured["effective"]["call_label"] == "critic"
+
+    events.clear()
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge2 = bridge.with_settings(call_label="")
+        bridge2.parse(StrAnswer, messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+    req_cleared = next(p for t, p in events if t == "llm_request")
+    assert "call_label" not in req_cleared
+    assert "call_label" not in req_cleared["effective"]
+
+
+def test_llm_bridge_call_label_truncation() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="k", model="m")
+    client = OpenAICompatClient(settings)
+    long_label = "x" * 200
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s").with_settings(
+        call_label=long_label
+    )
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    req = next(p for t, p in events if t == "llm_request")
+    assert len(req["call_label"]) == 128
+    assert req["effective"]["call_label"] == req["call_label"]
+
+
 def test_llm_bridge_call_extra_body_empty_dict_clears_defaults() -> None:
     client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
     bridge = LLMBridge(

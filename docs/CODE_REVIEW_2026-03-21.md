@@ -2,7 +2,7 @@
 
 ## Assessment
 
-The runtime, CLI, config resolution, and persistence layers are separated cleanly enough that review fixes stayed local. This pass found two confirmed high-severity issues in LLM gateway handling and audit-surface hygiene, plus one confirmed medium-severity SQLite read-path problem. All three are now fixed with targeted regressions, so this review did not uncover a larger remediation project before the next patch release.
+The runtime, CLI, config resolution, and persistence layers are clearly separated, so review fixes stayed local. This pass found two confirmed high-severity issues in LLM gateway handling and audit-surface hygiene, plus one confirmed medium-severity SQLite read-path problem. All three are now fixed with targeted regressions, so this review did not uncover a larger remediation project before the next patch release.
 
 ## Critical
 

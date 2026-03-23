@@ -66,6 +66,39 @@ def _wrong_workflow_type_message(target: str, obj: Any) -> str:
     )
 
 
+def _unsupported_existing_workflow_file_message(target: str, path: Path) -> str:
+    """*path* exists and is a file, but is not an executable ``.py`` / YAML workflow entry."""
+
+    display = str(path)
+    base = (
+        f"Target {display!r} exists on disk but is not a `.py` or `.yaml` / `.yml` workflow file. "
+        "`replayt run` needs the workflow entrypoint; inputs are passed separately."
+    )
+    suf = path.suffix.lower()
+    name = path.name
+    if suf == ".json":
+        return (
+            f"{base} For JSON payloads use `--inputs-file {name}` with a workflow target "
+            f"(for example `replayt run workflow.py --inputs-file {name}`) or set `inputs_file` under "
+            "`.replaytrc.toml` / `[tool.replayt]`."
+        )
+    if suf in {".toml", ".ini", ".cfg"}:
+        return (
+            f"{base} Config files are not executed. Pass `MODULE:VAR`, a `.py` / `.yaml` workflow path, "
+            "or rely on project defaults from `pyproject.toml` / `.replaytrc.toml` "
+            "(`replayt config --format json` shows the resolved default target)."
+        )
+    if suf in {".md", ".rst", ".txt"}:
+        return (
+            f"{base} Documentation files are not workflows; open `docs/QUICKSTART.md` or run "
+            "`replayt init --list` / `replayt try --list` for a copy-paste starting target."
+        )
+    return (
+        f"{base} If this file holds inputs, add `--inputs-file` and pass the workflow as `TARGET` "
+        "(see `Default inputs file` in `src/replayt_examples/README.md`)."
+    )
+
+
 def _target_path_not_found_message(target: str, path: Path) -> str:
     """Explain missing targets with copy-paste fixes (junior onboarding)."""
 
@@ -305,6 +338,8 @@ def load_target(target: str) -> Workflow:
                 f"Target {path!r} is a directory. Pass a `.py` or `.yaml` workflow file, "
                 "or a MODULE:VAR target such as `my_pkg.workflow:wf`."
             )
+        if path.is_file():
+            raise typer.BadParameter(_unsupported_existing_workflow_file_message(target, path))
         raise typer.BadParameter(
             f"Target {path!r} is not a supported workflow file. "
             "Use a `.py` or `.yaml` / `.yml` path, or MODULE:VAR (for example `replayt_examples.e01_hello_world:wf`)."

@@ -18,6 +18,16 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, TextIO
 
+_REPO_ROOT_FOR_SKILL_ENV = Path(__file__).resolve().parents[1]
+_SRC_SKILL_ENV = str(_REPO_ROOT_FOR_SKILL_ENV / "src")
+if _SRC_SKILL_ENV not in sys.path:
+    sys.path.insert(0, _SRC_SKILL_ENV)
+
+from replayt.cli.skill_loop_env import (  # noqa: E402
+    SKILL_LOOP_FIX_INJECTED_ENV_KEYS,
+    SKILL_LOOP_MAIN_INJECTED_ENV_KEYS,
+)
+
 # Default order: twelve feat_* skills, then review_design_fidelity, improvedoc, deslopdoc, reviewcodebase.
 # Each feat_* skill targets one developer archetype (twelve skills instead of one bundled createfeatures step).
 # .cursor/skills/REJECTION_BLOCKLIST.md records rejected ideas so skills do not repeat them.
@@ -79,48 +89,6 @@ SKILL_INVOCATION_SCHEMA = "replayt.skill_invocation.v1"
 SKILL_RELEASE_PIPELINE_SCHEMA = "replayt.skill_release_pipeline.v1"
 
 # Environment keys the loop sets for skill backends (GIT_CONFIG_* from safe.directory are separate).
-SKILL_LOOP_MAIN_INJECTED_ENV_KEYS: tuple[str, ...] = (
-    "REPO_ROOT",
-    "SKILL_COMMAND_SHA256",
-    "SKILL_ITERATION",
-    "SKILL_LOG_FILE",
-    "SKILL_LOG_REL",
-    "SKILL_MAX_ITERATIONS",
-    "SKILL_NAME",
-    "SKILL_PATH",
-    "SKILL_PIPELINE_SHA256",
-    "SKILL_PROMPT_FILE",
-    "SKILL_PROMPT_REL",
-    "SKILL_REQUESTED_NAME",
-    "SKILL_ROOT",
-    "SKILL_RUN_DIR",
-    "SKILL_RUN_DIR_REL",
-    "SKILL_STEP_INDEX",
-    "SKILL_STEP_TOTAL",
-    "SKILL_TASK",
-    "SKILL_TASK_SHA256",
-)
-SKILL_LOOP_FIX_INJECTED_ENV_KEYS: tuple[str, ...] = (
-    "REPO_ROOT",
-    "SKILL_COMMAND_SHA256",
-    "SKILL_ITERATION",
-    "SKILL_LOG_FILE",
-    "SKILL_LOG_REL",
-    "SKILL_MAX_ITERATIONS",
-    "SKILL_NAME",
-    "SKILL_PIPELINE_SHA256",
-    "SKILL_PROMPT_FILE",
-    "SKILL_PROMPT_REL",
-    "SKILL_ROOT",
-    "SKILL_RUN_DIR",
-    "SKILL_RUN_DIR_REL",
-    "SKILL_STEP_INDEX",
-    "SKILL_STEP_TOTAL",
-    "SKILL_TASK",
-    "SKILL_TASK_SHA256",
-)
-
-
 class LoopError(RuntimeError):
     """Raised when the release loop cannot proceed safely."""
 

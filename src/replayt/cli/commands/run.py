@@ -55,6 +55,7 @@ from replayt.cli.run_support import (
     run_result_payload,
     run_started_hook_json_blobs_from_events,
     subprocess_env_child,
+    workflow_meta_json_for_run_hook,
 )
 from replayt.cli.stores import open_store, read_store
 from replayt.cli.targets import load_target
@@ -64,6 +65,7 @@ from replayt.cli.validation import (
     validate_workflow_graph,
     validation_report,
 )
+from replayt.persistence.jsonl import validate_run_id
 from replayt.runner import Runner, resolve_approval_on_store
 from replayt.security import approval_reason_missing, missing_actor_fields
 from replayt_examples.catalog import (
@@ -186,6 +188,20 @@ def _print_local_workflow_next_steps(
     typer.echo(f"  {step}) replayt inspect <run_id>")
     step += 1
     typer.echo(f"  {step}) replayt replay <run_id>")
+
+
+def cmd_init_gitignore(
+    path: Path = typer.Option(
+        Path("."),
+        "--path",
+        "-p",
+        help="Directory whose .gitignore should receive replayt's standard ignore lines.",
+    ),
+) -> None:
+    """Merge replayt's recommended .gitignore lines without running a full init scaffold."""
+
+    path.mkdir(parents=True, exist_ok=True)
+    merge_gitignore(path)
 
 
 def cmd_init(
@@ -486,6 +502,12 @@ def cmd_run(
     if run_id is None:
         run_id = str(uuid.uuid4())
 
+    try:
+        run_id = validate_run_id(run_id)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
     ci_artifacts = resolve_ci_artifacts(
         explicit_junit_xml=replayt_internal_junit_xml,
         explicit_summary_json=replayt_internal_summary_json,
@@ -583,6 +605,7 @@ def cmd_run(
     if experiment_json is not None:
         experiment = parse_json_object_option(experiment_json, label="--experiment-json")
     workflow_contract = wf.contract()
+    wf_meta_json = workflow_meta_json_for_run_hook(wf)
     hook = run_hook_argv(cfg)
     if hook:
         hook_timeout = run_hook_timeout_seconds(cfg)
@@ -603,6 +626,7 @@ def cmd_run(
                 tags_json=json.dumps(tags_dict, sort_keys=True) if tags_dict is not None else None,
                 metadata_json=json.dumps(run_meta, sort_keys=True) if run_meta is not None else None,
                 experiment_json=json.dumps(experiment, sort_keys=True) if experiment is not None else None,
+                workflow_meta_json=wf_meta_json,
                 timeout_seconds=hook_timeout,
             )
         except subprocess.TimeoutExpired as exc:
@@ -1081,6 +1105,11 @@ def cmd_resume(
     required_actor_keys, _required_actor_keys_source = resolve_approval_actor_required_keys(require_actor_key, cfg)
     require_reason, _required_reason_source = resolve_approval_reason_required(require_reason, cfg)
     wf = load_target(target)
+    try:
+        run_id = validate_run_id(run_id)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
     workflow_contract = wf.contract()
     lm = parse_log_mode(log_mode)
     hook = resume_hook_argv(cfg)
@@ -1088,7 +1117,9 @@ def cmd_resume(
     if hook:
         with read_store(log_dir, sqlite) as pre_store:
             pre_events = pre_store.load_events(run_id)
-        metadata_json, tags_json, experiment_json = run_started_hook_json_blobs_from_events(pre_events)
+        metadata_json, tags_json, experiment_json, workflow_meta_json = run_started_hook_json_blobs_from_events(
+            pre_events
+        )
         hook_timeout = resume_hook_timeout_seconds(cfg)
         try:
             invoke_resume_hook(
@@ -1106,6 +1137,7 @@ def cmd_resume(
                 metadata_json=metadata_json,
                 tags_json=tags_json,
                 experiment_json=experiment_json,
+                workflow_meta_json=workflow_meta_json,
             )
         except subprocess.TimeoutExpired as exc:
             lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
@@ -1156,6 +1188,7 @@ def cmd_resume(
 
 def register(app: typer.Typer) -> None:
     app.command("init")(cmd_init)
+    app.command("init-gitignore")(cmd_init_gitignore)
     app.command("run")(cmd_run)
     app.command("try")(cmd_try)
     app.command("ci")(cmd_ci)

@@ -39,6 +39,9 @@ _MAX_JSON_OBJECT_BRACE_STARTS = 50_000
 # Cap Pydantic issues on ``structured_output_failed`` so one pathological model payload cannot bloat JSONL.
 _MAX_STRUCTURED_VALIDATION_ISSUES = 32
 
+# Short per-call tag for JSONL when one step issues multiple LLM round trips (distinct from run-level ``experiment``).
+_MAX_CALL_LABEL_CHARS = 128
+
 # ``complete_text(..., response_format=...)`` uses this sentinel so ``None`` can mean "omit from HTTP".
 _RF_UNSET = object()
 
@@ -97,6 +100,15 @@ def _extract_json_object(text: str, *, max_brace_starts: int = _MAX_JSON_OBJECT_
 def _stable_json_sha256(value: Any) -> str:
     canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _coerce_call_label(raw: Any) -> str | None:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    return s[:_MAX_CALL_LABEL_CHARS]
 
 
 def _pydantic_validation_issues_for_log(exc: BaseException) -> tuple[list[dict[str, Any]], int] | None:
@@ -502,6 +514,7 @@ class LLMBridge:
         experiment: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
+        call_label: str | None = None,
     ) -> LLMBridge:
         """Return a new bridge with merged per-call defaults (logged on each request as ``effective``)."""
 
@@ -555,6 +568,12 @@ class LLMBridge:
                 merged.pop("stop", None)
             else:
                 merged["stop"] = coerced_stop
+        if call_label is not None:
+            coerced_label = _coerce_call_label(call_label)
+            if coerced_label:
+                merged["call_label"] = coerced_label
+            else:
+                merged.pop("call_label", None)
         return LLMBridge(
             emit=self._emit,
             client=self._client,
@@ -684,6 +703,9 @@ class LLMBridge:
         exp = d.get("experiment")
         if isinstance(exp, dict) and exp:
             effective["experiment"] = dict(exp)
+        call_lab = _coerce_call_label(d.get("call_label"))
+        if call_lab:
+            effective["call_label"] = call_lab
         if eff_stop:
             effective["stop"] = list(eff_stop)
         if eff_extra_body:
@@ -753,6 +775,9 @@ class LLMBridge:
         req_payload.update(fingerprints)
         if schema_name is not None:
             req_payload["schema_name"] = schema_name
+        cl = effective.get("call_label")
+        if isinstance(cl, str) and cl:
+            req_payload["call_label"] = cl
         if self._log_mode == LogMode.full:
             req_payload["messages"] = messages
         elif self._log_mode == LogMode.redacted:
@@ -803,6 +828,8 @@ class LLMBridge:
             resp_payload["system_fingerprint"] = fp.strip()
         if schema_name is not None:
             resp_payload["schema_name"] = schema_name
+        if isinstance(cl, str) and cl:
+            resp_payload["call_label"] = cl
         if self._log_mode == LogMode.full:
             resp_payload["content"] = content
         elif self._log_mode == LogMode.redacted:
@@ -841,6 +868,9 @@ class LLMBridge:
         }
         if effective is not None:
             payload["effective"] = effective
+            ecl = effective.get("call_label")
+            if isinstance(ecl, str) and ecl:
+                payload["call_label"] = ecl
         if fingerprints:
             payload.update(fingerprints)
         if response_chars is not None:
@@ -1056,15 +1086,16 @@ class LLMBridge:
                 validation_issue_count=v_count,
             )
             raise
-        self._emit(
-            "structured_output",
-            {
-                "state": self._state_getter(),
-                "schema_name": model_type.__name__,
-                "data": result.model_dump(),
-                "effective": effective,
-                **fingerprints,
-                **response_meta,
-            },
-        )
+        so_payload: dict[str, Any] = {
+            "state": self._state_getter(),
+            "schema_name": model_type.__name__,
+            "data": result.model_dump(),
+            "effective": effective,
+            **fingerprints,
+            **response_meta,
+        }
+        socl = effective.get("call_label")
+        if isinstance(socl, str) and socl:
+            so_payload["call_label"] = socl
+        self._emit("structured_output", so_payload)
         return result

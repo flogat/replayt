@@ -82,7 +82,7 @@ def _maybe_invoke_export_hook(
     if not hook:
         return None
     hook_timeout = export_hook_timeout_seconds(cfg)
-    meta_j, tags_j, exp_j = run_started_hook_json_blobs_from_events(events)
+    meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_events(events)
     try:
         invoke_export_hook(
             hook,
@@ -101,6 +101,7 @@ def _maybe_invoke_export_hook(
             metadata_json=meta_j,
             tags_json=tags_j,
             experiment_json=exp_j,
+            workflow_meta_json=wf_meta_j,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -131,7 +132,7 @@ def _maybe_invoke_seal_hook(
         return None
     hook_timeout = seal_hook_timeout_seconds(cfg)
     workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
-    meta_j, tags_j, exp_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
+    meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
     try:
         invoke_seal_hook(
             hook,
@@ -145,6 +146,7 @@ def _maybe_invoke_seal_hook(
             metadata_json=meta_j,
             tags_json=tags_j,
             experiment_json=exp_j,
+            workflow_meta_json=wf_meta_j,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -177,7 +179,7 @@ def _maybe_invoke_verify_seal_hook(
         return
     hook_timeout = verify_seal_hook_timeout_seconds(cfg)
     workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
-    meta_j, tags_j, exp_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
+    meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
     try:
         invoke_verify_seal_hook(
             hook,
@@ -193,6 +195,7 @@ def _maybe_invoke_verify_seal_hook(
             metadata_json=meta_j,
             tags_json=tags_j,
             experiment_json=exp_j,
+            workflow_meta_json=wf_meta_j,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -635,11 +638,25 @@ def cmd_report_diff(
     ctx_b = collect_report_context(events_b, llm_model_filter=llm_model_filters)
     if report_format == "markdown":
         doc = build_report_diff_markdown(
-            run_a, run_b, ctx_a, ctx_b, style=style, llm_model_filter=llm_model_filters
+            run_a,
+            run_b,
+            ctx_a,
+            ctx_b,
+            events_a=events_a,
+            events_b=events_b,
+            style=style,
+            llm_model_filter=llm_model_filters,
         )
     else:
         doc = build_report_diff_html(
-            run_a, run_b, ctx_a, ctx_b, style=style, llm_model_filter=llm_model_filters
+            run_a,
+            run_b,
+            ctx_a,
+            ctx_b,
+            events_a=events_a,
+            events_b=events_b,
+            style=style,
+            llm_model_filter=llm_model_filters,
         )
     if out:
         out_path = Path(out)

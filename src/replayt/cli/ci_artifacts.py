@@ -39,6 +39,7 @@ def ci_run_summary_runtime_fields() -> dict[str, str]:
     return {
         "replayt_version": replayt_version,
         "python_version": f"{vi.major}.{vi.minor}.{vi.micro}",
+        "python_executable": sys.executable,
         "platform": sys.platform,
     }
 
@@ -193,6 +194,7 @@ def write_summary_json(
         "error": result.error,
         "exit_code": exit_code_for_run_result(result),
         "target": target,
+        "cwd": str(Path.cwd().resolve()),
         "log_dir": str(log_dir.resolve()),
         "dry_run": dry_run,
         **ci_run_summary_runtime_fields(),

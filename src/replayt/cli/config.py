@@ -45,9 +45,11 @@ _PROJECT_CONFIG: dict[str, Any] | None = None
 _PROJECT_CONFIG_PATH: str | None = None
 _PROJECT_CONFIG_UNKNOWN_KEYS: frozenset[str] | None = None
 _PROJECT_CONFIG_SHADOWED_SOURCES: tuple[str, ...] | None = None
+_PROJECT_CONFIG_WALK: list[dict[str, Any]] | None = None
 _PROJECT_CONFIG_CWD: str | None = None
 
 PROJECT_CONFIG_DISCOVERY_SCHEMA = "replayt.project_config_discovery.v1"
+PROJECT_CONFIG_RESOLUTION_SCHEMA = "replayt.project_config_resolution.v1"
 
 
 def build_project_config_discovery_report() -> dict[str, object]:
@@ -260,7 +262,19 @@ def _shadowed_pyproject_paths_when_replaytrc_wins(directory: Path, tomllib_mod: 
     return ()
 
 
-def load_project_config() -> tuple[dict[str, Any], str | None, frozenset[str], tuple[str, ...]]:
+def _read_pyproject_tool_replayt_section(pyproject: Path, tomllib_mod: Any) -> dict[str, Any] | None:
+    """Return the ``[tool.replayt]`` table dict when present and mapping-shaped; else ``None``."""
+
+    try:
+        with open(pyproject, "rb") as f:
+            data = tomllib_mod.load(f)
+    except (OSError, UnicodeDecodeError, ValueError, TypeError):
+        return None
+    section = (data.get("tool") or {}).get("replayt")
+    return section if isinstance(section, dict) else None
+
+
+def load_project_config() -> tuple[dict[str, Any], str | None, frozenset[str], tuple[str, ...], list[dict[str, Any]]]:
     """Walk up from cwd looking for ``pyproject.toml`` (``[tool.replayt]``) or ``.replaytrc.toml``."""
 
     try:
@@ -269,30 +283,62 @@ def load_project_config() -> tuple[dict[str, Any], str | None, frozenset[str], t
         try:
             import tomli as tomllib  # type: ignore[import-not-found,no-redef]
         except ImportError:
-            return {}, None, frozenset(), ()
+            return {}, None, frozenset(), (), []
 
     cur = Path.cwd().resolve()
+    walk: list[dict[str, Any]] = []
     for directory in (cur, *cur.parents):
         rc = directory / ".replaytrc.toml"
-        if rc.is_file():
+        pyproject = directory / "pyproject.toml"
+        rc_exists = rc.is_file()
+        pj_exists = pyproject.is_file()
+        pj_section = _read_pyproject_tool_replayt_section(pyproject, tomllib) if pj_exists else None
+        pj_has = pj_section is not None
+
+        if rc_exists:
+            walk.append(
+                {
+                    "directory": str(directory),
+                    "replaytrc_toml": True,
+                    "pyproject_toml": pj_exists,
+                    "pyproject_has_tool_replayt": pj_has,
+                    "stopped_here": True,
+                }
+            )
             with open(rc, "rb") as f:
                 data = tomllib.load(f)
             if not isinstance(data, dict):
                 shadowed = _shadowed_pyproject_paths_when_replaytrc_wins(directory, tomllib)
-                return {}, str(rc.resolve()), frozenset(), shadowed
+                return {}, str(rc.resolve()), frozenset(), shadowed, walk
             filtered, unknown = _split_supported_section(data)
             shadowed = _shadowed_pyproject_paths_when_replaytrc_wins(directory, tomllib)
-            return filtered, str(rc.resolve()), unknown, shadowed
+            return filtered, str(rc.resolve()), unknown, shadowed, walk
 
-        pyproject = directory / "pyproject.toml"
-        if pyproject.is_file():
-            with open(pyproject, "rb") as f:
-                data = tomllib.load(f)
-            section = (data.get("tool") or {}).get("replayt")
-            if isinstance(section, dict):
-                filtered, unknown = _split_supported_section(section)
-                return filtered, str(pyproject.resolve()), unknown, ()
-    return {}, None, frozenset(), ()
+        if pj_has:
+            assert pj_section is not None
+            walk.append(
+                {
+                    "directory": str(directory),
+                    "replaytrc_toml": False,
+                    "pyproject_toml": True,
+                    "pyproject_has_tool_replayt": True,
+                    "stopped_here": True,
+                }
+            )
+            filtered, unknown = _split_supported_section(pj_section)
+            return filtered, str(pyproject.resolve()), unknown, (), walk
+
+        walk.append(
+            {
+                "directory": str(directory),
+                "replaytrc_toml": rc_exists,
+                "pyproject_toml": pj_exists,
+                "pyproject_has_tool_replayt": pj_has,
+                "stopped_here": False,
+            }
+        )
+
+    return {}, None, frozenset(), (), walk
 
 
 def get_project_config() -> tuple[dict[str, Any], str | None, frozenset[str], tuple[str, ...]]:
@@ -300,6 +346,7 @@ def get_project_config() -> tuple[dict[str, Any], str | None, frozenset[str], tu
     global _PROJECT_CONFIG_PATH  # noqa: PLW0603
     global _PROJECT_CONFIG_UNKNOWN_KEYS  # noqa: PLW0603
     global _PROJECT_CONFIG_SHADOWED_SOURCES  # noqa: PLW0603
+    global _PROJECT_CONFIG_WALK  # noqa: PLW0603
     global _PROJECT_CONFIG_CWD  # noqa: PLW0603
     cwd = str(Path.cwd().resolve())
     if _PROJECT_CONFIG is None or _PROJECT_CONFIG_CWD != cwd:
@@ -308,9 +355,38 @@ def get_project_config() -> tuple[dict[str, Any], str | None, frozenset[str], tu
             _PROJECT_CONFIG_PATH,
             _PROJECT_CONFIG_UNKNOWN_KEYS,
             _PROJECT_CONFIG_SHADOWED_SOURCES,
+            _PROJECT_CONFIG_WALK,
         ) = load_project_config()
         _PROJECT_CONFIG_CWD = cwd
     return _PROJECT_CONFIG, _PROJECT_CONFIG_PATH, _PROJECT_CONFIG_UNKNOWN_KEYS, _PROJECT_CONFIG_SHADOWED_SOURCES
+
+
+def build_project_config_resolution_report() -> dict[str, object]:
+    """Cwd-scoped project config discovery trace for ``replayt version --format json`` / CI assertions."""
+
+    _cfg, path, unknown, shadowed = get_project_config()
+    walk = list(_PROJECT_CONFIG_WALK or [])
+    cwd = str(Path.cwd().resolve())
+    winner: dict[str, str] | None
+    if path is None:
+        winner = None
+    else:
+        name = Path(path).name
+        if name == ".replaytrc.toml":
+            kind = "replaytrc"
+        elif name == "pyproject.toml":
+            kind = "pyproject"
+        else:
+            kind = "unknown"
+        winner = {"path": path, "kind": kind}
+    return {
+        "schema": PROJECT_CONFIG_RESOLUTION_SCHEMA,
+        "cwd": cwd,
+        "winner": winner,
+        "unknown_keys": sorted(unknown),
+        "shadowed_sources": list(shadowed),
+        "walk": walk,
+    }
 
 
 def sanitize_log_subdir(raw: str) -> str:

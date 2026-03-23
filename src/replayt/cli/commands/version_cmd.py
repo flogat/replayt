@@ -10,7 +10,11 @@ from typing import Literal
 import typer
 
 import replayt
-from replayt.cli.config import SUPPORTED_CONFIG_KEYS, build_project_config_discovery_report
+from replayt.cli.config import (
+    SUPPORTED_CONFIG_KEYS,
+    build_project_config_discovery_report,
+    build_project_config_resolution_report,
+)
 from replayt.cli.distribution_metadata import DISTRIBUTION_METADATA_SCHEMA, build_distribution_metadata_report
 from replayt.cli.path_readiness import build_operational_paths_report
 from replayt.cli.run_support import (
@@ -19,6 +23,10 @@ from replayt.cli.run_support import (
     build_cli_json_stdout_contract,
     build_cli_stdio_contract,
     build_policy_hook_env_catalog,
+)
+from replayt.cli.skill_loop_env import (
+    SKILL_LOOP_ENV_CONTRACT_SCHEMA,
+    build_skill_loop_env_contract,
 )
 
 VERSION_REPORT_SCHEMA = "replayt.version_report.v1"
@@ -83,11 +91,14 @@ def build_version_report() -> dict[str, object]:
         "cli_stdio_contract": build_cli_stdio_contract(),
         "cli_json_stdout_contract": build_cli_json_stdout_contract(),
         "project_config_discovery": build_project_config_discovery_report(),
+        "project_config_resolution": build_project_config_resolution_report(),
         "operational_paths": build_operational_paths_report(),
         "distribution_metadata": build_distribution_metadata_report(),
+        "skill_loop_env_contract": build_skill_loop_env_contract(),
         "cli_machine_readable_schemas": {
             "version_report": VERSION_REPORT_SCHEMA,
             "project_config_discovery": "replayt.project_config_discovery.v1",
+            "project_config_resolution": "replayt.project_config_resolution.v1",
             "workflow_contract": "replayt.workflow_contract.v1",
             "workflow_contract_check": "replayt.workflow_contract_check.v1",
             "validate_report": "replayt.validate_report.v1",
@@ -109,6 +120,7 @@ def build_version_report() -> dict[str, object]:
             "try_examples": "replayt.try_examples.v1",
             "try_copy": "replayt.try_copy.v1",
             "init_templates": "replayt.init_templates.v1",
+            "skill_loop_env_contract": SKILL_LOOP_ENV_CONTRACT_SCHEMA,
         },
     }
 

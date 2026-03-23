@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -308,6 +309,25 @@ def test_changelog_report_parses_unreleased_items(tmp_path: Path) -> None:
     assert report["ok"] is True
     assert report["item_count"] >= 1
     assert any("Maintainer release helpers" in item for item in report["items"])
+    assert report["body_sha256"] == hashlib.sha256(report["body"].encode("utf-8")).hexdigest()
+
+
+def test_changelog_report_missing_unreleased_has_null_body_sha256(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "CHANGELOG.md",
+        """
+        # Changelog
+
+        ## 0.1.0 - 2026-03-21
+
+        - Initial release.
+        """,
+    )
+    mod = _load_script("changelog_unreleased_missing", "changelog_unreleased.py")
+    report = mod.changelog_report(tmp_path / "CHANGELOG.md")
+
+    assert report["ok"] is False
+    assert report["body_sha256"] is None
 
 
 def test_changelog_main_checks_nonempty(tmp_path: Path) -> None:
@@ -889,6 +909,8 @@ def test_changelog_main_json_output(tmp_path: Path, capsys) -> None:
     data = json.loads(capsys.readouterr().out)
     assert data["schema"] == "replayt.unreleased_changelog.v1"
     assert data["items"] == ["First note", "Second note"]
+    assert data["body_sha256"]
+    assert data["body_sha256"] == hashlib.sha256(data["body"].encode("utf-8")).hexdigest()
 
 
 def test_run_light_release_skill_requires_repo_root(tmp_path: Path, monkeypatch) -> None:

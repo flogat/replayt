@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -40,6 +41,10 @@ def parse_items(body: str) -> list[str]:
     return [item for item in items if item.strip()]
 
 
+def _body_sha256(body: str) -> str:
+    return hashlib.sha256(body.encode("utf-8")).hexdigest()
+
+
 def changelog_report(changelog_path: Path) -> dict[str, Any]:
     text = changelog_path.read_text(encoding="utf-8")
     body = unreleased_body(text)
@@ -50,6 +55,7 @@ def changelog_report(changelog_path: Path) -> dict[str, Any]:
             "ok": False,
             "error": "CHANGELOG.md is missing a '## Unreleased' section",
             "body": None,
+            "body_sha256": None,
             "items": [],
             "item_count": 0,
         }
@@ -60,6 +66,7 @@ def changelog_report(changelog_path: Path) -> dict[str, Any]:
         "ok": True,
         "error": None,
         "body": body,
+        "body_sha256": _body_sha256(body),
         "items": items,
         "item_count": len(items),
     }

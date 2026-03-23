@@ -54,7 +54,7 @@ replayt inspect <run_id>
 replayt replay <run_id>
 ```
 
-Share a static HTML timeline (Tailwind via CDN):
+Share a static HTML timeline (one file, embedded CSS, no CDN):
 
 ```bash
 replayt replay <run_id> --format html --out run.html
