@@ -37,6 +37,21 @@ LLM_CREDENTIAL_ENV_VARS: tuple[str, ...] = (
     "XAI_API_KEY",
 )
 
+# Proxy-related names: many HTTP stacks honor lowercase variants on POSIX; audit both without echoing values.
+_EGRESS_PROXY_ENV_VARS: frozenset[str] = frozenset({"ALL_PROXY", "HTTP_PROXY", "HTTPS_PROXY", "NO_PROXY"})
+# Common env vars that steer TLS trust or HTTP proxy behavior for stacks replayt may use indirectly.
+# Sorted for stable doctor/config JSON.
+EGRESS_TRUST_ENV_VARS: tuple[str, ...] = (
+    "ALL_PROXY",
+    "CURL_CA_BUNDLE",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "REQUESTS_CA_BUNDLE",
+    "SSL_CERT_DIR",
+    "SSL_CERT_FILE",
+)
+
 
 def _env_nonempty(name: str) -> bool:
     raw = os.environ.get(name)
@@ -47,6 +62,19 @@ def llm_credential_env_presence() -> list[dict[str, bool]]:
     """Return fixed-name credential env flags for machine-readable doctor/config reports."""
 
     return [{"name": name, "present": _env_nonempty(name)} for name in LLM_CREDENTIAL_ENV_VARS]
+
+
+def egress_trust_env_presence() -> list[dict[str, bool]]:
+    """Return proxy / TLS-trust env flags (presence only) for compliance-style egress reviews."""
+
+    rows: list[dict[str, bool]] = []
+    for name in EGRESS_TRUST_ENV_VARS:
+        if name in _EGRESS_PROXY_ENV_VARS:
+            present = _env_nonempty(name) or _env_nonempty(name.lower())
+        else:
+            present = _env_nonempty(name)
+        rows.append({"name": name, "present": present})
+    return rows
 
 
 def extraneous_llm_credential_env_names() -> tuple[str, ...]:

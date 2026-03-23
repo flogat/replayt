@@ -363,6 +363,10 @@ def test_runner_persists_llm_request_schema_fingerprints(tmp_path: Path) -> None
     assert structured["usage"] == response["usage"]
     assert structured["latency_ms"] == response["latency_ms"]
     assert structured["finish_reason"] == response["finish_reason"]
+    assert response["http_attempts"] == 1
+    assert response["http_status"] == 200
+    assert structured["http_attempts"] == response["http_attempts"]
+    assert structured["http_status"] == response["http_status"]
 
 
 def test_runner_run_started_includes_policy_hook_breadcrumbs(tmp_path: Path) -> None:

@@ -60,6 +60,10 @@ def test_public_api_report_marks_missing_declared_exports(tmp_path: Path, monkey
             "source_module": None,
         },
     ]
+    assert report["export_sha256s"] == [
+        "67cab1841d22e21619eec2e99bf02cda0b0261666b451826388d565ebe5ba4e6",
+        "d8a9bf221ec6efa918c95cc35060546c983421e61bcd8943ce6632bbdf9f3f4e",
+    ]
 
 
 def test_public_api_report_json_output_for_replayt() -> None:
@@ -70,6 +74,10 @@ def test_public_api_report_json_output_for_replayt() -> None:
     assert report["schema"] == "replayt.public_api_report.v1"
     assert report["module"] == "replayt"
     assert any(item["name"] == "Workflow" for item in report["exports"])
+    assert len(report["export_sha256s"]) == len(report["exports"])
+    wf = next(item for item in report["exports"] if item["name"] == "Workflow")
+    idx = report["exports"].index(wf)
+    assert report["export_sha256s"][idx] == mod._export_row_sha256(wf)
 
 
 def test_public_api_report_check_snapshot_round_trip(tmp_path: Path, monkeypatch) -> None:
@@ -644,6 +652,9 @@ def test_maintainer_checks_tmp_pass_with_public_api_snapshot(tmp_path: Path) -> 
         """
         {
           "export_count": 1,
+          "export_sha256s": [
+            "e5f05f3f7cf8abd64cd118fd7a240bfdd199aaba4d0d905a0e6ac8ac5f7b4ba4"
+          ],
           "exports": [
             {
               "kind": "class",

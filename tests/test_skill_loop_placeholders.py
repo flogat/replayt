@@ -19,13 +19,17 @@ def test_build_skill_loop_placeholder_contract_shape() -> None:
     names = {r["name"] for r in skill}
     assert names == {
         "invocation_file",
+        "invocation_rel",
         "iteration",
         "log_file",
+        "log_rel",
         "max_iterations",
         "pipeline_sha256",
         "prompt_file",
+        "prompt_rel",
         "repo",
         "run_dir",
+        "run_dir_rel",
         "run_stamp",
         "skill",
         "skill_command_sha256",

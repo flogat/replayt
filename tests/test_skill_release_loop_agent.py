@@ -192,6 +192,32 @@ def test_codex_usage_limit_detection() -> None:
     assert not mod.codex_usage_limit_log_detected("some other error")
 
 
+def test_skill_command_rel_placeholders_resolves_under_repo(tmp_path: Path) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    prompt = repo / "nested" / "p.md"
+    prompt.parent.mkdir()
+    prompt.write_text("x", encoding="utf-8")
+    log_f = repo / "nested" / "l.log"
+    log_f.write_text("", encoding="utf-8")
+    inv = repo / "nested" / "i.invocation.json"
+    inv.write_text("{}", encoding="utf-8")
+    root = str(repo.resolve())
+    rels = mod.skill_command_rel_placeholders(
+        root,
+        prompt_file=str(prompt.resolve()),
+        log_file=str(log_f.resolve()),
+        invocation_file=str(inv.resolve()),
+        run_dir=str((repo / "nested").resolve()),
+    )
+    run_nested = (repo / "nested").resolve()
+    assert (Path(root) / rels["prompt_rel"]).resolve() == prompt.resolve()
+    assert (Path(root) / rels["log_rel"]).resolve() == log_f.resolve()
+    assert (Path(root) / rels["invocation_rel"]).resolve() == inv.resolve()
+    assert (Path(root) / rels["run_dir_rel"]).resolve() == run_nested
+
+
 def test_fix_round_skill_command_context_includes_task_matching_env() -> None:
     """`{task}` must be defined for automated fix rounds (parity with SKILL_TASK / version JSON contract)."""
 

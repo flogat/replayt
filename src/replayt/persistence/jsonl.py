@@ -72,7 +72,10 @@ else:
 
 def _validate_run_id(run_id: str) -> str:
     if not _RUN_ID_RE.fullmatch(run_id):
-        raise ValueError("run_id must be 1-128 chars and contain only letters, numbers, dot, underscore, or hyphen")
+        raise ValueError(
+            "run_id must be 1-128 chars and contain only letters, numbers, dot, underscore, or hyphen. "
+            "Copy the id from replayt runs (first column) or from the run_id= line replayt run prints."
+        )
     return run_id
 
 
@@ -151,6 +154,8 @@ class JSONLStore:
                 continue
             try:
                 event = json.loads(line)
+                if not isinstance(event, dict):
+                    continue
                 max_seq = max(max_seq, int(event.get("seq", 0)))
             except (json.JSONDecodeError, TypeError, ValueError):
                 continue
@@ -171,16 +176,19 @@ class JSONLStore:
             if lines:
                 try:
                     event = json.loads(lines[-1])
-                    return int(event.get("seq", 0))
                 except (json.JSONDecodeError, TypeError, ValueError):
-                    pass
+                    event = None
+                else:
+                    if isinstance(event, dict):
+                        return int(event.get("seq", 0))
             if start == 0:
                 for line in reversed(lines[:-1] if len(lines) > 1 else []):
                     try:
                         event = json.loads(line)
-                        return int(event.get("seq", 0))
                     except (json.JSONDecodeError, TypeError, ValueError):
                         continue
+                    if isinstance(event, dict):
+                        return int(event.get("seq", 0))
                 return self._max_seq_full_scan(f) if end > 0 else 0
             read_size = min(read_size * 2, end)
             start = end - read_size

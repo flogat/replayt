@@ -143,6 +143,24 @@ def path_under_repo_or_absolute(repo_root: str, target: str) -> str:
         return str(resolved)
 
 
+def skill_command_rel_placeholders(
+    repo_root_resolved: str,
+    *,
+    prompt_file: str,
+    log_file: str,
+    invocation_file: str,
+    run_dir: str,
+) -> dict[str, str]:
+    """Repo-relative paths for ``--skill-command`` templates (same strings as ``SKILL_*_REL`` env)."""
+
+    return {
+        "prompt_rel": path_under_repo_or_absolute(repo_root_resolved, prompt_file),
+        "log_rel": path_under_repo_or_absolute(repo_root_resolved, log_file),
+        "invocation_rel": path_under_repo_or_absolute(repo_root_resolved, invocation_file),
+        "run_dir_rel": path_under_repo_or_absolute(repo_root_resolved, run_dir),
+    }
+
+
 def skill_release_run_stamp(run_dir: Path | str) -> str:
     """Basename of the skill-release run directory (``YYYYMMDD-HHMMSS`` for default new runs)."""
 
@@ -400,7 +418,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Codex usage-limit auto-wait is off by default here; pass --wait-on-codex-usage-limit when your "
             "--skill-command runs OpenAI Codex.\n"
             "--skill-command runs once per skill and can use placeholders:\n"
-            "  {skill} {skill_path} {skill_root} {prompt_file} {invocation_file} {log_file} {run_dir} {run_stamp}\n"
+            "  {skill} {skill_path} {skill_root} {prompt_file} {prompt_rel} {invocation_file} {invocation_rel} "
+            "{log_file} {log_rel} {run_dir} {run_dir_rel} {run_stamp}\n"
             "  {repo} {iteration} {max_iterations} {task} {step_index} {step_total} {pipeline_sha256} "
             "{skill_command_sha256} {task_sha256}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
@@ -1269,6 +1288,13 @@ def run_skill_iteration(
                 "pipeline_sha256": pipeline_sha256,
                 "skill_command_sha256": skill_cmd_sha,
                 "task_sha256": loop_task_sha,
+                **skill_command_rel_placeholders(
+                    repo_resolved,
+                    prompt_file=str(prompt_path),
+                    log_file=str(log_path),
+                    invocation_file=invocation_abs,
+                    run_dir=run_dir_resolved,
+                ),
             },
         )
         progress_banner(f"Skill: {skill.name}")
@@ -1505,6 +1531,7 @@ def run_checks(
                 task_sha256=loop_task_sha,
             )
             fix_invocation_abs = str(fix_invocation_path.resolve())
+            repo_s = str(repo.resolve())
 
             fix_command = render_command(
                 args.skill_command,
@@ -1526,12 +1553,18 @@ def run_checks(
                     "skill_command_sha256": skill_cmd_sha,
                     "task_sha256": loop_task_sha,
                     "task": FIX_CHECK_TASK,
+                    **skill_command_rel_placeholders(
+                        repo_s,
+                        prompt_file=str(fix_prompt_path),
+                        log_file=str(fix_log_path),
+                        invocation_file=fix_invocation_abs,
+                        run_dir=run_dir_resolved,
+                    ),
                 },
             )
 
             fix_env = os.environ.copy()
             _inject_git_safe_directory(fix_env, str(repo))
-            repo_s = str(repo.resolve())
             fix_env.update(
                 {
                     "REPO_ROOT": repo_s,
@@ -1925,6 +1958,7 @@ def run_pre_tag_github_ci_with_fixes(
             task_sha256=loop_task_sha,
         )
         pre_tag_invocation_abs = str(pre_tag_invocation_path.resolve())
+        repo_s = str(repo.resolve())
 
         fix_command = render_command(
             args.skill_command,
@@ -1946,12 +1980,18 @@ def run_pre_tag_github_ci_with_fixes(
                 "skill_command_sha256": skill_cmd_sha,
                 "task_sha256": loop_task_sha,
                 "task": FIX_PRE_TAG_CI_TASK,
+                **skill_command_rel_placeholders(
+                    repo_s,
+                    prompt_file=str(fix_prompt_path),
+                    log_file=str(fix_log_path),
+                    invocation_file=pre_tag_invocation_abs,
+                    run_dir=run_dir_resolved,
+                ),
             },
         )
 
         fix_env = os.environ.copy()
         _inject_git_safe_directory(fix_env, str(repo))
-        repo_s = str(repo.resolve())
         fix_env.update(
             {
                 "REPO_ROOT": repo_s,

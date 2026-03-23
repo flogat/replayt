@@ -45,6 +45,24 @@ def test_tool_registry(tmp_path: Path) -> None:
     assert any(e["type"] == "tool_result" and e["payload"].get("ok") for e in ev)
 
 
+def test_tool_registry_rejects_non_dict_arguments(tmp_path: Path) -> None:
+    wf = Workflow("non_dict_args")
+    wf.set_initial("main")
+
+    def ping() -> str:
+        return "ok"
+
+    @wf.step("main")
+    def main(ctx) -> str | None:
+        ctx.tools.register(ping)
+        with pytest.raises(TypeError, match="arguments must be a dict"):
+            ctx.tools.call("ping", [])  # type: ignore[arg-type]
+        return None
+
+    store = JSONLStore(tmp_path)
+    assert Runner(wf, store, log_mode=LogMode.redacted).run().status == "completed"
+
+
 def test_tool_registry_rejects_unexpected_arguments_and_validates_primitives(tmp_path: Path) -> None:
     wf = Workflow("strict_tools")
     wf.set_initial("main")
@@ -200,7 +218,63 @@ def test_apply_openai_chat_tool_calls_order_and_json_args() -> None:
     assert out == ["a3", "HI"]
     assert [e[0] for e in events] == ["tool_call", "tool_result", "tool_call", "tool_result"]
     assert events[0][1]["name"] == "first"
+    assert events[0][1]["tool_call_id"] == "call_1"
+    assert events[1][1]["tool_call_id"] == "call_1"
     assert events[2][1]["name"] == "second"
+    assert events[2][1]["tool_call_id"] == "call_2"
+    assert events[3][1]["tool_call_id"] == "call_2"
+
+
+def test_apply_openai_chat_tool_calls_omits_tool_call_id_without_vendor_id() -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def emit(typ: str, payload: dict[str, Any]) -> None:
+        events.append((typ, payload))
+
+    reg = ToolRegistry(emit=emit, state_getter=lambda: "s1")
+
+    @reg.register
+    def ok() -> int:
+        return 1
+
+    reg.apply_openai_chat_tool_calls(
+        [{"type": "function", "function": {"name": "ok", "arguments": "{}"}}]
+    )
+    assert "tool_call_id" not in events[0][1]
+    assert "tool_call_id" not in events[1][1]
+
+
+def test_tool_registry_call_tool_call_id_on_failure() -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def emit(typ: str, payload: dict[str, Any]) -> None:
+        events.append((typ, payload))
+
+    reg = ToolRegistry(emit=emit, state_getter=lambda: "s1")
+
+    @reg.register
+    def boom() -> None:
+        raise RuntimeError("nope")
+
+    with pytest.raises(RuntimeError, match="nope"):
+        reg.call("boom", {}, tool_call_id="  tc99  ")
+    assert events[0][1].get("tool_call_id") == "tc99"
+    assert events[1][1].get("tool_call_id") == "tc99"
+    assert events[1][1]["ok"] is False
+
+
+def test_tool_registry_call_rejects_non_str_tool_call_id() -> None:
+    def emit(_typ: str, _payload: dict[str, Any]) -> None:
+        return None
+
+    reg = ToolRegistry(emit=emit, state_getter=lambda: "s1")
+
+    @reg.register
+    def ok() -> int:
+        return 1
+
+    with pytest.raises(TypeError, match="tool_call_id must be str or None"):
+        reg.call("ok", {}, tool_call_id=99)  # type: ignore[arg-type]
 
 
 def test_apply_openai_chat_tool_calls_rejects_bad_shape() -> None:
@@ -319,7 +393,11 @@ def test_apply_anthropic_tool_use_blocks_order_and_inputs() -> None:
     assert out == ["a3", "HI"]
     assert [e[0] for e in events] == ["tool_call", "tool_result", "tool_call", "tool_result"]
     assert events[0][1]["name"] == "first"
+    assert events[0][1]["tool_call_id"] == "tu_1"
+    assert events[1][1]["tool_call_id"] == "tu_1"
     assert events[2][1]["name"] == "second"
+    assert events[2][1]["tool_call_id"] == "tu_2"
+    assert events[3][1]["tool_call_id"] == "tu_2"
 
 
 def test_apply_anthropic_tool_use_blocks_rejects_bad_shape() -> None:
@@ -449,7 +527,11 @@ def test_apply_bedrock_converse_tool_use_blocks_order_and_inputs() -> None:
     assert out == ["a3", "HI"]
     assert [e[0] for e in events] == ["tool_call", "tool_result", "tool_call", "tool_result"]
     assert events[0][1]["name"] == "first"
+    assert events[0][1]["tool_call_id"] == "tu_1"
+    assert events[1][1]["tool_call_id"] == "tu_1"
     assert events[2][1]["name"] == "second"
+    assert events[2][1]["tool_call_id"] == "tu_2"
+    assert events[3][1]["tool_call_id"] == "tu_2"
 
 
 def test_apply_bedrock_converse_tool_use_blocks_rejects_bad_shape() -> None:

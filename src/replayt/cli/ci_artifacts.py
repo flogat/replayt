@@ -88,10 +88,13 @@ def ci_run_summary_runtime_fields() -> dict[str, Any]:
     vi = sys.version_info
     fs_enc = sys.getfilesystemencoding()
     soft, hard = _ulimit_nofile_pair()
+    impl = sys.implementation
+    cache_tag = getattr(impl, "cache_tag", None)
     return {
         "replayt_version": replayt_version,
         "python_version": f"{vi.major}.{vi.minor}.{vi.micro}",
         "python_implementation": platform.python_implementation(),
+        "python_cache_tag": cache_tag,
         "python_executable": sys.executable,
         "platform": sys.platform,
         "machine": platform.machine(),

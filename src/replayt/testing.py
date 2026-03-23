@@ -14,6 +14,14 @@ from replayt.types import LogMode
 from replayt.workflow import Workflow
 
 
+def _fill_llm_transport_meta(transport_meta: dict[str, Any] | None) -> None:
+    if transport_meta is None:
+        return
+    transport_meta.clear()
+    transport_meta["http_attempts"] = 1
+    transport_meta["http_status"] = 200
+
+
 class DryRunLLMClient(OpenAICompatClient):
     """Returns placeholder responses without calling any LLM. Useful for ``replayt run --dry-run``.
 
@@ -184,6 +192,7 @@ class DryRunLLMClient(OpenAICompatClient):
         response_format: dict[str, Any] | None = None,
         stop: list[str] | None = None,
         http_retries: int | None = None,
+        transport_meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         _ = (
             model,
@@ -210,6 +219,7 @@ class DryRunLLMClient(OpenAICompatClient):
             schema = self._schema_from_parse_prompt(messages)
             if schema is not None:
                 content = json.dumps(self._minimal_json_from_schema(schema))
+        _fill_llm_transport_meta(transport_meta)
         return {
             "choices": [{"message": {"content": content}, "finish_reason": "stop"}],
             "usage": {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0},
@@ -256,6 +266,7 @@ class MockLLMClient(OpenAICompatClient):
         response_format: dict[str, Any] | None = None,
         stop: list[str] | None = None,
         http_retries: int | None = None,
+        transport_meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         _ = (
             messages,
@@ -276,6 +287,7 @@ class MockLLMClient(OpenAICompatClient):
         )
         if not self._responses:
             raise RuntimeError("MockLLMClient: no queued response; call .enqueue(...) before running the workflow")
+        _fill_llm_transport_meta(transport_meta)
         return self._responses.pop(0)
 
 

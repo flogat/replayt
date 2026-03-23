@@ -75,7 +75,7 @@ class SQLiteStore:
                 (run_id, seq, typ, ts, payload_json),
             )
             self._cx.commit()
-        except Exception:
+        except sqlite3.Error:
             self._cx.rollback()
             raise
         return {"ts": ts, "run_id": run_id, "seq": seq, "type": typ, "payload": payload}
@@ -96,7 +96,7 @@ class SQLiteStore:
         except sqlite3.IntegrityError as e:
             self._cx.rollback()
             raise RuntimeError(f"Duplicate event sequence for run_id={run_id!r}: seq={seq}") from e
-        except Exception:
+        except sqlite3.Error:
             self._cx.rollback()
             raise
 

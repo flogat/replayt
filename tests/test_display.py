@@ -29,11 +29,13 @@ def test_stakeholder_report_handoff_includes_resume_with_approval_id() -> None:
     ]
     md = stakeholder_report_handoff_markdown(run_id, events)
     assert "## Stakeholder CLI handoff" in md
+    assert f"replayt inspect {run_id} --output markdown --style stakeholder" in md
     assert f"replayt bundle-export {run_id}" in md
     assert f"{run_id}-stakeholder-bundle.tar.gz" in md
     assert f"replayt resume TARGET {run_id} --approval ship-it" in md
     html = stakeholder_report_handoff_html(run_id, events)
     assert "Stakeholder CLI handoff" in html
+    assert f"replayt inspect {run_id} --output markdown --style stakeholder" in html
     assert f"replayt bundle-export {run_id}" in html
     assert f"replayt resume TARGET {run_id} --approval ship-it" in html
 
@@ -152,6 +154,7 @@ def test_replay_html_stakeholder_attention_and_no_tool_call_in_body() -> None:
     assert "Run timeline" in doc
     assert "Stakeholder CLI handoff" in doc
     assert "replayt bundle-export run-z --out run-z-stakeholder-bundle.tar.gz" in doc
+    assert "replayt inspect run-z --output markdown --style stakeholder" in doc
 
 
 def test_replay_html_support_includes_stakeholder_handoff() -> None:
@@ -166,3 +169,36 @@ def test_replay_html_support_includes_stakeholder_handoff() -> None:
     doc = replay_html("rid-support", events, style="support")
     assert "Stakeholder CLI handoff" in doc
     assert "--report-style support" in doc
+    assert "replayt inspect rid-support --output markdown --style support" in doc
+    assert "rid-support-support-bundle.tar.gz" in doc
+
+
+def test_inspect_stakeholder_markdown_support_style_commands() -> None:
+    run_id = "rid-sup-md"
+    events = [
+        {
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1", "tags": {}, "run_metadata": {}},
+        },
+        {"type": "run_completed", "payload": {"status": "completed"}},
+    ]
+    md = inspect_stakeholder_markdown(run_id, events, style="support")
+    assert f"## Support handoff — `{run_id}`" in md
+    assert "Support-oriented report (Markdown):" in md
+    assert f"replayt bundle-export {run_id} --out {run_id}-support-bundle.tar.gz --report-style support" in md
+
+
+def test_stakeholder_report_handoff_support_style_inspect_and_bundle() -> None:
+    run_id = "rid-h-support"
+    events = [
+        {
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1", "tags": {}, "run_metadata": {}},
+        },
+        {"type": "run_completed", "payload": {"status": "completed"}},
+    ]
+    md = stakeholder_report_handoff_markdown(run_id, events, report_style="support")
+    assert f"replayt inspect {run_id} --output markdown --style support" in md
+    assert f"{run_id}-support-bundle.tar.gz" in md
+    assert "Support report (run A" not in md  # single-run handoff has no run A label
+    assert "Support bundle" in md

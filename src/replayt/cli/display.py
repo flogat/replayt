@@ -333,20 +333,38 @@ def _stakeholder_report_handoff_rows(
     summary = event_summary(events)
     attention = run_attention_summary(events)
     status = str(summary.get("status") or "")
+    bundle_infix = "support" if report_style == "support" else "stakeholder"
+    regen_md_lbl = (
+        "Regenerate support report (Markdown)"
+        if report_style == "support"
+        else "Regenerate stakeholder report (Markdown)"
+    )
+    regen_html_lbl = (
+        "Regenerate support report (HTML)"
+        if report_style == "support"
+        else "Regenerate stakeholder report (HTML)"
+    )
+    bundle_lbl = "Support bundle (.tar.gz)" if report_style == "support" else "Stakeholder bundle (.tar.gz)"
     rows: list[tuple[str, str]] = [
-        ("Inspect (paste-friendly summary)", f"replayt inspect {run_id} --output markdown"),
         (
-            "Regenerate stakeholder report (Markdown)",
-            f"replayt report {run_id} --format markdown --style stakeholder",
+            "Inspect (paste-friendly summary)",
+            f"replayt inspect {run_id} --output markdown --style {report_style}",
         ),
         (
-            "Regenerate stakeholder report (HTML)",
-            f"replayt report {run_id} --format html --style stakeholder --out report.html",
+            regen_md_lbl,
+            f"replayt report {run_id} --format markdown --style {report_style}",
         ),
-        ("Offline timeline HTML", f"replayt replay {run_id} --format html --style stakeholder --out run.html"),
         (
-            "Stakeholder bundle (.tar.gz)",
-            f"replayt bundle-export {run_id} --out {run_id}-stakeholder-bundle.tar.gz "
+            regen_html_lbl,
+            f"replayt report {run_id} --format html --style {report_style} --out report.html",
+        ),
+        (
+            "Offline timeline HTML",
+            f"replayt replay {run_id} --format html --style {report_style} --out run.html",
+        ),
+        (
+            bundle_lbl,
+            f"replayt bundle-export {run_id} --out {run_id}-{bundle_infix}-bundle.tar.gz "
             f"--report-style {report_style}",
         ),
     ]
@@ -429,6 +447,9 @@ def _stakeholder_report_diff_handoff_rows(
     """Ordered (label, command) lines for stakeholder/support ``replayt report-diff`` handoff panels."""
 
     suf = _llm_model_cli_suffix(llm_model_filter)
+    bundle_infix = "support" if style == "support" else "stakeholder"
+    report_lbl = "Support report" if style == "support" else "Stakeholder report"
+    bundle_lbl = "Support bundle" if style == "support" else "Stakeholder bundle"
     rows: list[tuple[str, str]] = [
         (
             "Regenerate this comparison (Markdown)",
@@ -442,31 +463,37 @@ def _stakeholder_report_diff_handoff_rows(
             "Machine-readable diff (JSON)",
             f"replayt diff {run_a} {run_b} --output json{suf}",
         ),
-        ("Inspect run A (paste-friendly)", f"replayt inspect {run_a} --output markdown"),
-        ("Inspect run B (paste-friendly)", f"replayt inspect {run_b} --output markdown"),
         (
-            "Stakeholder report (run A, Markdown)",
-            f"replayt report {run_a} --format markdown --style stakeholder{suf}",
+            "Inspect run A (paste-friendly)",
+            f"replayt inspect {run_a} --output markdown --style {style}",
         ),
         (
-            "Stakeholder report (run B, Markdown)",
-            f"replayt report {run_b} --format markdown --style stakeholder{suf}",
+            "Inspect run B (paste-friendly)",
+            f"replayt inspect {run_b} --output markdown --style {style}",
+        ),
+        (
+            f"{report_lbl} (run A, Markdown)",
+            f"replayt report {run_a} --format markdown --style {style}{suf}",
+        ),
+        (
+            f"{report_lbl} (run B, Markdown)",
+            f"replayt report {run_b} --format markdown --style {style}{suf}",
         ),
         (
             "Offline timeline HTML (run A)",
-            f"replayt replay {run_a} --format html --style stakeholder --out run-a.html{suf}",
+            f"replayt replay {run_a} --format html --style {style} --out run-a.html{suf}",
         ),
         (
             "Offline timeline HTML (run B)",
-            f"replayt replay {run_b} --format html --style stakeholder --out run-b.html{suf}",
+            f"replayt replay {run_b} --format html --style {style} --out run-b.html{suf}",
         ),
         (
-            "Stakeholder bundle (run A)",
-            f"replayt bundle-export {run_a} --out {run_a}-stakeholder-bundle.tar.gz --report-style {style}",
+            f"{bundle_lbl} (run A)",
+            f"replayt bundle-export {run_a} --out {run_a}-{bundle_infix}-bundle.tar.gz --report-style {style}",
         ),
         (
-            "Stakeholder bundle (run B)",
-            f"replayt bundle-export {run_b} --out {run_b}-stakeholder-bundle.tar.gz --report-style {style}",
+            f"{bundle_lbl} (run B)",
+            f"replayt bundle-export {run_b} --out {run_b}-{bundle_infix}-bundle.tar.gz --report-style {style}",
         ),
     ]
     sum_a = event_summary(events_a)
@@ -601,12 +628,20 @@ def _stakeholder_paused_resume_md_bullets(
     return lines
 
 
-def inspect_stakeholder_markdown(run_id: str, events: list[dict[str, Any]]) -> str:
+def inspect_stakeholder_markdown(
+    run_id: str,
+    events: list[dict[str, Any]],
+    *,
+    style: Literal["stakeholder", "support"] = "stakeholder",
+) -> str:
     """Short Markdown blurb for PM/support paste (full run; not filtered event lists)."""
 
     summary = event_summary(events)
     attention = run_attention_summary(events)
-    lines: list[str] = [f"## replayt run `{run_id}`", ""]
+    if style == "support":
+        lines: list[str] = [f"## Support handoff — `{run_id}`", ""]
+    else:
+        lines = [f"## replayt run `{run_id}`", ""]
     wf = f"{summary.get('workflow_name')}@{summary.get('workflow_version')}"
     lines.append(f"- **Workflow:** {_md_inline_code(wf)}")
     lines.append(f"- **Status:** {_md_inline_code(str(summary.get('status') or 'unknown'))}")
@@ -623,21 +658,38 @@ def inspect_stakeholder_markdown(run_id: str, events: list[dict[str, Any]]) -> s
     elif kind != "none":
         lines.append(f"- **Needs attention:** {_md_inline_code(kind)}")
     lines.extend(["", "### Suggested next steps", ""])
-    lines.append(
-        f"- Stakeholder-facing report: `replayt report {run_id} --format markdown --style stakeholder` "
-        "(repeat `--log-dir`, `--log-subdir`, or `--sqlite` if you used them here)."
-    )
-    lines.append(
-        f"- Offline timeline HTML (same omissions as stakeholder report tool sections): "
-        f"`replayt replay {run_id} --format html --style stakeholder --out run.html` "
-        "(same log flags as above)."
-    )
-    lines.append(
-        f"- Stakeholder archive (HTML report + timeline + sanitized JSONL + manifest): "
-        f"`replayt bundle-export {run_id} --out {run_id}-stakeholder-bundle.tar.gz --report-style stakeholder` "
-        "(add `--target MODULE:wf` when you need `workflow.contract.json` / `workflow.mmd.txt` in the tarball; "
-        "same log flags as above)."
-    )
+    if style == "support":
+        lines.append(
+            f"- Support-oriented report (Markdown): `replayt report {run_id} --format markdown --style support` "
+            "(repeat `--log-dir`, `--log-subdir`, or `--sqlite` if you used them here)."
+        )
+        lines.append(
+            f"- Offline timeline HTML (failure/approval-first; omits tool/LLM rows like support reports): "
+            f"`replayt replay {run_id} --format html --style support --out run.html` "
+            "(same log flags as above)."
+        )
+        lines.append(
+            f"- Support archive bundle (HTML report + timeline + sanitized JSONL + manifest): "
+            f"`replayt bundle-export {run_id} --out {run_id}-support-bundle.tar.gz --report-style support` "
+            "(add `--target MODULE:wf` when you need `workflow.contract.json` / `workflow.mmd.txt` in the tarball; "
+            "same log flags as above)."
+        )
+    else:
+        lines.append(
+            f"- Stakeholder-facing report: `replayt report {run_id} --format markdown --style stakeholder` "
+            "(repeat `--log-dir`, `--log-subdir`, or `--sqlite` if you used them here)."
+        )
+        lines.append(
+            f"- Offline timeline HTML (same omissions as stakeholder report tool sections): "
+            f"`replayt replay {run_id} --format html --style stakeholder --out run.html` "
+            "(same log flags as above)."
+        )
+        lines.append(
+            f"- Stakeholder archive (HTML report + timeline + sanitized JSONL + manifest): "
+            f"`replayt bundle-export {run_id} --out {run_id}-stakeholder-bundle.tar.gz --report-style stakeholder` "
+            "(add `--target MODULE:wf` when you need `workflow.contract.json` / `workflow.mmd.txt` in the tarball; "
+            "same log flags as above)."
+        )
     lines.extend(_stakeholder_paused_resume_md_bullets(run_id, summary, attention))
     return "\n".join(lines) + "\n"
 

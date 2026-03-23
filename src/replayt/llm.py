@@ -451,6 +451,7 @@ class OpenAICompatClient:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | None = None,
         http_retries: int | None = None,
+        transport_meta: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         url = (base_url or self.settings.base_url).rstrip("/") + "/chat/completions"
         eff_max = max_tokens if max_tokens is not None else self.settings.max_tokens
@@ -503,7 +504,8 @@ class OpenAICompatClient:
         for attempt in range(max_attempts):
             try:
                 with self._client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as r:
-                    if r.status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts - 1:
+                    status_code = int(r.status_code)
+                    if status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts - 1:
                         _drain_stream_with_limit(r, drain_cap)
                         retry_after = r.headers.get("retry-after")
                         delay = min(
@@ -512,7 +514,7 @@ class OpenAICompatClient:
                         )
                         time.sleep(delay)
                         continue
-                    if r.status_code == 401:
+                    if status_code == 401:
                         _raise_chat_completions_401_hint(self.settings)
                     r.raise_for_status()
                     cl = r.headers.get("content-length")
@@ -532,11 +534,16 @@ class OpenAICompatClient:
                         f"Chat completions response was not valid UTF-8: {exc}; body_bytes={len(raw)}"
                     ) from exc
                 try:
-                    return json.loads(text)
+                    parsed = json.loads(text)
                 except json.JSONDecodeError as exc:
                     raise RuntimeError(
                         f"Chat completions response was not valid JSON: {exc}; body_bytes={len(raw)}"
                     ) from exc
+                if transport_meta is not None:
+                    transport_meta.clear()
+                    transport_meta["http_attempts"] = attempt + 1
+                    transport_meta["http_status"] = status_code
+                return parsed
             except httpx.TransportError:
                 if attempt < max_attempts - 1:
                     time.sleep(min(_RETRY_BASE_DELAY * (2**attempt), _RETRY_MAX_DELAY))
@@ -901,6 +908,7 @@ class LLMBridge:
 
         t0 = time.perf_counter()
         max_tok = coerce_max_tokens_for_api(eff_max)
+        transport: dict[str, Any] = {}
         data = self._client.chat_completions(
             messages=messages,
             model=eff_model,
@@ -917,6 +925,7 @@ class LLMBridge:
             response_format=response_format,
             stop=eff_stop_list,
             http_retries=eff_http_retries,
+            transport_meta=transport,
         )
         dt_ms = int((time.perf_counter() - t0) * 1000)
         choice = (data.get("choices") or [{}])[0]
@@ -945,6 +954,12 @@ class LLMBridge:
             resp_payload["call_label"] = cl
         if tl_tags is not None:
             resp_payload["llm_tags"] = tl_tags
+        ha = transport.get("http_attempts")
+        hs = transport.get("http_status")
+        if isinstance(ha, int):
+            resp_payload["http_attempts"] = ha
+        if isinstance(hs, int):
+            resp_payload["http_status"] = hs
         if self._log_mode == LogMode.full:
             resp_payload["content"] = content
         elif self._log_mode == LogMode.redacted:
@@ -959,6 +974,10 @@ class LLMBridge:
             structured_meta["chat_completion_id"] = cid.strip()
         if isinstance(fp, str) and fp.strip():
             structured_meta["system_fingerprint"] = fp.strip()
+        if isinstance(ha, int):
+            structured_meta["http_attempts"] = ha
+        if isinstance(hs, int):
+            structured_meta["http_status"] = hs
         return content, effective, fingerprints, structured_meta
 
     def _emit_structured_output_failed(

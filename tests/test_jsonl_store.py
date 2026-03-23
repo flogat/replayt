@@ -42,6 +42,19 @@ def test_jsonl_append_event_monotonic_seq_after_corrupt_tail_line(tmp_path: Path
     assert ev["seq"] == 3
 
 
+def test_jsonl_append_event_monotonic_seq_after_non_object_json_tail(tmp_path: Path) -> None:
+    path = tmp_path / "nonobj_tail.jsonl"
+    path.write_text(
+        '{"ts":"t","run_id":"nonobj_tail","seq":1,"type":"run_started","payload":{}}\n'
+        '{"ts":"t","run_id":"nonobj_tail","seq":2,"type":"state_entered","payload":{}}\n'
+        "[1,2,3]\n",
+        encoding="utf-8",
+    )
+    store = JSONLStore(tmp_path)
+    ev = store.append_event("nonobj_tail", ts="t3", typ="state_entered", payload={})
+    assert ev["seq"] == 3
+
+
 def test_jsonl_append_event_tail_seq_on_long_log(tmp_path: Path) -> None:
     store = JSONLStore(tmp_path)
     rid = "longrun"

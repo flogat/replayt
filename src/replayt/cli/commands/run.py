@@ -58,6 +58,8 @@ from replayt.cli.run_support import (
     run_started_envelope_ts_from_jsonl_path,
     run_started_hook_json_blobs_from_events,
     run_started_inputs_json_from_events,
+    run_started_runtime_json_from_events,
+    run_started_runtime_json_from_jsonl_path,
     subprocess_env_child,
     workflow_meta_json_for_run_hook,
 )
@@ -663,10 +665,11 @@ def cmd_run(
     workflow_contract = wf.contract()
     wf_meta_json = workflow_meta_json_for_run_hook(wf)
     run_started_ts_for_hook: str | None = None
+    runtime_json_for_hook: str | None = None
     if resume:
-        run_started_ts_for_hook = run_started_envelope_ts_from_jsonl_path(
-            log_dir.resolve() / f"{run_id}.jsonl"
-        )
+        jsonl_for_hook = log_dir.resolve() / f"{run_id}.jsonl"
+        run_started_ts_for_hook = run_started_envelope_ts_from_jsonl_path(jsonl_for_hook)
+        runtime_json_for_hook = run_started_runtime_json_from_jsonl_path(jsonl_for_hook)
     hook = run_hook_argv(cfg)
     if hook:
         hook_timeout = run_hook_timeout_seconds(cfg)
@@ -690,6 +693,7 @@ def cmd_run(
                 workflow_meta_json=wf_meta_json,
                 policy_hook_context_json=policy_hook_canonical,
                 run_started_ts=run_started_ts_for_hook,
+                runtime_json=runtime_json_for_hook,
                 timeout_seconds=hook_timeout,
             )
         except subprocess.TimeoutExpired as exc:
@@ -1269,6 +1273,7 @@ def cmd_resume(
             pre_events
         )
         inputs_json = run_started_inputs_json_from_events(pre_events)
+        runtime_json = run_started_runtime_json_from_events(pre_events)
         started_ts = run_started_envelope_ts_from_events(pre_events)
         hook_timeout = resume_hook_timeout_seconds(cfg)
         try:
@@ -1291,6 +1296,7 @@ def cmd_resume(
                 inputs_json=inputs_json,
                 policy_hook_context_json=policy_hook_canonical,
                 run_started_ts=started_ts,
+                runtime_json=runtime_json,
             )
         except subprocess.TimeoutExpired as exc:
             lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"

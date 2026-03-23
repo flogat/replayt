@@ -12,10 +12,12 @@ from replayt.cli.config import inputs_file_trust_audit_paths
 from replayt.cli.run_support import policy_hook_trust_audit_paths_for_cfg
 from replayt.cli.targets import workflow_trust_audit_paths
 from replayt.security import (
+    EGRESS_TRUST_ENV_VARS,
     LLM_CREDENTIAL_ENV_VARS,
     approval_reason_missing,
     dotenv_permission_trust_checks,
     dotenv_trust_candidate_paths,
+    egress_trust_env_presence,
     extraneous_llm_credential_env_names,
     inputs_file_permission_trust_checks,
     llm_credential_env_presence,
@@ -330,6 +332,34 @@ def test_llm_credential_env_vars_sorted_and_covers_common_gateways() -> None:
         "XAI_API_KEY",
     ):
         assert name in LLM_CREDENTIAL_ENV_VARS
+
+
+def test_egress_trust_env_vars_sorted() -> None:
+    assert EGRESS_TRUST_ENV_VARS == tuple(sorted(EGRESS_TRUST_ENV_VARS))
+
+
+def test_egress_trust_env_presence_never_includes_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("HTTP_PROXY", "http://user:secret@proxy.invalid:8080")
+    monkeypatch.setenv("SSL_CERT_FILE", "/tmp/fake.pem")
+    rows = egress_trust_env_presence()
+    assert all(set(r.keys()) == {"name", "present"} for r in rows)
+    http = next(r for r in rows if r["name"] == "HTTP_PROXY")
+    assert http["present"] is True
+    blob = str(rows)
+    assert "secret" not in blob
+    assert "proxy.invalid" not in blob
+
+
+def test_egress_trust_env_presence_detects_lowercase_proxy_on_posix(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    if os.name == "nt":
+        pytest.skip("POSIX lowercase proxy alias check")
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:9")
+    rows = egress_trust_env_presence()
+    https = next(r for r in rows if r["name"] == "HTTPS_PROXY")
+    assert https["present"] is True
 
 
 def test_workflow_entrypoint_permission_trust_checks_empty_on_windows(

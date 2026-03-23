@@ -27,6 +27,15 @@ _UNSUPPORTED_PARAM_KINDS = frozenset(
 )
 
 
+def _optional_tool_call_id(value: Any) -> str | None:
+    """Return a non-empty stripped string, or None if missing or not a string."""
+
+    if not isinstance(value, str):
+        return None
+    s = value.strip()
+    return s or None
+
+
 def _first_paragraph_doc(fn: Callable[..., Any]) -> str | None:
     raw = inspect.getdoc(fn)
     if not raw:
@@ -187,7 +196,9 @@ class ToolRegistry:
 
         Each element should be a mapping with ``type == "tool_use"``, a non-empty ``name``, and an
         ``input`` object (dict). Other block types (for example ``text``) are skipped; results are
-        returned **only** for ``tool_use`` blocks, in the order they appear.
+        returned **only** for ``tool_use`` blocks, in the order they appear. When a block carries a
+        non-empty string ``id``, it is copied to optional ``tool_call_id`` on emitted
+        ``tool_call`` / ``tool_result`` lines.
 
         This is a thin composition helper for ``anthropic`` SDK steps: pass
         ``message.content`` (or a filtered list of blocks) after ``messages.create``, then feed
@@ -229,7 +240,8 @@ class ToolRegistry:
             if not isinstance(args, dict):
                 msg = f"content[{i}]: decoded tool_use.input must be a JSON object"
                 raise TypeError(msg)
-            results.append(self.call(name, args))
+            bid = _optional_tool_call_id(block.get("id"))
+            results.append(self.call(name, args, tool_call_id=bid))
         return results
 
     def apply_bedrock_converse_tool_use_blocks(
@@ -243,8 +255,9 @@ class ToolRegistry:
         object string). Other blocks (``text``, ``image``, and similar) are skipped;
         results are returned **only** for ``toolUse`` blocks, in the order they appear.
 
-        ``toolUseId`` is ignored for replayt logging; it is only for pairing results when
-        you send ``toolResult`` blocks back to Bedrock.
+        When ``toolUse`` includes a non-empty string ``toolUseId``, it is copied to optional
+        ``tool_call_id`` on emitted ``tool_call`` / ``tool_result`` lines so you can pair results
+        when sending ``toolResult`` blocks back to Bedrock.
         """
 
         if not content:
@@ -286,7 +299,8 @@ class ToolRegistry:
             if not isinstance(args, dict):
                 msg = f"content[{i}]: decoded toolUse.input must be a JSON object"
                 raise TypeError(msg)
-            results.append(self.call(name, args))
+            uid = _optional_tool_call_id(tu.get("toolUseId"))
+            results.append(self.call(name, args, tool_call_id=uid))
         return results
 
     def apply_openai_chat_tool_calls(
@@ -303,6 +317,8 @@ class ToolRegistry:
         :meth:`openai_chat_tools` when building ``tools=``, then pass
         ``message.tool_calls`` converted with ``model_dump()`` (or equivalent) so each
         model-chosen invocation still emits replayt ``tool_call`` / ``tool_result`` lines.
+        When an entry includes a non-empty string ``id`` (OpenAI tool call id), it is copied to
+        optional ``tool_call_id`` on those JSONL payloads.
 
         Returns one result per tool call (same order as ``tool_calls``).
         """
@@ -347,15 +363,38 @@ class ToolRegistry:
             if not isinstance(args, dict):
                 msg = f"tool_calls[{i}]: decoded arguments must be a JSON object"
                 raise TypeError(msg)
-            results.append(self.call(name, args))
+            oid = _optional_tool_call_id(tc.get("id"))
+            results.append(self.call(name, args, tool_call_id=oid))
         return results
 
-    def call(self, name: str, arguments: dict[str, Any]) -> Any:
+    def call(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        tool_call_id: str | None = None,
+    ) -> Any:
+        """Invoke a registered tool, emitting ``tool_call`` / ``tool_result`` events.
+
+        Optional ``tool_call_id`` (non-empty after strip) is copied onto both payloads so vendor
+        multi-turn tool protocols (OpenAI, Anthropic, Bedrock, or custom gateways) can be replayed
+        from JSONL without losing per-invocation ids.
+        """
+
+        if not isinstance(arguments, dict):
+            raise TypeError("arguments must be a dict")
         if name not in self._tools:
             raise KeyError(f"Unknown tool: {name}")
         fn = self._tools[name]
         state = self._state_getter()
-        self._emit("tool_call", {"state": state, "name": name, "arguments": arguments})
+        if tool_call_id is not None and not isinstance(tool_call_id, str):
+            msg = "tool_call_id must be str or None"
+            raise TypeError(msg)
+        tcid = _optional_tool_call_id(tool_call_id)
+        call_payload: dict[str, Any] = {"state": state, "name": name, "arguments": arguments}
+        if tcid:
+            call_payload["tool_call_id"] = tcid
+        self._emit("tool_call", call_payload)
         try:
             sig = inspect.signature(fn)
             mod = inspect.getmodule(fn)
@@ -398,17 +437,26 @@ class ToolRegistry:
             out: Any = result
             if isinstance(result, BaseModel):
                 out = result.model_dump()
-            self._emit("tool_result", {"state": state, "name": name, "ok": True, "result": out, "error": None})
+            ok_payload: dict[str, Any] = {
+                "state": state,
+                "name": name,
+                "ok": True,
+                "result": out,
+                "error": None,
+            }
+            if tcid:
+                ok_payload["tool_call_id"] = tcid
+            self._emit("tool_result", ok_payload)
             return result
         except Exception as e:  # noqa: BLE001
-            self._emit(
-                "tool_result",
-                {
-                    "state": state,
-                    "name": name,
-                    "ok": False,
-                    "result": None,
-                    "error": {"type": e.__class__.__name__, "message": str(e)},
-                },
-            )
+            err_payload: dict[str, Any] = {
+                "state": state,
+                "name": name,
+                "ok": False,
+                "result": None,
+                "error": {"type": e.__class__.__name__, "message": str(e)},
+            }
+            if tcid:
+                err_payload["tool_call_id"] = tcid
+            self._emit("tool_result", err_payload)
             raise

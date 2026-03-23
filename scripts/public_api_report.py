@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import importlib
 import inspect
 import json
@@ -15,6 +16,11 @@ from typing import Any
 
 SCHEMA = "replayt.public_api_report.v1"
 CHECK_SCHEMA = "replayt.public_api_report_check.v1"
+
+
+def _export_row_sha256(row: dict[str, Any]) -> str:
+    payload = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _ensure_repo_src_on_path(repo_root: Path | None = None) -> None:
@@ -74,6 +80,7 @@ def _snapshot_payload(report: dict[str, Any]) -> dict[str, Any]:
         "export_count": report["export_count"],
         "missing_exports": report["missing_exports"],
         "exports": report["exports"],
+        "export_sha256s": report["export_sha256s"],
     }
 
 
@@ -86,6 +93,7 @@ def public_api_report(
     exports = [export_record(module, name) for name in export_names(module)]
     missing = [item["name"] for item in exports if item["status"] == "missing"]
     version = getattr(module, "__version__", None)
+    export_sha256s = [_export_row_sha256(item) for item in exports]
     return {
         "schema": SCHEMA,
         "module": module.__name__,
@@ -93,6 +101,7 @@ def public_api_report(
         "export_count": len(exports),
         "missing_exports": missing,
         "exports": exports,
+        "export_sha256s": export_sha256s,
     }
 
 

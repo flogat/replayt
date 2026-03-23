@@ -5,6 +5,7 @@ from __future__ import annotations
 import difflib
 import importlib.resources
 import json
+import shlex
 from collections import Counter
 from datetime import datetime, timezone
 from itertools import zip_longest
@@ -49,7 +50,7 @@ from replayt.cli.display import (
     stakeholder_report_diff_handoff_markdown,
     tags_match,
 )
-from replayt.cli.run_id_hints import echo_missing_run_hints
+from replayt.cli.run_id_hints import echo_missing_run_hints, exit_on_invalid_run_id
 from replayt.cli.stores import read_store
 from replayt.cli.targets import load_target
 from replayt.cli.validation import (
@@ -353,7 +354,15 @@ def cmd_inspect(
     output: Literal["text", "json", "markdown"] = typer.Option(
         "text",
         "--output",
-        help="text (default), json (machine-readable), or markdown (paste-friendly stakeholder summary).",
+        help="text (default), json (machine-readable), or markdown (paste-friendly stakeholder/support summary).",
+    ),
+    style: Literal["stakeholder", "support"] = typer.Option(
+        "stakeholder",
+        "--style",
+        help=(
+            "With --output markdown only: stakeholder (default) or support copy-paste lines "
+            "matching replayt report / replay / bundle-export --style / --report-style."
+        ),
     ),
     print_inputs: bool = typer.Option(
         False,
@@ -367,6 +376,7 @@ def cmd_inspect(
 ) -> None:
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    run_id = exit_on_invalid_run_id(run_id)
     type_filters = _event_type_filters(event_type)
     note_kind_filters = parse_note_kind_filters(note_kind)
     finish_reason_filters = parse_finish_reason_filters(finish_reason)
@@ -380,6 +390,8 @@ def cmd_inspect(
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
     if print_inputs:
+        if style != "stakeholder":
+            raise typer.BadParameter("--style only applies with --output markdown; omit --style with --print-inputs.")
         if as_json or output != "text":
             raise typer.BadParameter(
                 "--print-inputs only supports default text mode; omit --output and --json."
@@ -407,6 +419,8 @@ def cmd_inspect(
         typer.echo(json.dumps(inputs_obj, ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         return
     use_json = as_json or output == "json"
+    if output != "markdown" and style == "support":
+        raise typer.BadParameter("--style support only applies with --output markdown.")
     if output == "markdown":
         if (
             type_filters is not None
@@ -420,7 +434,7 @@ def cmd_inspect(
                 "--output markdown summarizes the full run; omit --event-type, --note-kind, "
                 "--finish-reason, --tool, --structured-schema, and --llm-model."
             )
-        typer.echo(inspect_stakeholder_markdown(run_id, events))
+        typer.echo(inspect_stakeholder_markdown(run_id, events, style=style))
         return
     filtered = _filter_events_by_type(events, type_filters)
     filtered = _filter_events_by_note_kind(filtered, note_kind_filters, event_type_filters=type_filters)
@@ -518,6 +532,7 @@ def cmd_replay(
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    run_id = exit_on_invalid_run_id(run_id)
     with read_store(log_dir, sqlite) as store:
         events = store.load_events(run_id)
     if not events:
@@ -688,6 +703,15 @@ def cmd_validate(
             "Mutually exclusive with --format json."
         ),
     ),
+    print_run_one_liner: bool = typer.Option(
+        False,
+        "--print-run-one-liner",
+        help=(
+            "After a successful graph check, print one POSIX-shell line: replayt run TARGET --inputs-json … "
+            "using the same placeholder union as --print-inputs-template; includes --strict-graph when you "
+            "passed --strict-graph. Mutually exclusive with --format json and --print-inputs-template."
+        ),
+    ),
     output: Literal["text", "json"] = typer.Option(
         "text",
         "--format",
@@ -699,6 +723,12 @@ def cmd_validate(
 
     if print_inputs_template and output == "json":
         raise typer.BadParameter("Cannot combine --print-inputs-template with --format json (stdout conflict).")
+    if print_run_one_liner and output == "json":
+        raise typer.BadParameter("Cannot combine --print-run-one-liner with --format json (stdout conflict).")
+    if print_inputs_template and print_run_one_liner:
+        raise typer.BadParameter(
+            "Cannot combine --print-inputs-template with --print-run-one-liner (stdout conflict)."
+        )
 
     cfg, cfg_path, _unknown, _shadowed = get_project_config()
     target = resolve_cli_target(target, cfg=cfg)
@@ -732,6 +762,18 @@ def cmd_validate(
         typer.echo(json.dumps(tpl, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
         typer.echo(
             "Tip: stdout is the template only; redirect to a file or pass via --inputs-json @path.",
+            err=True,
+        )
+        raise typer.Exit(code=0)
+    if print_run_one_liner:
+        tpl = workflow_inputs_template(wf)
+        compact = json.dumps(tpl, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        argv: list[str] = ["replayt", "run", target, "--inputs-json", compact]
+        if strict_graph:
+            argv.append("--strict-graph")
+        typer.echo(shlex.join(argv))
+        typer.echo(
+            "Tip: stdout is the command only; paste into a POSIX shell or adapt quoting for PowerShell.",
             err=True,
         )
         raise typer.Exit(code=0)
@@ -1150,6 +1192,8 @@ def cmd_diff(
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    run_a = exit_on_invalid_run_id(run_a)
+    run_b = exit_on_invalid_run_id(run_b)
     with read_store(log_dir, sqlite) as store:
         events_a = store.load_events(run_a)
         events_b = store.load_events(run_b)

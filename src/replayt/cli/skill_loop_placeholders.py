@@ -27,6 +27,13 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
             ),
         ),
         _row(
+            name="invocation_rel",
+            description=(
+                "Sidecar path relative to REPO_ROOT when under the repo, else absolute. "
+                "Same as env SKILL_INVOCATION_REL."
+            ),
+        ),
+        _row(
             name="iteration",
             description=(
                 "1-based outer loop iteration index (string). Same as env SKILL_ITERATION."
@@ -35,6 +42,12 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
         _row(
             name="log_file",
             description="Absolute path to this invocation's log file.",
+        ),
+        _row(
+            name="log_rel",
+            description=(
+                "Log path relative to REPO_ROOT when under the repo, else absolute. Same as env SKILL_LOG_REL."
+            ),
         ),
         _row(
             name="max_iterations",
@@ -52,6 +65,12 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
             description="Absolute path to the generated *.prompt.md file.",
         ),
         _row(
+            name="prompt_rel",
+            description=(
+                "Prompt path relative to REPO_ROOT when under the repo, else absolute. Same as env SKILL_PROMPT_REL."
+            ),
+        ),
+        _row(
             name="repo",
             description=(
                 "Repository root path string for template expansion. "
@@ -62,6 +81,12 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
         _row(
             name="run_dir",
             description="Absolute path to the skill-release run directory. Same as env SKILL_RUN_DIR.",
+        ),
+        _row(
+            name="run_dir_rel",
+            description=(
+                "Run directory relative to REPO_ROOT when under the repo, else absolute. Same as env SKILL_RUN_DIR_REL."
+            ),
         ),
         _row(
             name="run_stamp",

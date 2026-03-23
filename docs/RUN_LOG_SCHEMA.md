@@ -39,6 +39,8 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `trust_boundary.warnings`: soft local-policy findings such as `log_mode=full` or a risky `OPENAI_BASE_URL`
 - `policy_hooks.run` / `policy_hooks.resume` (object, optional): compact CLI policy-hook breadcrumbs with `source`, `argv0`, and `arg_count` when trusted external gate subprocesses were configured for the run lifecycle
 
+Trusted policy hooks (**`run_hook`** on **`--resume`**, **`resume_hook`**, **`export_hook`**, **`seal_hook`**, **`verify_seal_hook`**) may receive this snapshot again as env **`REPLAYT_RUN_STARTED_RUNTIME_JSON`**: canonical sorted JSON of the **`runtime`** object, or **`{}`** when **`runtime`** was omitted or null (see [`CLI.md`](CLI.md) / **`policy_hook_env_catalog`**).
+
 ## State flow
 
 ### `state_entered`
@@ -75,6 +77,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 
 - `state` (string)
 - `model` (string)
+- `latency_ms` (integer): wall time for the OpenAI-compat POST round trip (including sleeps between retryable responses)
 - `usage` (object, optional)
 - `effective` (object): same shape as on `llm_request`
 - `call_label` (string, optional): same as on `llm_request` when present
@@ -86,6 +89,8 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `finish_reason` (string or null): first choice `finish_reason` from the provider when present (for example `stop`, `length`, `content_filter`); null when the gateway omits it
 - `chat_completion_id` (string, optional): provider response `id` when the gateway returns one (useful to correlate with vendor dashboards)
 - `system_fingerprint` (string, optional): provider fingerprint when returned (OpenAI-style reproducibility hint)
+- `http_attempts` (integer, optional): how many HTTP POST attempts the OpenAI-compat client made for this completion (1 on the first success; greater than 1 when earlier responses were retryable 429 / 5xx and the client backed off)
+- `http_status` (integer, optional): HTTP status code of the successful chat-completions response (typically `200`)
 - `content_preview` (string, optional): truncated in `redacted` mode only
 - `content` (string): only when logging mode is `full`
 
@@ -105,6 +110,8 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `finish_reason` (string or null): first choice `finish_reason` when the gateway returned one
 - `chat_completion_id` (string, optional): provider response `id` when returned (correlate with vendor dashboards without joining `llm_response`)
 - `system_fingerprint` (string, optional): provider fingerprint when returned
+- `http_attempts` (integer, optional): same as on the preceding `llm_response` when the OpenAI-compat client recorded transport metadata
+- `http_status` (integer, optional): same as on the preceding `llm_response` when present
 
 ### `structured_output_failed`
 
@@ -131,6 +138,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `state` (string)
 - `name` (string)
 - `arguments` (object)
+- `tool_call_id` (string, optional): vendor per-invocation id when supplied (for example OpenAI `tool_calls[].id`, Anthropic `tool_use.id`, or Bedrock `toolUse.toolUseId` via `ToolRegistry.apply_*` helpers, or an explicit `ctx.tools.call(..., tool_call_id=...)`)
 
 ### `tool_result`
 
@@ -139,6 +147,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `ok` (bool)
 - `result` (object, string, or null)
 - `error` (string or null)
+- `tool_call_id` (string, optional): same id as the matching `tool_call` when one was recorded
 
 ## Application notes
 

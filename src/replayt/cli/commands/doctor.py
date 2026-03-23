@@ -39,6 +39,7 @@ from replayt.cli.validation import validate_workflow_graph, validation_report
 from replayt.security import (
     dotenv_permission_trust_checks,
     dotenv_trust_candidate_paths,
+    egress_trust_env_presence,
     extraneous_llm_credential_env_names,
     inputs_file_permission_trust_checks,
     llm_credential_env_presence,
@@ -535,6 +536,7 @@ def cmd_doctor(
             "healthy": healthy,
             "checks": [{"name": n, "ok": o, "detail": d, "hint": hints.get(n)} for n, o, d in checks],
             "credential_env": llm_credential_env_presence(),
+            "egress_trust_env": egress_trust_env_presence(),
             "ci_artifacts": ci_artifacts_payload(ci_artifacts),
             "resolved_paths": {
                 "log_dir": str(resolved_log_dir),

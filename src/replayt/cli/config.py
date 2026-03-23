@@ -11,7 +11,12 @@ import typer
 
 from replayt.cli.validation import parse_json_object_cli_ref, parse_json_object_option
 from replayt.llm import LLMSettings
-from replayt.security import llm_credential_env_presence, normalize_name_list, sanitize_base_url_for_output
+from replayt.security import (
+    egress_trust_env_presence,
+    llm_credential_env_presence,
+    normalize_name_list,
+    sanitize_base_url_for_output,
+)
 from replayt.types import LogMode
 
 SUPPORTED_CONFIG_KEYS = frozenset(
@@ -1088,6 +1093,7 @@ def resolve_llm_settings(cfg: dict[str, Any]) -> tuple[LLMSettings | None, dict[
         "api_key_present": bool(api_key),
         "api_key_source": api_key_source,
         "credential_env": llm_credential_env_presence(),
+        "egress_trust_env": egress_trust_env_presence(),
     }
     try:
         settings = LLMSettings.from_sources(

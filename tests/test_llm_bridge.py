@@ -274,6 +274,33 @@ def test_llm_bridge_float_max_tokens_from_defaults_passed_to_client() -> None:
     assert req["effective"]["max_tokens"] == 4096
 
 
+def test_llm_bridge_llm_response_logs_http_transport_metadata() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    body_ok = b'{"choices":[{"message":{"content":"hi"}}],"usage":{}}'
+    statuses = iter([503, 200])
+
+    def responder(*_a, **_k):
+        st = next(statuses)
+        body = body_ok if st == 200 else b"{}"
+        return _stream_cm(_FakeStreamResp(body, status=st))
+
+    fake_http = _FakeHTTPClient(responder)
+    settings = LLMSettings(api_key="k", model="m", base_url="http://127.0.0.1:9999/v1", http_retries=1)
+    client = OpenAICompatClient(settings, http_client=fake_http)
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+
+    with patch("replayt.llm.time.sleep", return_value=None):
+        bridge.complete_text(messages=[{"role": "user", "content": "x"}], temperature=0.0)
+
+    resp = next(p for t, p in events if t == "llm_response")
+    assert resp["http_attempts"] == 2
+    assert resp["http_status"] == 200
+
+
 def test_llm_bridge_llm_response_logs_finish_reason_and_provider_ids() -> None:
     events: list[tuple[str, dict]] = []
 
@@ -1128,10 +1155,15 @@ def test_openai_compat_retries_503_then_succeeds() -> None:
         LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", http_retries=1),
         http_client=fake_http,
     )
+    transport: dict[str, object] = {}
     with patch("replayt.llm.time.sleep", return_value=None):
-        data = client.chat_completions(messages=[{"role": "user", "content": "x"}])
+        data = client.chat_completions(
+            messages=[{"role": "user", "content": "x"}],
+            transport_meta=transport,
+        )
     assert data["choices"][0]["message"]["content"] == "{}"
     assert len(fake_http.calls) == 2
+    assert transport == {"http_attempts": 2, "http_status": 200}
 
 
 def test_openai_compat_http_retries_kw_overrides_settings() -> None:

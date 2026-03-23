@@ -16,10 +16,12 @@ import replayt
 from replayt.cli.targets import workflow_trust_audit_paths
 from replayt.persistence.jsonl import validate_run_id
 from replayt.runner import RunResult
+from replayt.types import LogMode
 from replayt.workflow import Workflow
 
 RUN_RESULT_SCHEMA = "replayt.run_result.v1"
 RUN_RESULT_STATUS_CONTRACT_SCHEMA = "replayt.run_result_status_contract.v1"
+LOG_MODE_CONTRACT_SCHEMA = "replayt.log_mode_contract.v1"
 
 # Injected into every trusted policy-hook subprocess; values match ``policy_hook_env_catalog`` hook keys.
 POLICY_HOOK_NAME_ENV_VAR = "REPLAYT_POLICY_HOOK_NAME"
@@ -183,6 +185,42 @@ def run_started_inputs_json_from_jsonl_path(path: Path) -> str | None:
     if not isinstance(payload, dict):
         return None
     return run_started_inputs_json_from_payload(payload)
+
+
+def run_started_runtime_json_from_payload(payload: dict[str, Any]) -> str | None:
+    """Canonical sorted JSON for ``run_started.runtime`` (object only); ``None`` if unreadable."""
+
+    raw = payload.get("runtime")
+    if raw is None:
+        return json.dumps({}, sort_keys=True)
+    if isinstance(raw, dict):
+        return json.dumps(raw, sort_keys=True)
+    return None
+
+
+def run_started_runtime_json_from_events(events: list[dict[str, Any]]) -> str | None:
+    """Sorted JSON env string for ``run_started.runtime`` from an in-memory timeline."""
+
+    for event in events:
+        if event.get("type") != "run_started":
+            continue
+        payload = event.get("payload") or {}
+        if not isinstance(payload, dict):
+            return None
+        return run_started_runtime_json_from_payload(payload)
+    return None
+
+
+def run_started_runtime_json_from_jsonl_path(path: Path) -> str | None:
+    """Same as :func:`run_started_runtime_json_from_events` but scans the JSONL file on disk."""
+
+    event = first_jsonl_event_with_type(path, event_type="run_started")
+    if event is None:
+        return None
+    payload = event.get("payload") or {}
+    if not isinstance(payload, dict):
+        return None
+    return run_started_runtime_json_from_payload(payload)
 
 
 def run_started_envelope_ts_from_event(event: dict[str, Any]) -> str | None:
@@ -501,6 +539,7 @@ def invoke_run_hook(
     workflow_meta_json: str | None = None,
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
+    runtime_json: str | None = None,
     timeout_seconds: float | None,
 ) -> None:
     """Run a pre-run policy hook before the workflow starts writing events."""
@@ -526,6 +565,8 @@ def invoke_run_hook(
         extra_env["REPLAYT_SQLITE"] = str(sqlite.resolve())
     if inputs_json is not None:
         extra_env["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
+    if runtime_json is not None:
+        extra_env["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
     if tags_json is not None:
         extra_env["REPLAYT_RUN_TAGS_JSON"] = tags_json
     if metadata_json is not None:
@@ -560,6 +601,7 @@ def invoke_resume_hook(
     inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
+    runtime_json: str | None = None,
 ) -> None:
     """Run *argv* with extra ``REPLAYT_*`` env vars; *argv* must come from trusted config."""
 
@@ -589,6 +631,8 @@ def invoke_resume_hook(
     )
     if inputs_json is not None:
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
+    if runtime_json is not None:
+        extra["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
     extra.update(_workflow_entry_path_hook_env(target))
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     _merge_run_started_ts_env(extra, run_started_ts)
@@ -620,6 +664,7 @@ def invoke_export_hook(
     inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
+    runtime_json: str | None = None,
 ) -> None:
     """Run *argv* before ``export-run`` / ``bundle-export`` writes the archive; *argv* is trusted config only."""
 
@@ -655,6 +700,8 @@ def invoke_export_hook(
     )
     if inputs_json is not None:
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
+    if runtime_json is not None:
+        extra["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
@@ -680,6 +727,7 @@ def invoke_seal_hook(
     inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
+    runtime_json: str | None = None,
 ) -> None:
     """Run *argv* before ``replayt seal`` writes the manifest; *argv* is trusted config only."""
 
@@ -706,6 +754,8 @@ def invoke_seal_hook(
     )
     if inputs_json is not None:
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
+    if runtime_json is not None:
+        extra["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
@@ -733,6 +783,7 @@ def invoke_verify_seal_hook(
     inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
+    runtime_json: str | None = None,
 ) -> None:
     """Run *argv* after ``replayt verify-seal`` digests match; *argv* is trusted config only."""
 
@@ -761,6 +812,8 @@ def invoke_verify_seal_hook(
     )
     if inputs_json is not None:
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
+    if runtime_json is not None:
+        extra["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
@@ -789,6 +842,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_JSONL",
                     "REPLAYT_RUN_METADATA_JSON",
                     "REPLAYT_RUN_MODE",
+                    "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_SQLITE",
@@ -820,6 +874,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_JSONL",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_TARGET",
@@ -853,6 +908,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_SQLITE",
@@ -881,6 +937,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_SEAL_JSONL",
@@ -909,6 +966,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_VERIFY_SEAL_FILE_SHA256",
@@ -1141,6 +1199,7 @@ CLI_JSON_STDOUT_TRUST_PROFILES: dict[str, str] = {
 def _stdout_json_route(
     trust_profile: str,
     *,
+    route_id: str,
     schema_key: str,
     option: str,
     short: str | None = None,
@@ -1149,7 +1208,12 @@ def _stdout_json_route(
     boolean_flag: bool | None = None,
     exit_codes_with_json_on_stdout: tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
-    row: dict[str, Any] = {"option": option, "schema_key": schema_key, "trust_profile": trust_profile}
+    row: dict[str, Any] = {
+        "route_id": route_id,
+        "option": option,
+        "schema_key": schema_key,
+        "trust_profile": trust_profile,
+    }
     if short is not None:
         row["short"] = short
     if equals is not None:
@@ -1203,7 +1267,10 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "Maps subcommands to flags that select JSON on stdout. Each schema_key matches a key under "
             "cli_machine_readable_schemas on this report; each route row also duplicates the resolved "
             "replayt.*.v1 id as schema so subprocess and MCP wrappers can map argv to the expected stdout "
-            "payload type without a second lookup. Each route lists exit_codes_with_json_on_stdout: sorted "
+            "payload type without a second lookup. Each route includes route_id: a stable globally unique "
+            "string (dot-separated; Typer subcommand names use underscores instead of hyphens in the first "
+            "segment) for MCP tool registration, allowlist diffs, and upgrade guards without relying on "
+            "array order under subcommands. Each route lists exit_codes_with_json_on_stdout: sorted "
             "exit codes that can occur after replayt wrote that schema's JSON object to stdout (Typer "
             "pre-dispatch failures and many pre-callback validation errors typically exit without JSON on "
             "stdout; see typer_pre_dispatch_phase). Each route includes trust_profile, an index into "
@@ -1277,6 +1344,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "ci": [
                 _stdout_json_route(
                     dry,
+                    route_id="ci.output_json.validate_report_with_dry_check",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1286,6 +1354,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
                 _stdout_json_route(
                     runx,
+                    route_id="ci.output_json.run_result",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1295,11 +1364,19 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
             ],
             "config": [
-                _stdout_json_route(inv, option="--format", short="-f", equals="json", schema_key="config_report")
+                _stdout_json_route(
+                    inv,
+                    route_id="config.format_json.config_report",
+                    option="--format",
+                    short="-f",
+                    equals="json",
+                    schema_key="config_report",
+                )
             ],
             "contract": [
                 _stdout_json_route(
                     inv,
+                    route_id="contract.format_json.workflow_contract_with_check",
                     option="--format",
                     short="-f",
                     equals="json",
@@ -1309,6 +1386,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
                 _stdout_json_route(
                     inv,
+                    route_id="contract.format_json.workflow_contract_snapshot",
                     option="--format",
                     short="-f",
                     equals="json",
@@ -1317,11 +1395,19 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
             ],
             "diff": [
-                _stdout_json_route(inv, option="--output", short="-o", equals="json", schema_key="diff_report")
+                _stdout_json_route(
+                    inv,
+                    route_id="diff.output_json.diff_report",
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="diff_report",
+                )
             ],
             "doctor": [
                 _stdout_json_route(
                     "doctor_preflight",
+                    route_id="doctor.format_json.doctor_report",
                     option="--format",
                     short="-f",
                     equals="json",
@@ -1332,6 +1418,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "init": [
                 _stdout_json_route(
                     inv,
+                    route_id="init.list_output_json.init_templates",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1341,10 +1428,16 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             ],
             "inspect": [
                 _stdout_json_route(
-                    inv, option="--output", short="-o", equals="json", schema_key="inspect_report"
+                    inv,
+                    route_id="inspect.output_json.inspect_report",
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="inspect_report",
                 ),
                 _stdout_json_route(
                     inv,
+                    route_id="inspect.legacy_json_flag.inspect_report",
                     option="--json",
                     schema_key="inspect_report",
                     when="same payload as --output json",
@@ -1352,11 +1445,19 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
             ],
             "runs": [
-                _stdout_json_route(inv, option="--output", short="-o", equals="json", schema_key="runs_report")
+                _stdout_json_route(
+                    inv,
+                    route_id="runs.output_json.runs_report",
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="runs_report",
+                )
             ],
             "run": [
                 _stdout_json_route(
                     dry,
+                    route_id="run.output_json.validate_report_with_dry_check",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1366,6 +1467,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
                 _stdout_json_route(
                     runx,
+                    route_id="run.output_json.run_result",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1376,15 +1478,28 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             ],
             "seal": [
                 _stdout_json_route(
-                    "seal_manifest_write", option="--output", short="-o", equals="json", schema_key="seal"
+                    "seal_manifest_write",
+                    route_id="seal.output_json.seal",
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="seal",
                 )
             ],
             "stats": [
-                _stdout_json_route(inv, option="--output", short="-o", equals="json", schema_key="stats_report")
+                _stdout_json_route(
+                    inv,
+                    route_id="stats.output_json.stats_report",
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="stats_report",
+                )
             ],
             "try": [
                 _stdout_json_route(
                     inv,
+                    route_id="try.list_output_json.try_examples",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1393,6 +1508,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
                 _stdout_json_route(
                     inv,
+                    route_id="try.print_snippet_output_json.try_print_snippet",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1401,6 +1517,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
                 _stdout_json_route(
                     "try_copy_scaffold",
+                    route_id="try.copy_to_output_json.try_copy",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1409,6 +1526,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
                 _stdout_json_route(
                     dry,
+                    route_id="try.output_json.validate_report_with_dry_check",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1418,6 +1536,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                 ),
                 _stdout_json_route(
                     runx,
+                    route_id="try.output_json.run_result",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1429,6 +1548,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "validate": [
                 _stdout_json_route(
                     inv,
+                    route_id="validate.format_json.validate_report",
                     option="--format",
                     short="-f",
                     equals="json",
@@ -1439,6 +1559,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "verify-seal": [
                 _stdout_json_route(
                     "verify_seal_compare",
+                    route_id="verify_seal.output_json.verify_seal_report",
                     option="--output",
                     short="-o",
                     equals="json",
@@ -1448,7 +1569,12 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             ],
             "version": [
                 _stdout_json_route(
-                    inv, option="--format", short="-f", equals="json", schema_key="version_report"
+                    inv,
+                    route_id="version.format_json.version_report",
+                    option="--format",
+                    short="-f",
+                    equals="json",
+                    schema_key="version_report",
                 )
             ],
         },
@@ -1460,6 +1586,54 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             sk = row["schema_key"]
             row["schema"] = sm[str(sk)]
     return contract
+
+
+def build_log_mode_contract() -> dict[str, Any]:
+    """Canonical ``LogMode`` string values for CLI, project config, and policy-hook env (version JSON)."""
+
+    summaries: dict[str, str] = {
+        "full": (
+            "Persist full LLM request/response bodies in JSONL (subject to redact_keys); "
+            "highest fidelity, largest logs."
+        ),
+        "redacted": (
+            "Default-friendly mode: message bodies and previews are omitted or shortened while keeping structured "
+            "outputs and metadata."
+        ),
+        "structured_only": (
+            "Log llm_request / llm_response with timing, usage, and effective settings only (no message bodies); "
+            "pair with ctx.llm.parse for structured_output without raw model text in the log."
+        ),
+    }
+    modes = sorted(LogMode, key=lambda m: m.value)
+    return {
+        "schema": LOG_MODE_CONTRACT_SCHEMA,
+        "payload": {
+            "python_enum": "replayt.types.LogMode",
+        },
+        "modes": [
+            {
+                "value": m.value,
+                "summary": summaries[m.value],
+            }
+            for m in modes
+        ],
+        "cli_flag": "--log-mode",
+        "project_config_key": "log_mode",
+        "policy_hook_env_var": "REPLAYT_LOG_MODE",
+        "notes": [
+            (
+                "Only these three strings are accepted after CLI and config resolution; "
+                "unknown values raise a clear error."
+            ),
+            (
+                "policy_hook_env_var carries the effective mode into trusted hook subprocesses alongside "
+                "REPLAYT_FORBID_LOG_MODE_FULL and REPLAYT_REDACT_KEYS_JSON (see policy_hook_env_catalog)."
+            ),
+            "Precedence for default redacted vs project log_mode is documented on project_setting_precedence_contract.",
+        ],
+        "project_setting_precedence_cross_reference": "log_mode",
+    }
 
 
 def build_run_result_status_contract() -> dict[str, Any]:
