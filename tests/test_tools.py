@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -156,3 +157,76 @@ def test_tool_registry_openai_chat_tools_rejects_var_positional() -> None:
     reg.register(bad)
     with pytest.raises(TypeError, match="not supported for"):
         reg.openai_chat_tools()
+
+
+def test_apply_openai_chat_tool_calls_empty() -> None:
+    def emit(_typ: str, _payload: dict[str, Any]) -> None:
+        return None
+
+    reg = ToolRegistry(emit=emit, state_getter=lambda: "main")
+    assert reg.apply_openai_chat_tool_calls(None) == []
+    assert reg.apply_openai_chat_tool_calls([]) == []
+
+
+def test_apply_openai_chat_tool_calls_order_and_json_args() -> None:
+    events: list[tuple[str, dict[str, Any]]] = []
+
+    def emit(typ: str, payload: dict[str, Any]) -> None:
+        events.append((typ, payload))
+
+    reg = ToolRegistry(emit=emit, state_getter=lambda: "s1")
+
+    @reg.register
+    def first(x: int) -> str:
+        return f"a{x}"
+
+    @reg.register
+    def second(y: str) -> str:
+        return y.upper()
+
+    tcs = [
+        {
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "first", "arguments": json.dumps({"x": 3})},
+        },
+        {
+            "id": "call_2",
+            "type": "function",
+            "function": {"name": "second", "arguments": {"y": "hi"}},
+        },
+    ]
+    out = reg.apply_openai_chat_tool_calls(tcs)
+    assert out == ["a3", "HI"]
+    assert [e[0] for e in events] == ["tool_call", "tool_result", "tool_call", "tool_result"]
+    assert events[0][1]["name"] == "first"
+    assert events[2][1]["name"] == "second"
+
+
+def test_apply_openai_chat_tool_calls_rejects_bad_shape() -> None:
+    def emit(_typ: str, _payload: dict[str, Any]) -> None:
+        return None
+
+    reg = ToolRegistry(emit=emit, state_getter=lambda: "main")
+
+    @reg.register
+    def ok() -> int:
+        return 1
+
+    with pytest.raises(TypeError, match="expected dict"):
+        reg.apply_openai_chat_tool_calls([object()])  # type: ignore[list-item]
+
+    with pytest.raises(ValueError, match="expected type 'function'"):
+        reg.apply_openai_chat_tool_calls(
+            [{"type": "other", "function": {"name": "ok", "arguments": "{}"}}]
+        )
+
+    with pytest.raises(ValueError, match="missing or invalid function.name"):
+        reg.apply_openai_chat_tool_calls(
+            [{"type": "function", "function": {"name": "", "arguments": "{}"}}]
+        )
+
+    with pytest.raises(ValueError, match=r"tool_calls\[0\].*invalid JSON"):
+        reg.apply_openai_chat_tool_calls(
+            [{"type": "function", "function": {"name": "ok", "arguments": "not-json"}}]
+        )

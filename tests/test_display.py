@@ -29,9 +29,12 @@ def test_stakeholder_report_handoff_includes_resume_with_approval_id() -> None:
     ]
     md = stakeholder_report_handoff_markdown(run_id, events)
     assert "## Stakeholder CLI handoff" in md
+    assert f"replayt bundle-export {run_id}" in md
+    assert f"{run_id}-stakeholder-bundle.tar.gz" in md
     assert f"replayt resume TARGET {run_id} --approval ship-it" in md
     html = stakeholder_report_handoff_html(run_id, events)
     assert "Stakeholder CLI handoff" in html
+    assert f"replayt bundle-export {run_id}" in html
     assert f"replayt resume TARGET {run_id} --approval ship-it" in html
 
 

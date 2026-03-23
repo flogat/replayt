@@ -111,6 +111,33 @@ def _coerce_call_label(raw: Any) -> str | None:
     return s[:_MAX_CALL_LABEL_CHARS]
 
 
+def _coerce_bridge_response_format(raw: Any) -> dict[str, Any]:
+    if not isinstance(raw, dict):
+        raise TypeError("response_format must be a dict")
+    try:
+        json.dumps(raw, sort_keys=True, default=str)
+    except TypeError as exc:
+        raise TypeError(f"response_format must be JSON-serializable: {exc}") from exc
+    return dict(raw)
+
+
+def _response_format_for_effective(rf: dict[str, Any]) -> dict[str, Any] | None:
+    """Compact OpenAI-style ``response_format`` for ``effective`` (no full ``json_schema.schema`` tree)."""
+
+    out: dict[str, Any] = {}
+    t = rf.get("type")
+    if isinstance(t, str) and t.strip():
+        out["type"] = t.strip()
+    js = rf.get("json_schema")
+    if isinstance(js, dict):
+        name = js.get("name")
+        if isinstance(name, str) and name.strip():
+            out["json_schema_name"] = name.strip()
+        if "strict" in js:
+            out["json_schema_strict"] = bool(js["strict"])
+    return out or None
+
+
 def _pydantic_validation_issues_for_log(exc: BaseException) -> tuple[list[dict[str, Any]], int] | None:
     """Return a bounded list of Pydantic v2 validation errors plus the full error count, or None."""
 
@@ -574,6 +601,11 @@ class LLMBridge:
                 merged["call_label"] = coerced_label
             else:
                 merged.pop("call_label", None)
+        if response_format is not None:
+            if response_format == {}:
+                merged.pop("response_format", None)
+            else:
+                merged["response_format"] = _coerce_bridge_response_format(response_format)
         return LLMBridge(
             emit=self._emit,
             client=self._client,
@@ -760,6 +792,10 @@ class LLMBridge:
         )
         if effective_extras:
             effective = {**effective, **effective_extras}
+        if response_format is not None:
+            rf_log = _response_format_for_effective(response_format)
+            if rf_log:
+                effective = {**effective, "response_format": rf_log}
         fingerprints = _request_fingerprints(messages=messages, effective=effective, schema_json=schema_json)
         eff_model = str(effective["model"])
         eff_temp = float(effective["temperature"])
@@ -916,8 +952,16 @@ class LLMBridge:
         extra_body: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
         schema_name: str | None = None,
+        response_format: Any = _RF_UNSET,
     ) -> str:
         sn = str(schema_name).strip() if schema_name is not None else None
+        if response_format is _RF_UNSET:
+            rf_resolved = self._defaults.get("response_format")
+            rf_call = rf_resolved if isinstance(rf_resolved, dict) else None
+        elif response_format is None:
+            rf_call = None
+        else:
+            rf_call = _coerce_bridge_response_format(response_format)
         text, _effective, _fingerprints, _meta = self._request_text(
             messages=messages,
             model=model,
@@ -932,6 +976,7 @@ class LLMBridge:
             base_url=base_url,
             extra_headers=extra_headers,
             extra_body=extra_body,
+            response_format=rf_call,
             stop=stop,
             schema_name=sn or None,
         )

@@ -159,6 +159,11 @@ def _merge_optional_hook_json_env(
         extra["REPLAYT_WORKFLOW_META_JSON"] = workflow_meta_json
 
 
+def _merge_policy_hook_context_env(dst: dict[str, str], policy_hook_context_json: str | None) -> None:
+    if policy_hook_context_json is not None:
+        dst["REPLAYT_POLICY_HOOK_CONTEXT_JSON"] = policy_hook_context_json
+
+
 def dry_check_suggested_command(
     *,
     target: str,
@@ -413,6 +418,7 @@ def invoke_run_hook(
     metadata_json: str | None,
     experiment_json: str | None,
     workflow_meta_json: str | None = None,
+    policy_hook_context_json: str | None = None,
     timeout_seconds: float | None,
 ) -> None:
     """Run a pre-run policy hook before the workflow starts writing events."""
@@ -446,6 +452,7 @@ def invoke_run_hook(
     if workflow_meta_json is not None:
         extra_env["REPLAYT_WORKFLOW_META_JSON"] = workflow_meta_json
     extra_env.update(_workflow_entry_path_hook_env(target))
+    _merge_policy_hook_context_env(extra_env, policy_hook_context_json)
     invoke_hook(argv, extra_env=extra_env, timeout_seconds=timeout_seconds)
 
 
@@ -466,6 +473,7 @@ def invoke_resume_hook(
     tags_json: str | None = None,
     experiment_json: str | None = None,
     workflow_meta_json: str | None = None,
+    policy_hook_context_json: str | None = None,
 ) -> None:
     """Run *argv* with extra ``REPLAYT_*`` env vars; *argv* must come from trusted config."""
 
@@ -493,6 +501,7 @@ def invoke_resume_hook(
         workflow_meta_json=workflow_meta_json,
     )
     extra.update(_workflow_entry_path_hook_env(target))
+    _merge_policy_hook_context_env(extra, policy_hook_context_json)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -518,6 +527,7 @@ def invoke_export_hook(
     tags_json: str | None = None,
     experiment_json: str | None = None,
     workflow_meta_json: str | None = None,
+    policy_hook_context_json: str | None = None,
 ) -> None:
     """Run *argv* before ``export-run`` / ``bundle-export`` writes the archive; *argv* is trusted config only."""
 
@@ -550,6 +560,7 @@ def invoke_export_hook(
         experiment_json=experiment_json,
         workflow_meta_json=workflow_meta_json,
     )
+    _merge_policy_hook_context_env(extra, policy_hook_context_json)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -570,6 +581,7 @@ def invoke_seal_hook(
     tags_json: str | None = None,
     experiment_json: str | None = None,
     workflow_meta_json: str | None = None,
+    policy_hook_context_json: str | None = None,
 ) -> None:
     """Run *argv* before ``replayt seal`` writes the manifest; *argv* is trusted config only."""
 
@@ -593,6 +605,7 @@ def invoke_seal_hook(
         experiment_json=experiment_json,
         workflow_meta_json=workflow_meta_json,
     )
+    _merge_policy_hook_context_env(extra, policy_hook_context_json)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -615,6 +628,7 @@ def invoke_verify_seal_hook(
     tags_json: str | None = None,
     experiment_json: str | None = None,
     workflow_meta_json: str | None = None,
+    policy_hook_context_json: str | None = None,
 ) -> None:
     """Run *argv* after ``replayt verify-seal`` digests match; *argv* is trusted config only."""
 
@@ -640,6 +654,7 @@ def invoke_verify_seal_hook(
         experiment_json=experiment_json,
         workflow_meta_json=workflow_meta_json,
     )
+    _merge_policy_hook_context_env(extra, policy_hook_context_json)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -656,6 +671,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_FORBID_LOG_MODE_FULL",
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
+                    "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
@@ -684,6 +700,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_FORBID_LOG_MODE_FULL",
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
+                    "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
                     "REPLAYT_REJECT",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
@@ -715,6 +732,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_FORBID_LOG_MODE_FULL",
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
+                    "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
@@ -739,6 +757,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_FORBID_LOG_MODE_FULL",
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
+                    "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
@@ -763,6 +782,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_FORBID_LOG_MODE_FULL",
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
+                    "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
@@ -803,6 +823,7 @@ def build_internal_run_argv(
     output: str,
     metadata_json: str | None = None,
     experiment_json: str | None = None,
+    policy_hook_context_json: str | None = None,
     strict_graph: bool = False,
     replayt_internal_junit_xml: Path | None = None,
     replayt_internal_github_summary: bool = False,
@@ -827,6 +848,8 @@ def build_internal_run_argv(
         argv += ["--metadata-json", metadata_json]
     if experiment_json is not None:
         argv += ["--experiment-json", experiment_json]
+    if policy_hook_context_json is not None:
+        argv += ["--policy-hook-context-json", policy_hook_context_json]
     if resume:
         argv.append("--resume")
     if dry_run:
@@ -898,6 +921,66 @@ def build_cli_stdio_contract() -> dict[str, Any]:
             "the workflow inputs payload."
         ),
     }
+
+
+TRUST_PROFILE_MACHINE_FLAGS: dict[str, dict[str, bool]] = {
+    "doctor_preflight": {
+        "appends_run_timeline": False,
+        "executes_workflow_runner": False,
+        "may_invoke_trusted_policy_hooks": False,
+        "may_probe_default_llm_http": True,
+        "writes_scaffold_paths": False,
+        "writes_seal_manifest": False,
+    },
+    "graph_validate_short_circuit": {
+        "appends_run_timeline": False,
+        "executes_workflow_runner": False,
+        "may_invoke_trusted_policy_hooks": False,
+        "may_probe_default_llm_http": False,
+        "writes_scaffold_paths": False,
+        "writes_seal_manifest": False,
+    },
+    "inventory_read_only": {
+        "appends_run_timeline": False,
+        "executes_workflow_runner": False,
+        "may_invoke_trusted_policy_hooks": False,
+        "may_probe_default_llm_http": False,
+        "writes_scaffold_paths": False,
+        "writes_seal_manifest": False,
+    },
+    "seal_manifest_write": {
+        "appends_run_timeline": False,
+        "executes_workflow_runner": False,
+        "may_invoke_trusted_policy_hooks": True,
+        "may_probe_default_llm_http": False,
+        "writes_scaffold_paths": False,
+        "writes_seal_manifest": True,
+    },
+    "try_copy_scaffold": {
+        "appends_run_timeline": False,
+        "executes_workflow_runner": False,
+        "may_invoke_trusted_policy_hooks": False,
+        "may_probe_default_llm_http": False,
+        "writes_scaffold_paths": True,
+        "writes_seal_manifest": False,
+    },
+    "verify_seal_compare": {
+        "appends_run_timeline": False,
+        "executes_workflow_runner": False,
+        "may_invoke_trusted_policy_hooks": True,
+        "may_probe_default_llm_http": False,
+        "writes_scaffold_paths": False,
+        "writes_seal_manifest": False,
+    },
+    "workflow_run_execute": {
+        "appends_run_timeline": True,
+        "executes_workflow_runner": True,
+        "may_invoke_trusted_policy_hooks": True,
+        "may_probe_default_llm_http": False,
+        "writes_scaffold_paths": False,
+        "writes_seal_manifest": False,
+    },
+}
 
 
 CLI_JSON_STDOUT_TRUST_PROFILES: dict[str, str] = {
@@ -975,7 +1058,9 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "Draft JSON Schema for one JSONL line (stdout) and is not tied to cli_machine_readable_schemas. "
             "replayt ci still prints a one-line stderr reminder when --output json is used. See "
             "subprocess_stream_semantics for stdout vs stderr expectations when wrapping the CLI, and "
-            "typer_pre_dispatch_phase for Typer usage failures vs workflow pause (both may use exit code 2)."
+            "typer_pre_dispatch_phase for Typer usage failures vs workflow pause (both may use exit code 2). "
+            "trust_profile_machine_flags mirrors trust_profiles with stable booleans for argv allowlists "
+            "(MCP tools, CI gates) without parsing prose."
         ),
         "subprocess_stream_semantics": {
             "stdout": {
@@ -1034,6 +1119,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             },
         },
         "trust_profiles": dict(sorted(CLI_JSON_STDOUT_TRUST_PROFILES.items())),
+        "trust_profile_machine_flags": dict(sorted(TRUST_PROFILE_MACHINE_FLAGS.items())),
         "subcommands": {
             "ci": [
                 _stdout_json_route(

@@ -32,6 +32,7 @@ from replayt.cli.config import (
     resolve_llm_settings,
     resolve_log_dir,
     resolve_log_mode_setting,
+    resolve_policy_hook_context_json,
     resolve_project_path,
     resolve_redact_keys,
     resolve_run_inputs_json,
@@ -61,6 +62,7 @@ from replayt.cli.stores import open_store, read_store
 from replayt.cli.targets import load_target
 from replayt.cli.validation import (
     inputs_json_from_options,
+    parse_json_object_cli_ref,
     parse_json_object_option,
     validate_workflow_graph,
     validation_report,
@@ -202,6 +204,30 @@ def cmd_init_gitignore(
 
     path.mkdir(parents=True, exist_ok=True)
     merge_gitignore(path)
+
+
+def cmd_init_env_example(
+    path: Path = typer.Option(
+        Path("."),
+        "--path",
+        "-p",
+        help="Directory that should contain .env.example (default: current directory).",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        help="Overwrite an existing .env.example (default: refuse when the file already exists).",
+    ),
+) -> None:
+    """Write the same .env.example template as replayt init, without other scaffold files."""
+
+    path.mkdir(parents=True, exist_ok=True)
+    env_path = path / ".env.example"
+    if env_path.exists() and not force:
+        typer.echo(f"Refusing to overwrite (use --force): {env_path}", err=True)
+        raise typer.Exit(code=1)
+    env_path.write_text(INIT_ENV_EXAMPLE, encoding="utf-8")
+    typer.echo(f"Wrote {env_path}")
 
 
 def cmd_init(
@@ -381,6 +407,15 @@ def cmd_run(
         "--experiment-json",
         help="JSON object on run_started as experiment and merged into LLM effective settings for the run.",
     ),
+    policy_hook_context_json: str | None = typer.Option(
+        None,
+        "--policy-hook-context-json",
+        help=(
+            "Optional JSON object forwarded only to trusted policy hooks as REPLAYT_POLICY_HOOK_CONTEXT_JSON "
+            "(not written to JSONL). Precedence over REPLAYT_POLICY_HOOK_CONTEXT_JSON env and "
+            "[tool.replayt] policy_hook_context_json. Use @path or @- like --inputs-json."
+        ),
+    ),
     resume: bool = typer.Option(False, help="Resume a paused run (requires --run-id)."),
     timeout: int | None = typer.Option(
         None,
@@ -454,6 +489,14 @@ def cmd_run(
             typer.echo("--dry-check cannot be used with --resume", err=True)
             raise typer.Exit(code=1)
         errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
+        policy_hook_context_for_report: str | None = None
+        if policy_hook_context_json is not None:
+            policy_hook_context_for_report = json.dumps(
+                parse_json_object_cli_ref(
+                    policy_hook_context_json.strip(), label="--policy-hook-context-json"
+                ),
+                sort_keys=True,
+            )
         report = validation_report(
             target=target,
             wf=wf,
@@ -463,6 +506,7 @@ def cmd_run(
             inputs_json=inputs_resolved,
             metadata_json=metadata_json,
             experiment_json=experiment_json,
+            policy_hook_context_json=policy_hook_context_for_report,
         )
         if output == "json":
             typer.echo(json.dumps(report, indent=2))
@@ -508,6 +552,12 @@ def cmd_run(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
+    try:
+        policy_hook_canonical = resolve_policy_hook_context_json(policy_hook_context_json, cfg=cfg)
+    except typer.BadParameter as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
     ci_artifacts = resolve_ci_artifacts(
         explicit_junit_xml=replayt_internal_junit_xml,
         explicit_summary_json=replayt_internal_summary_json,
@@ -540,6 +590,7 @@ def cmd_run(
             output=output,
             metadata_json=metadata_json,
             experiment_json=experiment_json,
+            policy_hook_context_json=policy_hook_context_json,
             strict_graph=strict_graph,
             replayt_internal_junit_xml=junit_for_ci,
             replayt_internal_github_summary=github_summary_for_ci,
@@ -627,6 +678,7 @@ def cmd_run(
                 metadata_json=json.dumps(run_meta, sort_keys=True) if run_meta is not None else None,
                 experiment_json=json.dumps(experiment, sort_keys=True) if experiment is not None else None,
                 workflow_meta_json=wf_meta_json,
+                policy_hook_context_json=policy_hook_canonical,
                 timeout_seconds=hook_timeout,
             )
         except subprocess.TimeoutExpired as exc:
@@ -901,6 +953,7 @@ def cmd_try(
         tag=tag,
         metadata_json=None,
         experiment_json=None,
+        policy_hook_context_json=None,
         resume=False,
         timeout=timeout,
         dry_run=not live,
@@ -973,6 +1026,11 @@ def cmd_ci(
         "--experiment-json",
         help="JSON object on run_started as experiment (merged into LLM effective settings).",
     ),
+    policy_hook_context_json: str | None = typer.Option(
+        None,
+        "--policy-hook-context-json",
+        help="Optional JSON object for REPLAYT_POLICY_HOOK_CONTEXT_JSON on policy hooks only (see replayt run).",
+    ),
     resume: bool = typer.Option(False, help="Resume a paused run (requires --run-id)."),
     timeout: int | None = typer.Option(
         None,
@@ -1040,6 +1098,7 @@ def cmd_ci(
         tag=tag,
         metadata_json=metadata_json,
         experiment_json=experiment_json,
+        policy_hook_context_json=policy_hook_context_json,
         resume=resume,
         timeout=timeout,
         dry_run=dry_run,
@@ -1090,6 +1149,11 @@ def cmd_resume(
         "--redact-key",
         help="Case-insensitive structured field name to scrub from logged payloads (repeatable).",
     ),
+    policy_hook_context_json: str | None = typer.Option(
+        None,
+        "--policy-hook-context-json",
+        help="Optional JSON object for REPLAYT_POLICY_HOOK_CONTEXT_JSON on resume_hook (not written to JSONL).",
+    ),
 ) -> None:
     cfg, cfg_path, _, _ = get_project_config()
     if sqlite is None and cfg.get("sqlite"):
@@ -1112,6 +1176,11 @@ def cmd_resume(
         raise typer.Exit(code=1) from exc
     workflow_contract = wf.contract()
     lm = parse_log_mode(log_mode)
+    try:
+        policy_hook_canonical = resolve_policy_hook_context_json(policy_hook_context_json, cfg=cfg)
+    except typer.BadParameter as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
     hook = resume_hook_argv(cfg)
     resume_policy_hook = resume_hook_audit(cfg) if hook else None
     if hook:
@@ -1138,6 +1207,7 @@ def cmd_resume(
                 tags_json=tags_json,
                 experiment_json=experiment_json,
                 workflow_meta_json=workflow_meta_json,
+                policy_hook_context_json=policy_hook_canonical,
             )
         except subprocess.TimeoutExpired as exc:
             lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
@@ -1188,6 +1258,7 @@ def cmd_resume(
 
 def register(app: typer.Typer) -> None:
     app.command("init")(cmd_init)
+    app.command("init-env-example")(cmd_init_env_example)
     app.command("init-gitignore")(cmd_init_gitignore)
     app.command("run")(cmd_run)
     app.command("try")(cmd_try)

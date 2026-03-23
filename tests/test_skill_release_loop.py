@@ -448,6 +448,46 @@ def test_default_skill_command_passes_skill_root_placeholder(tmp_path: Path) -> 
     assert "--skill-root {skill_root_q}" in command
 
 
+def test_fix_round_skill_command_context_includes_task_matching_env() -> None:
+    """`{task}` must be defined for automated fix rounds (parity with SKILL_TASK / version JSON contract)."""
+
+    mod = _load_script()
+    base = {
+        "skill_root": "/skills",
+        "prompt_file": "/p.md",
+        "log_file": "/l.log",
+        "run_dir": "/run",
+        "repo": "/repo",
+        "iteration": "1",
+        "max_iterations": "2",
+        "step_index": "0",
+        "step_total": "0",
+        "pipeline_sha256": "aa",
+        "skill_command_sha256": "bb",
+        "task_sha256": "cc",
+    }
+    check_out = mod.render_command(
+        "{task}",
+        {
+            **base,
+            "skill": "fix_check",
+            "skill_path": "fix_check",
+            "task": mod.FIX_CHECK_TASK,
+        },
+    )
+    assert check_out == mod.FIX_CHECK_TASK
+    pre_out = mod.render_command(
+        "{task}",
+        {
+            **base,
+            "skill": "fix_pre_tag_ci",
+            "skill_path": "fix_pre_tag_ci",
+            "task": mod.FIX_PRE_TAG_CI_TASK,
+        },
+    )
+    assert pre_out == mod.FIX_PRE_TAG_CI_TASK
+
+
 def test_github_ci_verify_command_require_gh(tmp_path: Path) -> None:
     mod = _load_script()
     assert "--require-gh" in mod.github_ci_verify_command(tmp_path, require_gh=True)

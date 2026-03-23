@@ -12,6 +12,7 @@ from replayt.cli.config import inputs_file_trust_audit_paths
 from replayt.cli.run_support import policy_hook_trust_audit_paths_for_cfg
 from replayt.cli.targets import workflow_trust_audit_paths
 from replayt.security import (
+    LLM_CREDENTIAL_ENV_VARS,
     approval_reason_missing,
     dotenv_permission_trust_checks,
     dotenv_trust_candidate_paths,
@@ -315,6 +316,20 @@ def test_extraneous_llm_credential_env_names_lists_non_openai(
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     monkeypatch.setenv("GROQ_API_KEY", "k")
     assert extraneous_llm_credential_env_names() == ("GROQ_API_KEY",)
+
+
+def test_llm_credential_env_vars_sorted_and_covers_common_gateways() -> None:
+    assert LLM_CREDENTIAL_ENV_VARS == tuple(sorted(LLM_CREDENTIAL_ENV_VARS))
+    for name in (
+        "DEEPSEEK_API_KEY",
+        "FIREWORKS_API_KEY",
+        "GOOGLE_API_KEY",
+        "OLLAMA_API_KEY",
+        "PERPLEXITY_API_KEY",
+        "TOGETHER_API_KEY",
+        "XAI_API_KEY",
+    ):
+        assert name in LLM_CREDENTIAL_ENV_VARS
 
 
 def test_workflow_entrypoint_permission_trust_checks_empty_on_windows(

@@ -62,6 +62,12 @@ OPENAI_API_KEY=
 # Optional - openai | ollama | groq | together | openrouter (see README).
 # For Anthropic, set OPENAI_BASE_URL to an OpenAI-compatible gateway or use the native SDK example.
 # REPLAYT_PROVIDER=ollama
+
+# Optional - default workflow target when you skip .replaytrc.toml / [tool.replayt] (see docs/CONFIG.md).
+# REPLAYT_TARGET=workflow.py
+
+# Optional - default inputs JSON file (see docs/CONFIG.md); same idea as [tool.replayt] inputs_file.
+# REPLAYT_INPUTS_FILE=inputs.example.json
 """
 
 INIT_GITIGNORE_LINES = [".replayt/", ".env", ".venv/", "__pycache__/"]

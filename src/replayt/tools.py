@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import logging
 import re
 from collections.abc import Callable
@@ -110,6 +111,67 @@ class ToolRegistry:
                 func["description"] = desc
             out.append({"type": "function", "function": func})
         return out
+
+    def apply_openai_chat_tool_calls(
+        self,
+        tool_calls: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+    ) -> list[Any]:
+        """Run OpenAI Chat Completions ``tool_calls`` through :meth:`call` in API list order.
+
+        Each element should match the JSON shape returned by the API: a mapping with
+        ``type == "function"`` and a nested ``function`` object containing ``name`` and
+        ``arguments``. ``arguments`` may be a JSON object string or already a ``dict``.
+
+        This is a thin composition helper for vendor SDK steps: pair with
+        :meth:`openai_chat_tools` when building ``tools=``, then pass
+        ``message.tool_calls`` converted with ``model_dump()`` (or equivalent) so each
+        model-chosen invocation still emits replayt ``tool_call`` / ``tool_result`` lines.
+
+        Returns one result per tool call (same order as ``tool_calls``).
+        """
+
+        if not tool_calls:
+            return []
+        results: list[Any] = []
+        for i, tc in enumerate(tool_calls):
+            if not isinstance(tc, dict):
+                msg = f"tool_calls[{i}]: expected dict, got {type(tc).__name__}"
+                raise TypeError(msg)
+            if tc.get("type") != "function":
+                msg = f"tool_calls[{i}]: expected type 'function', got {tc.get('type')!r}"
+                raise ValueError(msg)
+            fn = tc.get("function")
+            if not isinstance(fn, dict):
+                msg = f"tool_calls[{i}]: function must be a dict, got {type(fn).__name__}"
+                raise TypeError(msg)
+            name = fn.get("name")
+            if not isinstance(name, str) or not name.strip():
+                msg = f"tool_calls[{i}]: missing or invalid function.name"
+                raise ValueError(msg)
+            raw_args = fn.get("arguments", "{}")
+            if isinstance(raw_args, str):
+                stripped = raw_args.strip()
+                if not stripped:
+                    args = {}
+                else:
+                    try:
+                        args = json.loads(stripped)
+                    except json.JSONDecodeError as exc:
+                        msg = f"tool_calls[{i}]: invalid JSON in function.arguments: {exc.msg}"
+                        raise ValueError(msg) from exc
+            elif isinstance(raw_args, dict):
+                args = raw_args
+            else:
+                msg = (
+                    f"tool_calls[{i}]: function.arguments must be str or dict, "
+                    f"got {type(raw_args).__name__}"
+                )
+                raise TypeError(msg)
+            if not isinstance(args, dict):
+                msg = f"tool_calls[{i}]: decoded arguments must be a JSON object"
+                raise TypeError(msg)
+            results.append(self.call(name, args))
+        return results
 
     def call(self, name: str, arguments: dict[str, Any]) -> Any:
         if name not in self._tools:

@@ -45,5 +45,5 @@ __all__ = [
     "run_with_mock",
 ]
 
-__version__ = "0.4.20"
+__version__ = "0.4.21"
 __version_tuple__: tuple[int, int, int] = _version_tuple_from_string(__version__)

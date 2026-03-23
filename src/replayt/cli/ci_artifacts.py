@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,8 +40,10 @@ def ci_run_summary_runtime_fields() -> dict[str, str]:
     return {
         "replayt_version": replayt_version,
         "python_version": f"{vi.major}.{vi.minor}.{vi.micro}",
+        "python_implementation": platform.python_implementation(),
         "python_executable": sys.executable,
         "platform": sys.platform,
+        "machine": platform.machine(),
     }
 
 

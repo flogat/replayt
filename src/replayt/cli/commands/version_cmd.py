@@ -11,7 +11,9 @@ import typer
 
 import replayt
 from replayt.cli.config import (
+    CLI_RUN_DEFAULTS_CONTRACT_SCHEMA,
     SUPPORTED_CONFIG_KEYS,
+    build_cli_run_defaults_contract,
     build_project_config_discovery_report,
     build_project_config_resolution_report,
 )
@@ -27,6 +29,10 @@ from replayt.cli.run_support import (
 from replayt.cli.skill_loop_env import (
     SKILL_LOOP_ENV_CONTRACT_SCHEMA,
     build_skill_loop_env_contract,
+)
+from replayt.cli.skill_loop_placeholders import (
+    SKILL_LOOP_PLACEHOLDER_CONTRACT_SCHEMA,
+    build_skill_loop_placeholder_contract,
 )
 
 VERSION_REPORT_SCHEMA = "replayt.version_report.v1"
@@ -92,13 +98,16 @@ def build_version_report() -> dict[str, object]:
         "cli_json_stdout_contract": build_cli_json_stdout_contract(),
         "project_config_discovery": build_project_config_discovery_report(),
         "project_config_resolution": build_project_config_resolution_report(),
+        "cli_run_defaults_contract": build_cli_run_defaults_contract(),
         "operational_paths": build_operational_paths_report(),
         "distribution_metadata": build_distribution_metadata_report(),
         "skill_loop_env_contract": build_skill_loop_env_contract(),
+        "skill_loop_placeholder_contract": build_skill_loop_placeholder_contract(),
         "cli_machine_readable_schemas": {
             "version_report": VERSION_REPORT_SCHEMA,
             "project_config_discovery": "replayt.project_config_discovery.v1",
             "project_config_resolution": "replayt.project_config_resolution.v1",
+            "cli_run_defaults_contract": CLI_RUN_DEFAULTS_CONTRACT_SCHEMA,
             "workflow_contract": "replayt.workflow_contract.v1",
             "workflow_contract_check": "replayt.workflow_contract_check.v1",
             "validate_report": "replayt.validate_report.v1",
@@ -121,6 +130,7 @@ def build_version_report() -> dict[str, object]:
             "try_copy": "replayt.try_copy.v1",
             "init_templates": "replayt.init_templates.v1",
             "skill_loop_env_contract": SKILL_LOOP_ENV_CONTRACT_SCHEMA,
+            "skill_loop_placeholder_contract": SKILL_LOOP_PLACEHOLDER_CONTRACT_SCHEMA,
         },
     }
 

@@ -633,7 +633,7 @@ def _legacy_build_run_report_html(
 
     handoff_section = ""
     if style == "stakeholder":
-        handoff_section = stakeholder_report_handoff_html(run_id, events)
+        handoff_section = stakeholder_report_handoff_html(run_id, events, report_style="stakeholder")
 
     return REPORT_HTML.format(
         report_title=html.escape(report_title),
@@ -1441,7 +1441,7 @@ def build_run_report_html(
 
     handoff_section = ""
     if style in {"stakeholder", "support"}:
-        handoff_section = stakeholder_report_handoff_html(run_id, events)
+        handoff_section = stakeholder_report_handoff_html(run_id, events, report_style=style)
 
     timeline_items: list[str] = []
     for state_meta in states:
@@ -1804,7 +1804,7 @@ def build_run_report_markdown(
         lines.append("\n".join(attention_blocks))
 
     if style in {"stakeholder", "support"}:
-        lines.append(stakeholder_report_handoff_markdown(run_id, events).rstrip("\n"))
+        lines.append(stakeholder_report_handoff_markdown(run_id, events, report_style=style).rstrip("\n"))
         lines.append("")
 
     if approvals:

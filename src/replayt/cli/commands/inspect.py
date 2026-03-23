@@ -699,6 +699,12 @@ def cmd_validate(
     typer.echo(
         f"OK: {wf.name}@{wf.version} ({len(wf.step_names())} states, {len(wf.edges())} edges)"
     )
+    strict_tail = " --strict-graph" if strict_graph else ""
+    typer.echo(f"Next: replayt run {target}{strict_tail} --dry-check")
+    typer.echo(
+        f"Then: replayt run {target}{strict_tail} with inputs "
+        "(`--input key=value`, `--inputs-file`, or project defaults); see docs/QUICKSTART.md."
+    )
 
 
 def cmd_runs(

@@ -15,7 +15,9 @@ _replay_html = _display.replay_html
 
 app = typer.Typer(no_args_is_help=True, add_completion=False)
 
-_SKIP_MIN_REPLAYT_VERSION = frozenset({"config", "version", "doctor", "init", "init-gitignore"})
+_SKIP_MIN_REPLAYT_VERSION = frozenset(
+    {"config", "version", "doctor", "init", "init-env-example", "init-gitignore"}
+)
 
 
 @app.callback()

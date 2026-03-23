@@ -65,6 +65,8 @@ DEFAULT_TASK = (
     "workspace ready for the outer release loop to bump the patch version, create the tag, and "
     "push once all checks pass."
 )
+FIX_CHECK_TASK = "Fix the failing check."
+FIX_PRE_TAG_CI_TASK = "Fix the failure so pre-tag GitHub Actions verification passes."
 SKILL_ALIASES = {
     "createfeature": "createfeatures",
     # Legacy alias: the old monolith skill still exists for manual invocation.
@@ -385,7 +387,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog=(
             "The script is backend-agnostic. --skill-command runs once per skill and can use placeholders:\n"
             "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {run_dir}\n"
-            "  {repo} {iteration} {max_iterations} {step_index} {step_total} {pipeline_sha256} "
+            "  {repo} {iteration} {max_iterations} {task} {step_index} {step_total} {pipeline_sha256} "
             "{skill_command_sha256} {task_sha256}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
             "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
@@ -1406,7 +1408,7 @@ def run_checks(
                 injected_env_keys=SKILL_LOOP_FIX_INJECTED_ENV_KEYS,
                 iteration=iteration,
                 max_iterations=args.max_iterations,
-                task="Fix the failing check.",
+                task=FIX_CHECK_TASK,
                 step_index=0,
                 step_total=0,
                 pipeline_sha256=pipeline_sha256,
@@ -1431,6 +1433,7 @@ def run_checks(
                     "pipeline_sha256": pipeline_sha256,
                     "skill_command_sha256": skill_cmd_sha,
                     "task_sha256": loop_task_sha,
+                    "task": FIX_CHECK_TASK,
                 },
             )
 
@@ -1446,7 +1449,7 @@ def run_checks(
                     "SKILL_LOG_FILE": str(fix_log_path),
                     "SKILL_ITERATION": str(iteration),
                     "SKILL_MAX_ITERATIONS": str(args.max_iterations),
-                    "SKILL_TASK": "Fix the failing check.",
+                    "SKILL_TASK": FIX_CHECK_TASK,
                     "SKILL_RUN_DIR": run_dir_resolved,
                     "SKILL_STEP_INDEX": "0",
                     "SKILL_STEP_TOTAL": "0",
@@ -1817,7 +1820,7 @@ def run_pre_tag_github_ci_with_fixes(
             injected_env_keys=SKILL_LOOP_FIX_INJECTED_ENV_KEYS,
             iteration=passed_iteration,
             max_iterations=args.max_iterations,
-            task="Fix the failure so pre-tag GitHub Actions verification passes.",
+            task=FIX_PRE_TAG_CI_TASK,
             step_index=0,
             step_total=0,
             pipeline_sha256=pipeline_sha256,
@@ -1842,6 +1845,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "pipeline_sha256": pipeline_sha256,
                 "skill_command_sha256": skill_cmd_sha,
                 "task_sha256": loop_task_sha,
+                "task": FIX_PRE_TAG_CI_TASK,
             },
         )
 
@@ -1857,7 +1861,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "SKILL_LOG_FILE": str(fix_log_path),
                 "SKILL_ITERATION": str(passed_iteration),
                 "SKILL_MAX_ITERATIONS": str(args.max_iterations),
-                "SKILL_TASK": "Fix the failure so pre-tag GitHub Actions verification passes.",
+                "SKILL_TASK": FIX_PRE_TAG_CI_TASK,
                 "SKILL_RUN_DIR": run_dir_resolved,
                 "SKILL_STEP_INDEX": "0",
                 "SKILL_STEP_TOTAL": "0",

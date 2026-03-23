@@ -177,6 +177,24 @@ def parse_json_object_option(raw: str, *, label: str) -> dict[str, Any]:
     return obj
 
 
+def parse_json_object_cli_ref(raw: str, *, label: str) -> dict[str, Any]:
+    """Parse a JSON object from inline JSON or ``@path`` / ``@-`` (stdin), like ``--inputs-json``."""
+
+    s = str(raw).strip()
+    if not s:
+        raise typer.BadParameter(f"{label} cannot be empty")
+    if s.startswith("@"):
+        file_ref = s[1:].strip()
+        if not file_ref:
+            raise typer.BadParameter(f"{label} @path form requires a file path, e.g. {label} @ctx.json")
+        if file_ref == "-":
+            text = _read_json_from_stdin(label=f"{label} @-")
+        else:
+            text = _read_json_text_file(Path(file_ref), label=f"{label} @path")
+        return parse_json_object_option(text, label=label)
+    return parse_json_object_option(s, label=label)
+
+
 def validation_report(
     *,
     target: str,
@@ -187,10 +205,12 @@ def validation_report(
     inputs_json: str | None,
     metadata_json: str | None,
     experiment_json: str | None,
+    policy_hook_context_json: str | None = None,
 ) -> dict[str, Any]:
     inp_ok, inp_err = check_json_object_string(inputs_json, label="inputs")
     meta_ok, meta_err = check_json_object_string(metadata_json, label="metadata")
     exp_ok, exp_err = check_json_object_string(experiment_json, label="experiment")
+    phc_ok, phc_err = check_json_object_string(policy_hook_context_json, label="policy_hook_context")
     extra_errors: list[str] = []
     if inp_err:
         extra_errors.append(inp_err)
@@ -198,9 +218,11 @@ def validation_report(
         extra_errors.append(meta_err)
     if exp_err:
         extra_errors.append(exp_err)
+    if phc_err:
+        extra_errors.append(phc_err)
     return {
         "schema": VALIDATE_REPORT_SCHEMA,
-        "ok": len(errors) == 0 and inp_ok and meta_ok and exp_ok,
+        "ok": len(errors) == 0 and inp_ok and meta_ok and exp_ok and phc_ok,
         "target": target,
         "workflow": {
             "name": wf.name,

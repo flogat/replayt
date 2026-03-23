@@ -310,6 +310,10 @@ def test_changelog_report_parses_unreleased_items(tmp_path: Path) -> None:
     assert report["item_count"] >= 1
     assert any("Maintainer release helpers" in item for item in report["items"])
     assert report["body_sha256"] == hashlib.sha256(report["body"].encode("utf-8")).hexdigest()
+    assert len(report["item_sha256s"]) == report["item_count"]
+    assert report["item_sha256s"] == [
+        hashlib.sha256(item.encode("utf-8")).hexdigest() for item in report["items"]
+    ]
 
 
 def test_changelog_report_missing_unreleased_has_null_body_sha256(tmp_path: Path) -> None:
@@ -328,6 +332,7 @@ def test_changelog_report_missing_unreleased_has_null_body_sha256(tmp_path: Path
 
     assert report["ok"] is False
     assert report["body_sha256"] is None
+    assert report["item_sha256s"] == []
 
 
 def test_changelog_main_checks_nonempty(tmp_path: Path) -> None:
@@ -911,6 +916,10 @@ def test_changelog_main_json_output(tmp_path: Path, capsys) -> None:
     assert data["items"] == ["First note", "Second note"]
     assert data["body_sha256"]
     assert data["body_sha256"] == hashlib.sha256(data["body"].encode("utf-8")).hexdigest()
+    assert data["item_sha256s"] == [
+        hashlib.sha256(b"First note").hexdigest(),
+        hashlib.sha256(b"Second note").hexdigest(),
+    ]
 
 
 def test_run_light_release_skill_requires_repo_root(tmp_path: Path, monkeypatch) -> None:

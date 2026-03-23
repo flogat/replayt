@@ -45,6 +45,10 @@ def _body_sha256(body: str) -> str:
     return hashlib.sha256(body.encode("utf-8")).hexdigest()
 
 
+def _item_sha256(item: str) -> str:
+    return hashlib.sha256(item.encode("utf-8")).hexdigest()
+
+
 def changelog_report(changelog_path: Path) -> dict[str, Any]:
     text = changelog_path.read_text(encoding="utf-8")
     body = unreleased_body(text)
@@ -58,6 +62,7 @@ def changelog_report(changelog_path: Path) -> dict[str, Any]:
             "body_sha256": None,
             "items": [],
             "item_count": 0,
+            "item_sha256s": [],
         }
     items = parse_items(body)
     return {
@@ -69,6 +74,7 @@ def changelog_report(changelog_path: Path) -> dict[str, Any]:
         "body_sha256": _body_sha256(body),
         "items": items,
         "item_count": len(items),
+        "item_sha256s": [_item_sha256(item) for item in items],
     }
 
 

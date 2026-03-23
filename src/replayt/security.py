@@ -16,17 +16,25 @@ _REDACTION_SENTINEL = {"_redacted": True}
 
 # Common LLM-related env vars. replayt's OpenAI-compat client reads OPENAI_API_KEY / OPENAI_BASE_URL
 # / REPLAYT_*; other names are audited for presence only (never values) for compliance reviews.
+# Keep this tuple sorted alphabetically so doctor/config JSON and diffs stay stable.
 LLM_CREDENTIAL_ENV_VARS: tuple[str, ...] = (
-    "OPENAI_API_KEY",
     "ANTHROPIC_API_KEY",
     "AZURE_OPENAI_API_KEY",
     "AZURE_OPENAI_ENDPOINT",
-    "OPENROUTER_API_KEY",
-    "GROQ_API_KEY",
-    "MISTRAL_API_KEY",
     "COHERE_API_KEY",
+    "DEEPSEEK_API_KEY",
+    "FIREWORKS_API_KEY",
+    "GOOGLE_API_KEY",
+    "GROQ_API_KEY",
     "HF_TOKEN",
     "HUGGINGFACE_HUB_TOKEN",
+    "MISTRAL_API_KEY",
+    "OLLAMA_API_KEY",
+    "OPENAI_API_KEY",
+    "OPENROUTER_API_KEY",
+    "PERPLEXITY_API_KEY",
+    "TOGETHER_API_KEY",
+    "XAI_API_KEY",
 )
 
 

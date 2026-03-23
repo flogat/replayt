@@ -21,6 +21,7 @@ from replayt.cli.config import (
     resolve_forbid_log_mode_full,
     resolve_log_dir,
     resolve_log_mode_setting,
+    resolve_policy_hook_context_json,
     resolve_redact_keys,
     seal_hook_timeout_seconds,
     verify_seal_hook_timeout_seconds,
@@ -52,6 +53,14 @@ from replayt.graph_export import workflow_to_mermaid
 from replayt.persistence.jsonl import validate_run_id
 
 
+def _exit_on_invalid_run_id(run_id: str) -> str:
+    try:
+        return validate_run_id(run_id)
+    except ValueError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
+
+
 def _privacy_hook_kwargs_from_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
     log_mode, _ = resolve_log_mode_setting("redacted", cfg)
     forbid_full, _ = resolve_forbid_log_mode_full(cfg)
@@ -76,6 +85,7 @@ def _maybe_invoke_export_hook(
     events: list[dict[str, Any]],
     cli_target: str | None = None,
     report_style: str | None = None,
+    policy_hook_context_json: str | None = None,
 ) -> dict[str, Any] | None:
     cfg, _, _, _ = get_project_config()
     hook = export_hook_argv(cfg)
@@ -102,6 +112,7 @@ def _maybe_invoke_export_hook(
             tags_json=tags_j,
             experiment_json=exp_j,
             workflow_meta_json=wf_meta_j,
+            policy_hook_context_json=policy_hook_context_json,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -125,6 +136,7 @@ def _maybe_invoke_seal_hook(
     jsonl_path: Path,
     seal_out: Path,
     line_count: int,
+    policy_hook_context_json: str | None = None,
 ) -> dict[str, Any] | None:
     cfg, _, _, _ = get_project_config()
     hook = seal_hook_argv(cfg)
@@ -147,6 +159,7 @@ def _maybe_invoke_seal_hook(
             tags_json=tags_j,
             experiment_json=exp_j,
             workflow_meta_json=wf_meta_j,
+            policy_hook_context_json=policy_hook_context_json,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -172,6 +185,7 @@ def _maybe_invoke_verify_seal_hook(
     manifest_schema: str,
     line_count: int,
     file_sha256: str,
+    policy_hook_context_json: str | None = None,
 ) -> None:
     cfg, _, _, _ = get_project_config()
     hook = verify_seal_hook_argv(cfg)
@@ -196,6 +210,7 @@ def _maybe_invoke_verify_seal_hook(
             tags_json=tags_j,
             experiment_json=exp_j,
             workflow_meta_json=wf_meta_j,
+            policy_hook_context_json=policy_hook_context_json,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -333,11 +348,22 @@ def cmd_seal(
         "--out",
         help="Manifest output path (default: <log-dir>/<run_id>.seal.json).",
     ),
+    policy_hook_context_json: str | None = typer.Option(
+        None,
+        "--policy-hook-context-json",
+        help="Optional JSON object for REPLAYT_POLICY_HOOK_CONTEXT_JSON on seal_hook only.",
+    ),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """Write a SHA-256 manifest for a JSONL run log (best-effort audit helper; not cryptographic proof)."""
 
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    cfg, _, _, _ = get_project_config()
+    try:
+        policy_hook_canonical = resolve_policy_hook_context_json(policy_hook_context_json, cfg=cfg)
+    except typer.BadParameter as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
 
     try:
         safe_run_id = validate_run_id(run_id)
@@ -381,6 +407,7 @@ def cmd_seal(
         jsonl_path=path,
         seal_out=out_path,
         line_count=int(manifest["line_count"]),
+        policy_hook_context_json=policy_hook_canonical,
     )
     if policy_hook is not None:
         manifest["policy_hook"] = policy_hook
@@ -410,11 +437,22 @@ def cmd_verify_seal(
         "--jsonl",
         help="Override JSONL path (needed for extracted export/bundle manifests with relative jsonl_path).",
     ),
+    policy_hook_context_json: str | None = typer.Option(
+        None,
+        "--policy-hook-context-json",
+        help="Optional JSON object for REPLAYT_POLICY_HOOK_CONTEXT_JSON on verify_seal_hook only.",
+    ),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
 ) -> None:
     """Check that a JSONL run log still matches a prior ``replayt seal`` or export ``events.seal.json`` manifest."""
 
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    cfg, _, _, _ = get_project_config()
+    try:
+        policy_hook_canonical = resolve_policy_hook_context_json(policy_hook_context_json, cfg=cfg)
+    except typer.BadParameter as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
 
     try:
         safe_run_id = validate_run_id(run_id)
@@ -505,6 +543,7 @@ def cmd_verify_seal(
             manifest_schema=str(schema),
             line_count=line_count,
             file_sha256=file_digest,
+            policy_hook_context_json=policy_hook_canonical,
         )
     if output == "json":
         report = {
@@ -563,17 +602,18 @@ def cmd_report(
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    safe_run_id = _exit_on_invalid_run_id(run_id)
     with read_store(log_dir, sqlite) as store:
-        events = store.load_events(run_id)
+        events = store.load_events(safe_run_id)
     if not events:
-        typer.echo(f"No events for run_id={run_id!r}", err=True)
+        typer.echo(f"No events for run_id={safe_run_id!r}", err=True)
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
 
     if report_format == "markdown":
-        report = build_run_report_markdown(run_id, events, style=style, llm_model_filter=llm_model_filters)
+        report = build_run_report_markdown(safe_run_id, events, style=style, llm_model_filter=llm_model_filters)
     else:
-        report = build_run_report_html(run_id, events, style=style, llm_model_filter=llm_model_filters)
+        report = build_run_report_html(safe_run_id, events, style=style, llm_model_filter=llm_model_filters)
 
     if out:
         out_path = Path(out)
@@ -623,23 +663,25 @@ def cmd_report_diff(
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    safe_a = _exit_on_invalid_run_id(run_a)
+    safe_b = _exit_on_invalid_run_id(run_b)
     with read_store(log_dir, sqlite) as store:
-        events_a = store.load_events(run_a)
-        events_b = store.load_events(run_b)
+        events_a = store.load_events(safe_a)
+        events_b = store.load_events(safe_b)
     if not events_a:
-        typer.echo(f"No events for run_id={run_a!r}", err=True)
+        typer.echo(f"No events for run_id={safe_a!r}", err=True)
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
     if not events_b:
-        typer.echo(f"No events for run_id={run_b!r}", err=True)
+        typer.echo(f"No events for run_id={safe_b!r}", err=True)
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
     ctx_a = collect_report_context(events_a, llm_model_filter=llm_model_filters)
     ctx_b = collect_report_context(events_b, llm_model_filter=llm_model_filters)
     if report_format == "markdown":
         doc = build_report_diff_markdown(
-            run_a,
-            run_b,
+            safe_a,
+            safe_b,
             ctx_a,
             ctx_b,
             events_a=events_a,
@@ -649,8 +691,8 @@ def cmd_report_diff(
         )
     else:
         doc = build_report_diff_html(
-            run_a,
-            run_b,
+            safe_a,
+            safe_b,
             ctx_a,
             ctx_b,
             events_a=events_a,
@@ -692,21 +734,33 @@ def cmd_export_run(
         "--seal",
         help="Include events.seal.json with SHA-256 digests for the exported events.jsonl.",
     ),
+    policy_hook_context_json: str | None = typer.Option(
+        None,
+        "--policy-hook-context-json",
+        help="Optional JSON object for REPLAYT_POLICY_HOOK_CONTEXT_JSON on export_hook only.",
+    ),
 ) -> None:
     """Write a shareable .tar.gz: sanitized events.jsonl + manifest.json."""
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    cfg, _, _, _ = get_project_config()
+    try:
+        policy_hook_canonical = resolve_policy_hook_context_json(policy_hook_context_json, cfg=cfg)
+    except typer.BadParameter as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
     lm = parse_log_mode(export_mode)
+    safe_run_id = _exit_on_invalid_run_id(run_id)
     with read_store(log_dir, sqlite) as store:
-        events = store.load_events(run_id)
+        events = store.load_events(safe_run_id)
     if not events:
-        typer.echo(f"No events for run_id={run_id!r}", err=True)
+        typer.echo(f"No events for run_id={safe_run_id!r}", err=True)
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
 
     policy_hook = _maybe_invoke_export_hook(
-        run_id=run_id,
+        run_id=safe_run_id,
         export_kind="export_run",
         log_dir=log_dir,
         sqlite=sqlite,
@@ -716,6 +770,7 @@ def cmd_export_run(
         event_count=len(events),
         events=events,
         cli_target=target,
+        policy_hook_context_json=policy_hook_canonical,
     )
     lines = events_to_jsonl_lines(events, lm)
     bundle = b"".join(lines)
@@ -731,7 +786,7 @@ def cmd_export_run(
         files.append("workflow.contract.json")
     manifest: dict[str, Any] = {
         "schema": "replayt.export_bundle.v1",
-        "run_id": run_id,
+        "run_id": safe_run_id,
         "export_mode": export_mode,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "line_count": len(lines),
@@ -749,7 +804,7 @@ def cmd_export_run(
     if seal:
         seal_manifest = _seal_manifest(
             schema="replayt.export_seal.v1",
-            run_id=run_id,
+            run_id=safe_run_id,
             jsonl_path="events.jsonl",
             raw=bundle,
             note=(
@@ -768,11 +823,11 @@ def cmd_export_run(
         if contract_bytes is not None:
             export_files.append(("workflow.contract.json", contract_bytes))
         for name, body in export_files:
-            ti = tarfile.TarInfo(name=f"{run_id}/{name}")
+            ti = tarfile.TarInfo(name=f"{safe_run_id}/{name}")
             ti.size = len(body)
             tf.addfile(ti, io.BytesIO(body))
         if seal_bytes is not None:
-            ti = tarfile.TarInfo(name=f"{run_id}/events.seal.json")
+            ti = tarfile.TarInfo(name=f"{safe_run_id}/events.seal.json")
             ti.size = len(seal_bytes)
             tf.addfile(ti, io.BytesIO(seal_bytes))
     typer.echo(f"wrote {out.resolve()} ({len(lines)} events, sha256={digest[:16]}...)")
@@ -808,6 +863,11 @@ def cmd_bundle_export(
         "--seal",
         help="Include events.seal.json with SHA-256 digests for the exported events.jsonl.",
     ),
+    policy_hook_context_json: str | None = typer.Option(
+        None,
+        "--policy-hook-context-json",
+        help="Optional JSON object for REPLAYT_POLICY_HOOK_CONTEXT_JSON on export_hook only.",
+    ),
 ) -> None:
     """Write a stakeholder-oriented .tar.gz: HTML report, replay timeline HTML, sanitized events.jsonl, manifest."""
 
@@ -815,16 +875,23 @@ def cmd_bundle_export(
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
+    cfg, _, _, _ = get_project_config()
+    try:
+        policy_hook_canonical = resolve_policy_hook_context_json(policy_hook_context_json, cfg=cfg)
+    except typer.BadParameter as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(code=1) from exc
     lm = parse_log_mode(export_mode)
+    safe_run_id = _exit_on_invalid_run_id(run_id)
     with read_store(log_dir, sqlite) as store:
-        events = store.load_events(run_id)
+        events = store.load_events(safe_run_id)
     if not events:
-        typer.echo(f"No events for run_id={run_id!r}", err=True)
+        typer.echo(f"No events for run_id={safe_run_id!r}", err=True)
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
 
     policy_hook = _maybe_invoke_export_hook(
-        run_id=run_id,
+        run_id=safe_run_id,
         export_kind="bundle_export",
         log_dir=log_dir,
         sqlite=sqlite,
@@ -835,9 +902,10 @@ def cmd_bundle_export(
         events=events,
         cli_target=target,
         report_style=report_style,
+        policy_hook_context_json=policy_hook_canonical,
     )
-    report_html = build_run_report_html(run_id, events, style=report_style)
-    timeline_html = replay_html(run_id, events, style=report_style)
+    report_html = build_run_report_html(safe_run_id, events, style=report_style)
+    timeline_html = replay_html(safe_run_id, events, style=report_style)
     lines = events_to_jsonl_lines(events, lm)
     bundle = b"".join(lines)
     digest = hashlib.sha256(bundle).hexdigest()
@@ -857,7 +925,7 @@ def cmd_bundle_export(
 
     manifest: dict[str, Any] = {
         "schema": "replayt.bundle_export.v1",
-        "run_id": run_id,
+        "run_id": safe_run_id,
         "export_mode": export_mode,
         "report_style": report_style,
         "timeline_style": report_style,
@@ -876,7 +944,7 @@ def cmd_bundle_export(
     if seal:
         seal_manifest = _seal_manifest(
             schema="replayt.export_seal.v1",
-            run_id=run_id,
+            run_id=safe_run_id,
             jsonl_path="events.jsonl",
             raw=bundle,
             note=(
@@ -891,7 +959,7 @@ def cmd_bundle_export(
         )
         seal_bytes = json.dumps(seal_manifest, indent=2).encode("utf-8")
     out.parent.mkdir(parents=True, exist_ok=True)
-    prefix = run_id
+    prefix = safe_run_id
     with tarfile.open(out, "w:gz") as tf:
         export_files = [
             ("report.html", report_html.encode("utf-8")),

@@ -607,6 +607,11 @@ def test_llm_bridge_parse_with_native_response_format_logs_mode() -> None:
     req = next(p for t, p in events if t == "llm_request")
     assert req["schema_name"] == "Answer"
     assert req["effective"]["structured_output_mode"] == "native_json_schema"
+    assert req["effective"]["response_format"] == {
+        "type": "json_schema",
+        "json_schema_name": "Answer",
+        "json_schema_strict": True,
+    }
 
 
 def test_llm_bridge_parse_success_emits_schema_and_request_fingerprints() -> None:
@@ -653,6 +658,78 @@ def test_llm_bridge_parse_success_emits_schema_and_request_fingerprints() -> Non
     assert structured["latency_ms"] == resp["latency_ms"]
     assert structured["chat_completion_id"] == "chatcmpl-parse-1"
     assert structured["system_fingerprint"] == "fp_parse"
+    assert "response_format" not in req["effective"]
+
+
+def test_llm_bridge_complete_text_with_settings_response_format_forwards_and_logs_compact() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "s",
+    ).with_settings(response_format={"type": "json_object"})
+    canned = {"choices": [{"message": {"content": "{}"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    assert mock_cc.call_args.kwargs["response_format"] == {"type": "json_object"}
+    req = next(p for t, p in events if t == "llm_request")
+    resp = next(p for t, p in events if t == "llm_response")
+    assert req["effective"]["response_format"] == {"type": "json_object"}
+    assert resp["effective"]["response_format"] == {"type": "json_object"}
+
+
+def test_llm_bridge_complete_text_response_format_none_overrides_default() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "s",
+    ).with_settings(response_format={"type": "json_object"})
+
+    with patch.object(client, "chat_completions", return_value={"choices": [{"message": {"content": "x"}}]}) as mock_cc:
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], response_format=None)
+
+    assert mock_cc.call_args.kwargs.get("response_format") is None
+    req = next(p for t, p in events if t == "llm_request")
+    assert "response_format" not in req["effective"]
+
+
+def test_llm_bridge_with_settings_response_format_empty_clears() -> None:
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    b = LLMBridge(
+        emit=lambda *_a, **_k: None,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "s",
+    ).with_settings(response_format={"type": "json_object"})
+    b2 = b.with_settings(response_format={})
+    assert "response_format" not in b2._defaults  # noqa: SLF001
+
+
+def test_llm_bridge_with_settings_response_format_rejects_non_dict() -> None:
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(
+        emit=lambda *_a, **_k: None,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "s",
+    )
+    with pytest.raises(TypeError, match="response_format must be a dict"):
+        bridge.with_settings(response_format="json_object")  # type: ignore[arg-type]
 
 
 def test_llm_bridge_parse_emits_structured_output_failed_on_validation_error() -> None:

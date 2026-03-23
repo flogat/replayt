@@ -56,7 +56,7 @@ These ideas stay inside replayt's contract: explicit states, strict schemas, typ
 - **Principle / scope tension:** This conflicts with **Determinism over autonomy**, **Explicit states over hidden loops**, and the **LangChain / LangGraph / "agent framework" integration** row in [`docs/SCOPE.md`](./SCOPE.md); framework-owned subgraphs would hide control flow and flood the replay log.
 - **Suggested overcome:** Keep the framework inside one replayt step, stream there if needed, normalize to one Pydantic exit shape, and choose the next state explicitly in Python. The user-facing path already exists in [`README.md`](../README.md) under **Streaming, planner loops, and "agents" (composition, not core)**, in [`src/replayt_examples/README.md`](../src/replayt_examples/README.md) under **Framework-style agents, streaming, and planner loops (feature 10 / composition)** and **LangGraph (and similar frameworks): composition, not core**, and in **Pattern: framework in a sandbox step** plus **Pattern: stream inside step, log structured summary** in [`docs/EXAMPLES_PATTERNS.md`](./EXAMPLES_PATTERNS.md).
 
-## Summary table
+## Reference table
 
 | # | Archetype | Feature | Fits principles | Scope |
 |---|-----------|---------|-----------------|-------|

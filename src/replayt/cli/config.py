@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
 
 import typer
 
+from replayt.cli.validation import parse_json_object_cli_ref, parse_json_object_option
 from replayt.llm import LLMSettings
 from replayt.security import llm_credential_env_presence, normalize_name_list, sanitize_base_url_for_output
 from replayt.types import LogMode
@@ -38,6 +40,7 @@ SUPPORTED_CONFIG_KEYS = frozenset(
         "inputs_file",
         "approval_reason_required",
         "forbid_log_mode_full",
+        "policy_hook_context_json",
     }
 )
 
@@ -85,6 +88,34 @@ DEFAULT_LOG_DIR = Path(".replayt/runs")
 REPLAYT_TARGET_ENV = "REPLAYT_TARGET"
 REPLAYT_INPUTS_FILE_ENV = "REPLAYT_INPUTS_FILE"
 REPLAYT_FORBID_LOG_MODE_FULL_ENV = "REPLAYT_FORBID_LOG_MODE_FULL"
+REPLAYT_POLICY_HOOK_CONTEXT_JSON_ENV = "REPLAYT_POLICY_HOOK_CONTEXT_JSON"
+
+
+def resolve_policy_hook_context_json(cli_raw: str | None, *, cfg: dict[str, Any]) -> str | None:
+    """Return canonical JSON (sorted keys) for ``REPLAYT_POLICY_HOOK_CONTEXT_JSON``, or ``None`` when unset.
+
+    Precedence: ``--policy-hook-context-json`` > ``REPLAYT_POLICY_HOOK_CONTEXT_JSON`` >
+    ``[tool.replayt]`` / ``.replaytrc.toml`` ``policy_hook_context_json``. Not written to JSONL;
+    only forwarded to trusted policy-hook subprocesses.
+    """
+
+    if cli_raw is not None:
+        s = str(cli_raw).strip()
+        if not s:
+            raise typer.BadParameter(
+                "--policy-hook-context-json cannot be empty; omit the flag to use env / project config."
+            )
+        obj = parse_json_object_cli_ref(s, label="--policy-hook-context-json")
+        return json.dumps(obj, sort_keys=True)
+    env_val = os.environ.get(REPLAYT_POLICY_HOOK_CONTEXT_JSON_ENV, "").strip()
+    if env_val:
+        obj = parse_json_object_option(env_val, label=REPLAYT_POLICY_HOOK_CONTEXT_JSON_ENV)
+        return json.dumps(obj, sort_keys=True)
+    cfg_val = cfg.get("policy_hook_context_json")
+    if isinstance(cfg_val, str) and cfg_val.strip():
+        obj = parse_json_object_option(cfg_val.strip(), label="policy_hook_context_json")
+        return json.dumps(obj, sort_keys=True)
+    return None
 
 
 def resolve_cli_target(explicit: str | None, *, cfg: dict[str, Any]) -> str:
@@ -219,6 +250,101 @@ def resolve_run_inputs_json(
         return resolved, "cli:--input"
 
     return None, "unset"
+
+
+CLI_RUN_DEFAULTS_CONTRACT_SCHEMA = "replayt.cli_run_defaults_contract.v1"
+
+
+def build_cli_run_defaults_contract() -> dict[str, object]:
+    """Cwd-independent precedence rules for optional TARGET and run inputs (for CI, wrappers, and docs parity)."""
+
+    return {
+        "schema": CLI_RUN_DEFAULTS_CONTRACT_SCHEMA,
+        "workflow_target": {
+            "optional_on_commands": ["ci", "run"],
+            "precedence": [
+                {
+                    "order": 1,
+                    "id": "cli_positional_target",
+                    "description": (
+                        "Non-empty TARGET argument on replayt run / replayt ci "
+                        "(MODULE:VAR or a trusted workflow .py / .yaml / .yml path)."
+                    ),
+                },
+                {
+                    "order": 2,
+                    "id": "env_REPLAYT_TARGET",
+                    "env": REPLAYT_TARGET_ENV,
+                    "description": "Non-empty REPLAYT_TARGET when TARGET is omitted on run or ci.",
+                },
+                {
+                    "order": 3,
+                    "id": "project_config_target",
+                    "config_key": "target",
+                    "description": (
+                        "Non-empty target from the resolved project config "
+                        "([tool.replayt] or .replaytrc.toml; see project_config_discovery / project_config_resolution)."
+                    ),
+                },
+            ],
+            "missing_behavior": (
+                "Typer raises BadParameter: pass TARGET, set REPLAYT_TARGET, or set target in project config "
+                "(see docs/CONFIG.md)."
+            ),
+            "required_target_elsewhere_note": (
+                "Subcommands that declare TARGET as a required Typer argument (for example validate, contract, "
+                "graph, resume, export-run) do not fall back to REPLAYT_TARGET or project_config target; pass TARGET "
+                "on argv. replayt doctor --target similarly uses only the flag value."
+            ),
+        },
+        "run_inputs": {
+            "commands_using_resolve_run_inputs_json": ["ci", "doctor", "run", "validate"],
+            "doctor_note": (
+                "doctor calls resolve_run_inputs_json only when --target is set (inputs preflight for that target)."
+            ),
+            "precedence": [
+                {
+                    "order": 1,
+                    "id": "cli_inputs_json_or_file",
+                    "description": (
+                        "When --inputs-json and/or --inputs-file is provided, that path wins; repeatable --input "
+                        "values merge on top of the parsed JSON object (@path and @- stdin rules match "
+                        "replayt validate)."
+                    ),
+                },
+                {
+                    "order": 2,
+                    "id": "env_REPLAYT_INPUTS_FILE",
+                    "env": REPLAYT_INPUTS_FILE_ENV,
+                    "description": (
+                        "When CLI inputs are omitted, non-empty REPLAYT_INPUTS_FILE (path or - for stdin); --input "
+                        "still merges on top."
+                    ),
+                },
+                {
+                    "order": 3,
+                    "id": "project_config_inputs_file",
+                    "config_key": "inputs_file",
+                    "description": (
+                        "Path relative to the resolved config file when env and CLI omit inputs; --input merges on top."
+                    ),
+                },
+                {
+                    "order": 4,
+                    "id": "cli_input_only",
+                    "description": (
+                        "When no base JSON object is resolved but --input is present, inputs are built only from "
+                        "--input (source label cli:--input in replayt config --format json)."
+                    ),
+                },
+                {
+                    "order": 5,
+                    "id": "unset",
+                    "description": "Otherwise inputs are unset until try/cmd_run supplies defaults.",
+                },
+            ],
+        },
+    }
 
 
 def _split_supported_section(section: dict[str, Any]) -> tuple[dict[str, Any], frozenset[str]]:
