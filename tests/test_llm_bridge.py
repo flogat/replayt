@@ -461,14 +461,29 @@ def test_llm_bridge_parse_rejects_oversized_json_schema() -> None:
 
     settings = LLMSettings(api_key="k", model="m", max_schema_json_chars=120)
     client = OpenAICompatClient(settings)
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
     bridge = LLMBridge(
-        emit=lambda *_args, **_kwargs: None,
+        emit=emit,
         client=client,
         log_mode=LogMode.redacted,
         state_getter=lambda: "parse",
-    )
+    ).with_settings(experiment={"variant": "A"})
     with pytest.raises(ValueError, match="max_schema_json_chars"):
         bridge.parse(Wide, messages=[{"role": "user", "content": "hi"}])
+
+    failure = next(p for t, p in events if t == "structured_output_failed")
+    assert failure["stage"] == "schema_limit"
+    assert failure["structured_output_mode"] == "prompt_only"
+    assert failure["effective"]["model"] == "m"
+    assert failure["effective"]["structured_output_mode"] == "prompt_only"
+    assert failure["effective"]["experiment"] == {"variant": "A"}
+    assert "schema_sha256" in failure
+    assert "messages_sha256" not in failure
+    assert "effective_sha256" not in failure
 
 
 def test_llm_bridge_parse_with_native_response_format_logs_mode() -> None:

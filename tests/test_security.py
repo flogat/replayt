@@ -564,3 +564,16 @@ def test_policy_hook_trust_audit_paths_for_cfg_dedupes_across_hooks(
         {"run_hook": script.name, "resume_hook": script.name},
     )
     assert paths == [script.resolve()]
+
+
+def test_privacy_contract_hook_env_sorts_redact_key_names() -> None:
+    from replayt.cli.run_support import _privacy_contract_hook_env
+
+    env = _privacy_contract_hook_env(
+        log_mode="structured_only",
+        forbid_log_mode_full=False,
+        redact_keys=("b", "A"),
+    )
+    assert env["REPLAYT_LOG_MODE"] == "structured_only"
+    assert env["REPLAYT_FORBID_LOG_MODE_FULL"] == "0"
+    assert env["REPLAYT_REDACT_KEYS_JSON"] == '["A", "b"]'

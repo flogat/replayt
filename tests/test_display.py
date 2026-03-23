@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from replayt.cli.display import format_timeline_seq, inspect_stakeholder_markdown, replay_timeline_lines
+from replayt.cli.display import (
+    format_timeline_seq,
+    inspect_stakeholder_markdown,
+    replay_html,
+    replay_timeline_lines,
+)
 
 
 def test_inspect_stakeholder_markdown_paused_without_pending_includes_run_id_in_inspect_hint() -> None:
@@ -39,3 +44,41 @@ def test_format_timeline_seq() -> None:
 def test_replay_timeline_lines_missing_seq_does_not_crash() -> None:
     lines = replay_timeline_lines([{"type": "run_started", "payload": {}}])
     assert lines == ["----  run_started"]
+
+
+def test_replay_timeline_lines_stakeholder_skips_llm_and_tool_rows() -> None:
+    events = [
+        {"seq": 1, "type": "run_started", "payload": {}},
+        {"seq": 2, "type": "llm_request", "payload": {"model": "x"}},
+        {"seq": 3, "type": "tool_call", "payload": {"name": "n"}},
+        {"seq": 4, "type": "state_entered", "payload": {"state": "s"}},
+        {"seq": 5, "type": "run_completed", "payload": {"status": "completed"}},
+    ]
+    default_lines = replay_timeline_lines(events, style="default")
+    assert any("llm_request" in ln for ln in default_lines)
+    stake_lines = replay_timeline_lines(events, style="stakeholder")
+    assert not any("llm_request" in ln for ln in stake_lines)
+    assert not any("tool_call" in ln for ln in stake_lines)
+    assert any("state_entered" in ln for ln in stake_lines)
+
+
+def test_replay_html_stakeholder_attention_and_no_tool_call_in_body() -> None:
+    events = [
+        {
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {"seq": 2, "type": "tool_call", "payload": {"name": "n"}},
+        {
+            "seq": 3,
+            "type": "run_failed",
+            "payload": {"state": "s", "error": {"type": "E", "message": "boom"}},
+        },
+        {"seq": 4, "type": "run_completed", "payload": {"status": "failed"}},
+    ]
+    doc = replay_html("run-z", events, style="stakeholder")
+    assert "attention=" in doc
+    assert "boom" in doc
+    assert "0002  tool_call" not in doc
+    assert "Run timeline" in doc

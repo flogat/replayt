@@ -36,6 +36,25 @@ def _is_windows_drive_path_target(target: str) -> bool:
     return target[0].isalpha() and target[1] == ":" and target[2] in "/\\"
 
 
+def _wrong_workflow_type_message(target: str, obj: Any) -> str:
+    """Explain MODULE:VAR / file targets that resolve to a non-Workflow object."""
+
+    t = type(obj)
+    mod = getattr(t, "__module__", "") or ""
+    name = getattr(t, "__qualname__", t.__name__)
+    if mod in ("", "builtins"):
+        type_label = name
+    else:
+        type_label = f"{mod}.{name}"
+    return (
+        f"Target {target!r} resolved to {type_label}, not replayt.workflow.Workflow. "
+        "Pass the name of the variable that holds your built Workflow instance (often `wf` or `workflow`), "
+        "not a class, plain dict, or factory function. "
+        f"After fixing the export, `replayt doctor --skip-connectivity --target {target}` "
+        "checks the graph without executing."
+    )
+
+
 def _target_path_not_found_message(target: str, path: Path) -> str:
     """Explain missing targets with copy-paste fixes (junior onboarding)."""
 
@@ -212,7 +231,17 @@ def load_target(target: str) -> Workflow:
         if path.suffix == ".py":
             obj = load_python_file(path)
         else:
-            obj = workflow_from_spec(load_workflow_yaml(path))
+            try:
+                obj = workflow_from_spec(load_workflow_yaml(path))
+            except RuntimeError as exc:
+                msg = str(exc).strip()
+                low = msg.lower()
+                if "yaml" in low and ("extra" in low or "pip install" in low):
+                    raise typer.BadParameter(
+                        f"{msg} Then retry `replayt run {path}` "
+                        f"(or the same path with `replayt doctor --skip-connectivity --target {path}`)."
+                    ) from exc
+                raise
     elif ":" in target and not _is_windows_drive_path_target(target):
         mod_name, attr = target.split(":", 1)
         try:
@@ -247,7 +276,7 @@ def load_target(target: str) -> Workflow:
             "Use a `.py` or `.yaml` / `.yml` path, or MODULE:VAR (for example `replayt_examples.e01_hello_world:wf`)."
         )
     if not isinstance(obj, Workflow):
-        raise typer.BadParameter(f"{target} did not resolve to a replayt.workflow.Workflow")
+        raise typer.BadParameter(_wrong_workflow_type_message(target, obj))
     return obj
 
 

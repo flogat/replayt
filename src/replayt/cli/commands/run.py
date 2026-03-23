@@ -195,17 +195,61 @@ def cmd_init(
         "basic",
         "--template",
         "-t",
-        help="basic|approval|tool-using|yaml|issue-triage|publishing-preflight",
+        help="Template key; replayt init --list prints keys and summaries.",
     ),
     ci: str | None = typer.Option(
         None,
         "--ci",
         help="Also write CI workflow: github → .github/workflows/replayt.yml (replace CHANGE_ME_MODULE:wf).",
     ),
+    list_templates: bool = typer.Option(False, "--list", help="List scaffold templates and exit."),
+    output: Literal["text", "json"] = typer.Option(
+        "text",
+        "--output",
+        "-o",
+        help="With --list: text (default) or json (replayt.init_templates.v1).",
+    ),
 ) -> None:
     """Create a minimal workflow file and .env.example in the given directory."""
 
-    from replayt.cli.templates import TEMPLATES
+    from replayt.cli.templates import (
+        INIT_TEMPLATES_SCHEMA,
+        TEMPLATES,
+        init_template_cli_snippets,
+        list_init_template_specs,
+    )
+
+    if list_templates:
+        if ci is not None:
+            raise typer.BadParameter("Cannot combine --list with --ci")
+        specs = list_init_template_specs()
+        if output == "json":
+            typer.echo(
+                json.dumps(
+                    {
+                        "schema": INIT_TEMPLATES_SCHEMA,
+                        "templates": [
+                            {
+                                "key": key,
+                                "workflow_file": spec.filename,
+                                "inputs_file": spec.inputs_filename,
+                                "llm_backed": spec.llm_backed,
+                                "summary": spec.summary,
+                                "cli": init_template_cli_snippets(key),
+                            }
+                            for key, spec in specs
+                        ],
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            typer.echo("Init templates:")
+            for key, spec in specs:
+                mode = "llm-backed" if spec.llm_backed else "deterministic"
+                typer.echo(f"  - {key}: {spec.summary} [{mode}]")
+                typer.echo(f"      {init_template_cli_snippets(key)['init_here']}")
+        raise typer.Exit(code=0)
 
     if template not in TEMPLATES:
         raise typer.BadParameter(f"Unknown template {template!r}; choose from: {', '.join(sorted(TEMPLATES))}")
@@ -547,6 +591,8 @@ def cmd_run(
                 run_id=run_id,
                 log_dir=log_dir,
                 log_mode=log_mode,
+                forbid_log_mode_full=forbid_full,
+                redact_keys=redact_keys,
                 dry_run=dry_run,
                 resume=resume,
                 sqlite=sqlite,
@@ -1049,6 +1095,9 @@ def cmd_resume(
                 run_id=run_id,
                 approval_id=approval_id,
                 reject=reject,
+                log_mode=log_mode,
+                forbid_log_mode_full=forbid_full,
+                redact_keys=redact_keys,
                 workflow_contract=workflow_contract,
                 timeout_seconds=hook_timeout,
                 metadata_json=metadata_json,

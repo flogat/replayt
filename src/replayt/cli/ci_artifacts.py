@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,23 @@ class ResolvedCIArtifacts:
     github_summary_requested_source: str
     github_step_summary: Path | None
     github_step_summary_source: str
+
+
+def ci_run_summary_runtime_fields() -> dict[str, str]:
+    """Stable host/interpreter stamps for machine-readable CI summaries."""
+
+    try:
+        import replayt as _rt
+
+        replayt_version = getattr(_rt, "__version__", "unknown")
+    except ImportError:
+        replayt_version = "unknown"
+    vi = sys.version_info
+    return {
+        "replayt_version": replayt_version,
+        "python_version": f"{vi.major}.{vi.minor}.{vi.micro}",
+        "platform": sys.platform,
+    }
 
 
 def parse_ci_metadata_from_env() -> dict[str, Any] | None:
@@ -177,6 +195,7 @@ def write_summary_json(
         "target": target,
         "log_dir": str(log_dir.resolve()),
         "dry_run": dry_run,
+        **ci_run_summary_runtime_fields(),
     }
     if sqlite is not None:
         payload["sqlite"] = str(sqlite.resolve())

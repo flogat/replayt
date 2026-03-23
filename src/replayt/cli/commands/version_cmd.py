@@ -10,6 +10,7 @@ import typer
 
 import replayt
 from replayt.cli.config import SUPPORTED_CONFIG_KEYS, build_project_config_discovery_report
+from replayt.cli.distribution_metadata import DISTRIBUTION_METADATA_SCHEMA, build_distribution_metadata_report
 from replayt.cli.path_readiness import build_operational_paths_report
 from replayt.cli.run_support import (
     RUN_RESULT_SCHEMA,
@@ -72,6 +73,7 @@ def build_version_report() -> dict[str, object]:
         "cli_json_stdout_contract": build_cli_json_stdout_contract(),
         "project_config_discovery": build_project_config_discovery_report(),
         "operational_paths": build_operational_paths_report(),
+        "distribution_metadata": build_distribution_metadata_report(),
         "cli_machine_readable_schemas": {
             "version_report": VERSION_REPORT_SCHEMA,
             "project_config_discovery": "replayt.project_config_discovery.v1",
@@ -82,6 +84,7 @@ def build_version_report() -> dict[str, object]:
             "config_report": "replayt.config_report.v1",
             "ci_run_summary": "replayt.ci_run_summary.v1",
             "operational_paths": "replayt.operational_paths.v1",
+            "distribution_metadata": DISTRIBUTION_METADATA_SCHEMA,
             "run_result": RUN_RESULT_SCHEMA,
             "inspect_report": "replayt.inspect_report.v1",
             "runs_report": "replayt.runs_report.v1",
@@ -94,6 +97,7 @@ def build_version_report() -> dict[str, object]:
             "verify_seal_report": "replayt.verify_seal_report.v1",
             "try_examples": "replayt.try_examples.v1",
             "try_copy": "replayt.try_copy.v1",
+            "init_templates": "replayt.init_templates.v1",
         },
     }
 

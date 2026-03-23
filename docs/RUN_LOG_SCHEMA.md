@@ -105,7 +105,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `stage` (string): for example `schema_limit`, `response_limit`, `json_extract`, `json_decode`, or `schema_validate`
 - `structured_output_mode` (string): `prompt_only` or `native_json_schema`
 - `error` (object): serialized exception with `type`, `module`, and `message`
-- `effective` (object, optional): resolved LLM settings for the failed parse call
+- `effective` (object, optional): resolved LLM settings for the failed parse call (including `structured_output_mode`); for `schema_limit` failures this is still populated even though no `llm_request` was emitted (no giant system schema is hashed into `messages_sha256`)
 - `messages_sha256` (string, optional): same fingerprint as the triggering `llm_request` when the provider call happened
 - `effective_sha256` (string, optional): same fingerprint as the triggering `llm_request` when the provider call happened
 - `schema_sha256` (string, optional): stable SHA-256 fingerprint of the parse schema

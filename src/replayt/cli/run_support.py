@@ -12,10 +12,27 @@ from typing import Any
 
 import typer
 
+import replayt
 from replayt.runner import RunResult
 from replayt.workflow import Workflow
 
 RUN_RESULT_SCHEMA = "replayt.run_result.v1"
+
+
+def _privacy_contract_hook_env(
+    *,
+    log_mode: str,
+    forbid_log_mode_full: bool,
+    redact_keys: tuple[str, ...],
+) -> dict[str, str]:
+    """Non-secret logging contract for trusted policy hooks (audit without reading JSONL)."""
+
+    keys = sorted(redact_keys, key=str.lower)
+    return {
+        "REPLAYT_LOG_MODE": log_mode,
+        "REPLAYT_FORBID_LOG_MODE_FULL": "1" if forbid_log_mode_full else "0",
+        "REPLAYT_REDACT_KEYS_JSON": json.dumps(keys),
+    }
 
 
 def _workflow_contract_hook_env(contract: dict[str, Any]) -> dict[str, str]:
@@ -329,7 +346,11 @@ def policy_hook_trust_audit_paths_for_cfg(cfg: dict[str, Any]) -> list[Path]:
 def invoke_hook(argv: list[str], *, extra_env: dict[str, str], timeout_seconds: float | None) -> None:
     """Run *argv* with extra env vars; *argv* must come from trusted config."""
 
-    env = {**os.environ, **extra_env}
+    env = {
+        **os.environ,
+        **extra_env,
+        "REPLAYT_REPLAYT_VERSION": replayt.__version__,
+    }
     subprocess.run(
         argv,
         env=env,
@@ -346,6 +367,8 @@ def invoke_run_hook(
     run_id: str,
     log_dir: Path,
     log_mode: str,
+    forbid_log_mode_full: bool,
+    redact_keys: tuple[str, ...],
     dry_run: bool,
     resume: bool,
     sqlite: Path | None,
@@ -363,8 +386,12 @@ def invoke_run_hook(
         "REPLAYT_RUN_ID": run_id,
         "REPLAYT_RUN_MODE": "resume" if resume else "run",
         "REPLAYT_LOG_DIR": str(log_dir.resolve()),
-        "REPLAYT_LOG_MODE": log_mode,
         "REPLAYT_DRY_RUN": "1" if dry_run else "0",
+        **_privacy_contract_hook_env(
+            log_mode=log_mode,
+            forbid_log_mode_full=forbid_log_mode_full,
+            redact_keys=redact_keys,
+        ),
         **_workflow_contract_hook_env(workflow_contract),
     }
     if sqlite is not None:
@@ -387,6 +414,9 @@ def invoke_resume_hook(
     run_id: str,
     approval_id: str,
     reject: bool,
+    log_mode: str,
+    forbid_log_mode_full: bool,
+    redact_keys: tuple[str, ...],
     workflow_contract: dict[str, Any],
     timeout_seconds: float | None,
     metadata_json: str | None = None,
@@ -400,6 +430,11 @@ def invoke_resume_hook(
         "REPLAYT_RUN_ID": run_id,
         "REPLAYT_APPROVAL_ID": approval_id,
         "REPLAYT_REJECT": "1" if reject else "0",
+        **_privacy_contract_hook_env(
+            log_mode=log_mode,
+            forbid_log_mode_full=forbid_log_mode_full,
+            redact_keys=redact_keys,
+        ),
         **_workflow_contract_hook_env(workflow_contract),
     }
     _merge_optional_hook_json_env(
@@ -425,6 +460,9 @@ def invoke_export_hook(
     report_style: str | None,
     workflow_contract: dict[str, Any],
     cli_target: str | None,
+    log_mode: str,
+    forbid_log_mode_full: bool,
+    redact_keys: tuple[str, ...],
     timeout_seconds: float | None,
     metadata_json: str | None = None,
     tags_json: str | None = None,
@@ -440,6 +478,11 @@ def invoke_export_hook(
         "REPLAYT_EXPORT_OUT": str(out.resolve()),
         "REPLAYT_EXPORT_SEAL": "1" if seal else "0",
         "REPLAYT_EXPORT_EVENT_COUNT": str(event_count),
+        **_privacy_contract_hook_env(
+            log_mode=log_mode,
+            forbid_log_mode_full=forbid_log_mode_full,
+            redact_keys=redact_keys,
+        ),
         **_workflow_contract_hook_env(workflow_contract),
     }
     if sqlite is not None:
@@ -466,6 +509,9 @@ def invoke_seal_hook(
     seal_out: Path,
     line_count: int,
     workflow_contract: dict[str, Any],
+    log_mode: str,
+    forbid_log_mode_full: bool,
+    redact_keys: tuple[str, ...],
     timeout_seconds: float | None,
     metadata_json: str | None = None,
     tags_json: str | None = None,
@@ -479,6 +525,11 @@ def invoke_seal_hook(
         "REPLAYT_SEAL_JSONL": str(jsonl_path.resolve()),
         "REPLAYT_SEAL_OUT": str(seal_out.resolve()),
         "REPLAYT_SEAL_LINE_COUNT": str(line_count),
+        **_privacy_contract_hook_env(
+            log_mode=log_mode,
+            forbid_log_mode_full=forbid_log_mode_full,
+            redact_keys=redact_keys,
+        ),
         **_workflow_contract_hook_env(workflow_contract),
     }
     _merge_optional_hook_json_env(
@@ -501,6 +552,9 @@ def invoke_verify_seal_hook(
     line_count: int,
     file_sha256: str,
     workflow_contract: dict[str, Any],
+    log_mode: str,
+    forbid_log_mode_full: bool,
+    redact_keys: tuple[str, ...],
     timeout_seconds: float | None,
     metadata_json: str | None = None,
     tags_json: str | None = None,
@@ -516,6 +570,11 @@ def invoke_verify_seal_hook(
         "REPLAYT_VERIFY_SEAL_SCHEMA": manifest_schema,
         "REPLAYT_VERIFY_SEAL_LINE_COUNT": str(line_count),
         "REPLAYT_VERIFY_SEAL_FILE_SHA256": file_sha256,
+        **_privacy_contract_hook_env(
+            log_mode=log_mode,
+            forbid_log_mode_full=forbid_log_mode_full,
+            redact_keys=redact_keys,
+        ),
         **_workflow_contract_hook_env(workflow_contract),
     }
     _merge_optional_hook_json_env(
@@ -537,8 +596,11 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
             "injected_env_vars": sorted(
                 {
                     "REPLAYT_DRY_RUN",
+                    "REPLAYT_FORBID_LOG_MODE_FULL",
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
+                    "REPLAYT_REDACT_KEYS_JSON",
+                    "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
@@ -559,7 +621,11 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
             "injected_env_vars": sorted(
                 {
                     "REPLAYT_APPROVAL_ID",
+                    "REPLAYT_FORBID_LOG_MODE_FULL",
+                    "REPLAYT_LOG_MODE",
                     "REPLAYT_REJECT",
+                    "REPLAYT_REDACT_KEYS_JSON",
+                    "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_METADATA_JSON",
@@ -582,7 +648,11 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_EXPORT_MODE",
                     "REPLAYT_EXPORT_OUT",
                     "REPLAYT_EXPORT_SEAL",
+                    "REPLAYT_FORBID_LOG_MODE_FULL",
                     "REPLAYT_LOG_DIR",
+                    "REPLAYT_LOG_MODE",
+                    "REPLAYT_REDACT_KEYS_JSON",
+                    "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_METADATA_JSON",
@@ -600,7 +670,11 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
             "argv_config_key": "seal_hook",
             "injected_env_vars": sorted(
                 {
+                    "REPLAYT_FORBID_LOG_MODE_FULL",
                     "REPLAYT_LOG_DIR",
+                    "REPLAYT_LOG_MODE",
+                    "REPLAYT_REDACT_KEYS_JSON",
+                    "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_METADATA_JSON",
@@ -619,7 +693,11 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
             "argv_config_key": "verify_seal_hook",
             "injected_env_vars": sorted(
                 {
+                    "REPLAYT_FORBID_LOG_MODE_FULL",
                     "REPLAYT_LOG_DIR",
+                    "REPLAYT_LOG_MODE",
+                    "REPLAYT_REDACT_KEYS_JSON",
+                    "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_METADATA_JSON",
@@ -754,6 +832,61 @@ def build_cli_stdio_contract() -> dict[str, Any]:
     }
 
 
+CLI_JSON_STDOUT_TRUST_PROFILES: dict[str, str] = {
+    "inventory_read_only": (
+        "Does not invoke Runner.run, run_hook, or seal/verify_seal hooks; does not append JSONL run timelines "
+        "or write seal manifests. Subcommands that take a TARGET still import or load that workflow module or "
+        "file to build contracts or validation payloads."
+    ),
+    "graph_validate_short_circuit": (
+        "Loads the workflow and validates the graph and optional inputs metadata, then exits before run_hook "
+        "and before Runner.run (same early-return path as replayt validate for --dry-check on run, ci, and try)."
+    ),
+    "workflow_run_execute": (
+        "Runs Runner.run (or an isolated subprocess with the same outcome). May append JSONL/SQLite, may "
+        "invoke run_hook before execution, and may call the configured LLM unless the CLI uses --dry-run "
+        "placeholder mode."
+    ),
+    "seal_manifest_write": (
+        "Hashes the run JSONL and writes <run_id>.seal.json beside it; may invoke seal_hook before the "
+        "manifest is written."
+    ),
+    "verify_seal_compare": (
+        "Re-hashes JSONL and compares digests to a manifest; may invoke verify_seal_hook after a successful "
+        "match (hook failure turns exit code 1)."
+    ),
+    "doctor_preflight": (
+        "Install, config, and path readiness checks; may contact the default LLM provider unless "
+        "--skip-connectivity."
+    ),
+    "try_copy_scaffold": (
+        "Copies packaged example files into --copy-to; does not invoke Runner.run."
+    ),
+}
+
+
+def _stdout_json_route(
+    trust_profile: str,
+    *,
+    schema_key: str,
+    option: str,
+    short: str | None = None,
+    equals: str | None = None,
+    when: str | None = None,
+    boolean_flag: bool | None = None,
+) -> dict[str, Any]:
+    row: dict[str, Any] = {"option": option, "schema_key": schema_key, "trust_profile": trust_profile}
+    if short is not None:
+        row["short"] = short
+    if equals is not None:
+        row["equals"] = equals
+    if when is not None:
+        row["when"] = when
+    if boolean_flag is not None:
+        row["boolean_flag"] = boolean_flag
+    return row
+
+
 def build_cli_json_stdout_contract() -> dict[str, Any]:
     """Machine-readable map of JSON-on-stdout routes (``replayt version --format json``).
 
@@ -762,112 +895,171 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
     file sinks such as ``--summary-json``.
     """
 
+    inv = "inventory_read_only"
+    dry = "graph_validate_short_circuit"
+    runx = "workflow_run_execute"
+
     return {
         "note": (
             "Maps subcommands to flags that select JSON on stdout. Each schema_key matches a key under "
-            "cli_machine_readable_schemas on this report. replayt log-schema always prints the bundled "
+            "cli_machine_readable_schemas on this report. Each route includes trust_profile, an index into "
+            "trust_profiles for subprocess/MCP allowlists. replayt log-schema always prints the bundled "
             "Draft JSON Schema for one JSONL line (stdout) and is not tied to cli_machine_readable_schemas. "
             "replayt ci still prints a one-line stderr reminder when --output json is used."
         ),
+        "trust_profiles": dict(sorted(CLI_JSON_STDOUT_TRUST_PROFILES.items())),
         "subcommands": {
             "ci": [
-                {
-                    "option": "--output",
-                    "short": "-o",
-                    "equals": "json",
-                    "schema_key": "validate_report",
-                    "when": "with --dry-check (graph/input validation only)",
-                },
-                {
-                    "option": "--output",
-                    "short": "-o",
-                    "equals": "json",
-                    "schema_key": "run_result",
-                    "when": "without --dry-check (normal run or --dry-run trace)",
-                },
+                _stdout_json_route(
+                    dry,
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="validate_report",
+                    when="with --dry-check (graph/input validation only)",
+                ),
+                _stdout_json_route(
+                    runx,
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="run_result",
+                    when="without --dry-check (normal run or --dry-run trace)",
+                ),
             ],
-            "config": [{"option": "--format", "short": "-f", "equals": "json", "schema_key": "config_report"}],
+            "config": [
+                _stdout_json_route(inv, option="--format", short="-f", equals="json", schema_key="config_report")
+            ],
             "contract": [
-                {
-                    "option": "--format",
-                    "short": "-f",
-                    "equals": "json",
-                    "schema_key": "workflow_contract_check",
-                    "when": "with --check SNAPSHOT (drift report; exit 1 when not ok)",
-                },
-                {
-                    "option": "--format",
-                    "short": "-f",
-                    "equals": "json",
-                    "schema_key": "workflow_contract",
-                    "when": "without --check (live contract snapshot)",
-                },
+                _stdout_json_route(
+                    inv,
+                    option="--format",
+                    short="-f",
+                    equals="json",
+                    schema_key="workflow_contract_check",
+                    when="with --check SNAPSHOT (drift report; exit 1 when not ok)",
+                ),
+                _stdout_json_route(
+                    inv,
+                    option="--format",
+                    short="-f",
+                    equals="json",
+                    schema_key="workflow_contract",
+                    when="without --check (live contract snapshot)",
+                ),
             ],
-            "diff": [{"option": "--output", "short": "-o", "equals": "json", "schema_key": "diff_report"}],
-            "doctor": [{"option": "--format", "short": "-f", "equals": "json", "schema_key": "doctor_report"}],
+            "diff": [
+                _stdout_json_route(inv, option="--output", short="-o", equals="json", schema_key="diff_report")
+            ],
+            "doctor": [
+                _stdout_json_route(
+                    "doctor_preflight", option="--format", short="-f", equals="json", schema_key="doctor_report"
+                )
+            ],
+            "init": [
+                _stdout_json_route(
+                    inv,
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="init_templates",
+                    when="with --list",
+                ),
+            ],
             "inspect": [
-                {"option": "--output", "short": "-o", "equals": "json", "schema_key": "inspect_report"},
-                {
-                    "option": "--json",
-                    "boolean_flag": True,
-                    "schema_key": "inspect_report",
-                    "when": "same payload as --output json",
-                },
+                _stdout_json_route(
+                    inv, option="--output", short="-o", equals="json", schema_key="inspect_report"
+                ),
+                _stdout_json_route(
+                    inv,
+                    option="--json",
+                    schema_key="inspect_report",
+                    when="same payload as --output json",
+                    boolean_flag=True,
+                ),
             ],
-            "runs": [{"option": "--output", "short": "-o", "equals": "json", "schema_key": "runs_report"}],
+            "runs": [
+                _stdout_json_route(inv, option="--output", short="-o", equals="json", schema_key="runs_report")
+            ],
             "run": [
-                {
-                    "option": "--output",
-                    "short": "-o",
-                    "equals": "json",
-                    "schema_key": "validate_report",
-                    "when": "with --dry-check (graph/input validation only)",
-                },
-                {
-                    "option": "--output",
-                    "short": "-o",
-                    "equals": "json",
-                    "schema_key": "run_result",
-                    "when": "without --dry-check (normal run or --dry-run trace)",
-                },
+                _stdout_json_route(
+                    dry,
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="validate_report",
+                    when="with --dry-check (graph/input validation only)",
+                ),
+                _stdout_json_route(
+                    runx,
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="run_result",
+                    when="without --dry-check (normal run or --dry-run trace)",
+                ),
             ],
-            "seal": [{"option": "--output", "short": "-o", "equals": "json", "schema_key": "seal"}],
-            "stats": [{"option": "--output", "short": "-o", "equals": "json", "schema_key": "stats_report"}],
+            "seal": [
+                _stdout_json_route(
+                    "seal_manifest_write", option="--output", short="-o", equals="json", schema_key="seal"
+                )
+            ],
+            "stats": [
+                _stdout_json_route(inv, option="--output", short="-o", equals="json", schema_key="stats_report")
+            ],
             "try": [
-                {
-                    "option": "--output",
-                    "short": "-o",
-                    "equals": "json",
-                    "schema_key": "try_examples",
-                    "when": "with --list",
-                },
-                {
-                    "option": "--output",
-                    "short": "-o",
-                    "equals": "json",
-                    "schema_key": "try_copy",
-                    "when": "with --copy-to DIR",
-                },
-                {
-                    "option": "--output",
-                    "short": "-o",
-                    "equals": "json",
-                    "schema_key": "validate_report",
-                    "when": "with --dry-check (invokes replayt run --dry-check)",
-                },
-                {
-                    "option": "--output",
-                    "short": "-o",
-                    "equals": "json",
-                    "schema_key": "run_result",
-                    "when": "example run path without --dry-check (invokes replayt run for the packaged target)",
-                },
+                _stdout_json_route(
+                    inv,
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="try_examples",
+                    when="with --list",
+                ),
+                _stdout_json_route(
+                    "try_copy_scaffold",
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="try_copy",
+                    when="with --copy-to DIR",
+                ),
+                _stdout_json_route(
+                    dry,
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="validate_report",
+                    when="with --dry-check (invokes replayt run --dry-check)",
+                ),
+                _stdout_json_route(
+                    runx,
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="run_result",
+                    when="example run path without --dry-check (invokes replayt run for the packaged target)",
+                ),
             ],
-            "validate": [{"option": "--format", "short": "-f", "equals": "json", "schema_key": "validate_report"}],
+            "validate": [
+                _stdout_json_route(
+                    inv, option="--format", short="-f", equals="json", schema_key="validate_report"
+                )
+            ],
             "verify-seal": [
-                {"option": "--output", "short": "-o", "equals": "json", "schema_key": "verify_seal_report"}
+                _stdout_json_route(
+                    "verify_seal_compare",
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="verify_seal_report",
+                )
             ],
-            "version": [{"option": "--format", "short": "-f", "equals": "json", "schema_key": "version_report"}],
+            "version": [
+                _stdout_json_route(
+                    inv, option="--format", short="-f", equals="json", schema_key="version_report"
+                )
+            ],
         },
     }
 

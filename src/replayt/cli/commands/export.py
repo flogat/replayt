@@ -18,11 +18,19 @@ from replayt.cli.config import (
     export_hook_timeout_seconds,
     get_project_config,
     parse_log_mode,
+    resolve_forbid_log_mode_full,
     resolve_log_dir,
+    resolve_log_mode_setting,
+    resolve_redact_keys,
     seal_hook_timeout_seconds,
     verify_seal_hook_timeout_seconds,
 )
-from replayt.cli.display import event_summary, replay_html, run_attention_summary
+from replayt.cli.display import (
+    event_summary,
+    parse_llm_model_filters,
+    replay_html,
+    run_attention_summary,
+)
 from replayt.cli.run_id_hints import echo_missing_run_hints
 from replayt.cli.run_support import (
     export_hook_argv,
@@ -42,6 +50,17 @@ from replayt.cli.targets import load_target
 from replayt.export_run import events_to_jsonl_lines
 from replayt.graph_export import workflow_to_mermaid
 from replayt.persistence.jsonl import validate_run_id
+
+
+def _privacy_hook_kwargs_from_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
+    log_mode, _ = resolve_log_mode_setting("redacted", cfg)
+    forbid_full, _ = resolve_forbid_log_mode_full(cfg)
+    redact_keys, _ = resolve_redact_keys(None, cfg)
+    return {
+        "log_mode": log_mode,
+        "forbid_log_mode_full": forbid_full,
+        "redact_keys": redact_keys,
+    }
 
 
 def _maybe_invoke_export_hook(
@@ -82,6 +101,7 @@ def _maybe_invoke_export_hook(
             metadata_json=meta_j,
             tags_json=tags_j,
             experiment_json=exp_j,
+            **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
         lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
@@ -125,6 +145,7 @@ def _maybe_invoke_seal_hook(
             metadata_json=meta_j,
             tags_json=tags_j,
             experiment_json=exp_j,
+            **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
         lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
@@ -172,6 +193,7 @@ def _maybe_invoke_verify_seal_hook(
             metadata_json=meta_j,
             tags_json=tags_j,
             experiment_json=exp_j,
+            **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
         lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"
@@ -520,10 +542,21 @@ def cmd_report(
         "--format",
         help="html (self-contained page) or markdown (paste into tickets / chat).",
     ),
+    llm_model: list[str] | None = typer.Option(
+        None,
+        "--llm-model",
+        help=(
+            "Repeat to OR-match logged model ids: limit structured outputs, parse-failure cards, "
+            "and token totals to matching `llm_response` / structured-output lines "
+            "(same rules as `replayt inspect --llm-model`)."
+        ),
+    ),
 ) -> None:
     """Generate a self-contained HTML or Markdown report for a run."""
 
     from replayt.cli.report_template import build_run_report_html, build_run_report_markdown
+
+    llm_model_filters = parse_llm_model_filters(llm_model)
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
@@ -535,9 +568,9 @@ def cmd_report(
         raise typer.Exit(code=1)
 
     if report_format == "markdown":
-        report = build_run_report_markdown(run_id, events, style=style)
+        report = build_run_report_markdown(run_id, events, style=style, llm_model_filter=llm_model_filters)
     else:
-        report = build_run_report_html(run_id, events, style=style)
+        report = build_run_report_html(run_id, events, style=style, llm_model_filter=llm_model_filters)
 
     if out:
         out_path = Path(out)
@@ -566,6 +599,14 @@ def cmd_report_diff(
         help="default (standard section order), stakeholder (attention hints + same order), "
         "or support (failure/approvals before context, for triage handoffs).",
     ),
+    llm_model: list[str] | None = typer.Option(
+        None,
+        "--llm-model",
+        help=(
+            "Repeat to OR-match logged model ids: structured outputs, parse-failure rows, and token "
+            "totals use the same slice as `replayt report --llm-model`."
+        ),
+    ),
 ) -> None:
     """Side-by-side comparison of two runs from local JSONL (no model calls)."""
 
@@ -574,6 +615,8 @@ def cmd_report_diff(
         build_report_diff_markdown,
         collect_report_context,
     )
+
+    llm_model_filters = parse_llm_model_filters(llm_model)
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
@@ -588,12 +631,16 @@ def cmd_report_diff(
         typer.echo(f"No events for run_id={run_b!r}", err=True)
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
-    ctx_a = collect_report_context(events_a)
-    ctx_b = collect_report_context(events_b)
+    ctx_a = collect_report_context(events_a, llm_model_filter=llm_model_filters)
+    ctx_b = collect_report_context(events_b, llm_model_filter=llm_model_filters)
     if report_format == "markdown":
-        doc = build_report_diff_markdown(run_a, run_b, ctx_a, ctx_b, style=style)
+        doc = build_report_diff_markdown(
+            run_a, run_b, ctx_a, ctx_b, style=style, llm_model_filter=llm_model_filters
+        )
     else:
-        doc = build_report_diff_html(run_a, run_b, ctx_a, ctx_b, style=style)
+        doc = build_report_diff_html(
+            run_a, run_b, ctx_a, ctx_b, style=style, llm_model_filter=llm_model_filters
+        )
     if out:
         out_path = Path(out)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -773,7 +820,7 @@ def cmd_bundle_export(
         report_style=report_style,
     )
     report_html = build_run_report_html(run_id, events, style=report_style)
-    timeline_html = replay_html(run_id, events)
+    timeline_html = replay_html(run_id, events, style=report_style)
     lines = events_to_jsonl_lines(events, lm)
     bundle = b"".join(lines)
     digest = hashlib.sha256(bundle).hexdigest()
@@ -796,6 +843,7 @@ def cmd_bundle_export(
         "run_id": run_id,
         "export_mode": export_mode,
         "report_style": report_style,
+        "timeline_style": report_style,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files": files,
         "events_jsonl_sha256": digest,
@@ -818,7 +866,11 @@ def cmd_bundle_export(
                 "Integrity record for the sanitized events.jsonl inside this stakeholder bundle. "
                 "Verify the extracted file against this manifest; it does not attest to the original on-disk JSONL."
             ),
-            extra={"export_mode": export_mode, "report_style": report_style},
+            extra={
+                "export_mode": export_mode,
+                "report_style": report_style,
+                "timeline_style": report_style,
+            },
         )
         seal_bytes = json.dumps(seal_manifest, indent=2).encode("utf-8")
     out.parent.mkdir(parents=True, exist_ok=True)

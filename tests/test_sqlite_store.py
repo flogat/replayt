@@ -154,6 +154,19 @@ def test_sqlite_read_only_store_loads_existing_events_and_rejects_writes(tmp_pat
         reader.close()
 
 
+def test_sqlite_read_only_uri_handles_path_with_spaces(tmp_path: Path) -> None:
+    db = tmp_path / "my events.sqlite3"
+    writer = SQLiteStore(db)
+    writer.append_event("r1", ts="t1", typ="run_started", payload={})
+    writer.close()
+
+    reader = SQLiteStore(db, read_only=True)
+    try:
+        assert [event["type"] for event in reader.load_events("r1")] == ["run_started"]
+    finally:
+        reader.close()
+
+
 def test_multi_store_delete_run(tmp_path: Path) -> None:
     j = JSONLStore(tmp_path / "j")
     s = SQLiteStore(tmp_path / "db.sqlite3")

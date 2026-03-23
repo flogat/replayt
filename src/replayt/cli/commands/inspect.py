@@ -487,6 +487,14 @@ def cmd_replay(
         "-f",
         help="text (terminal) or html (HTML page with inline styles).",
     ),
+    style: Literal["default", "stakeholder", "support"] = typer.Option(
+        "default",
+        "--style",
+        help=(
+            "Timeline rows: default (all events) or stakeholder/support "
+            "(omit llm_* and tool_* rows; HTML adds attention banner)."
+        ),
+    ),
     out: Path | None = typer.Option(
         None,
         "--out",
@@ -504,7 +512,7 @@ def cmd_replay(
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
     if format == "html":
-        doc = replay_html(run_id, events)
+        doc = replay_html(run_id, events, style=style)
         if out is not None:
             out.parent.mkdir(parents=True, exist_ok=True)
             out.write_text(doc, encoding="utf-8")
@@ -512,7 +520,7 @@ def cmd_replay(
         else:
             typer.echo(doc)
         return
-    for line in replay_timeline_lines(events):
+    for line in replay_timeline_lines(events, style=style):
         typer.echo(line)
 
 
@@ -1070,8 +1078,18 @@ def cmd_diff(
     log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o"),
+    llm_model: list[str] | None = typer.Option(
+        None,
+        "--llm-model",
+        help=(
+            "Repeat to OR-match logged model ids: keep structured outputs and LLM latency sums that "
+            "match `effective.model` (else top-level `model`) like `replayt inspect --llm-model`."
+        ),
+    ),
 ) -> None:
     """Compare two runs side by side: states, outputs, tool calls, status, latency."""
+
+    llm_model_filters = parse_llm_model_filters(llm_model)
 
     cli_log_dir = log_dir
     log_dir = resolve_log_dir(log_dir, log_subdir)
@@ -1087,8 +1105,8 @@ def cmd_diff(
         echo_missing_run_hints(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
         raise typer.Exit(code=1)
 
-    da = run_diff_data(events_a)
-    db = run_diff_data(events_b)
+    da = run_diff_data(events_a, llm_model_filter=llm_model_filters)
+    db = run_diff_data(events_b, llm_model_filter=llm_model_filters)
 
     diff_payload: dict[str, Any] = {
         "schema": _DIFF_REPORT_SCHEMA,
@@ -1116,6 +1134,8 @@ def cmd_diff(
             "delta_ms": db["total_latency_ms"] - da["total_latency_ms"],
         },
     }
+    if llm_model_filters is not None:
+        diff_payload["llm_model_filter"] = sorted(llm_model_filters)
 
     if da["structured_outputs"] != db["structured_outputs"]:
         field_diffs: dict[str, Any] = {}

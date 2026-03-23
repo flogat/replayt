@@ -20,7 +20,10 @@ class SQLiteStore:
         self.db_path = db_path
         self._read_only = read_only
         if read_only:
-            self._cx = sqlite3.connect(f"file:{db_path.as_posix()}?mode=ro", uri=True)
+            # ``as_uri()`` percent-encodes spaces and punctuation so ``?mode=ro`` cannot collide
+            # with characters in the path (unlike raw ``file:{as_posix()}?...``).
+            uri = db_path.expanduser().resolve().as_uri()
+            self._cx = sqlite3.connect(f"{uri}?mode=ro", uri=True)
         else:
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._cx = sqlite3.connect(db_path)

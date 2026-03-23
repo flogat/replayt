@@ -930,6 +930,22 @@ class LLMBridge:
         schema_hint = json.dumps(schema_json, ensure_ascii=False)
         cap = self._client.settings.max_schema_json_chars
         if len(schema_hint) > cap:
+            eff_pre, _, _, _ = self._merge_call(
+                model=model,
+                temperature=temperature,
+                top_p=top_p,
+                frequency_penalty=frequency_penalty,
+                presence_penalty=presence_penalty,
+                seed=seed,
+                max_tokens=max_tokens,
+                timeout_seconds=timeout_seconds,
+                provider=provider,
+                base_url=base_url,
+                extra_headers=extra_headers,
+                extra_body=extra_body,
+                stop=stop,
+            )
+            effective_schema_limit = {**eff_pre, "structured_output_mode": structured_output_mode}
             exc = ValueError(
                 f"JSON Schema for {model_type.__name__!r} serializes to {len(schema_hint)} characters, "
                 f"above max_schema_json_chars ({cap}); use a smaller model, split fields, or raise the limit "
@@ -940,6 +956,7 @@ class LLMBridge:
                 stage="schema_limit",
                 structured_output_mode=structured_output_mode,
                 error=exc,
+                effective=effective_schema_limit,
                 fingerprints=schema_fingerprint,
             )
             raise exc

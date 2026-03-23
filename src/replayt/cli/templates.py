@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+INIT_TEMPLATES_SCHEMA = "replayt.init_templates.v1"
+
 
 @dataclass(frozen=True)
 class TemplateSpec:
     content: str
     filename: str
     inputs_example: str
+    summary: str
     inputs_filename: str = "inputs.example.json"
     llm_backed: bool = False
 
@@ -341,21 +344,25 @@ TEMPLATES: dict[str, TemplateSpec] = {
         content=TEMPLATE_BASIC,
         filename="workflow.py",
         inputs_example='{\n  "customer_name": "Sam"\n}\n',
+        summary="Single-step hello workflow; deterministic, no LLM.",
     ),
     "approval": TemplateSpec(
         content=TEMPLATE_APPROVAL,
         filename="workflow.py",
         inputs_example='{\n  "draft": "Launch notes are ready for review."\n}\n',
+        summary="Human approval gate with pause and resume.",
     ),
     "tool-using": TemplateSpec(
         content=TEMPLATE_TOOL_USING,
         filename="workflow.py",
         inputs_example='{\n  "left": 2,\n  "right": 3\n}\n',
+        summary="Registers a typed Python tool and logs tool_call results.",
     ),
     "yaml": TemplateSpec(
         content=TEMPLATE_YAML,
         filename="workflow.yaml",
         inputs_example="{}\n",
+        summary="YAML-defined workflow graph (install replayt[yaml]).",
     ),
     "issue-triage": TemplateSpec(
         content=TEMPLATE_ISSUE_TRIAGE,
@@ -368,12 +375,27 @@ TEMPLATES: dict[str, TemplateSpec] = {
             "  }\n"
             "}\n"
         ),
+        summary="Structured LLM triage for GitHub-style issues.",
         llm_backed=True,
     ),
     "publishing-preflight": TemplateSpec(
         content=TEMPLATE_PUBLISHING_PREFLIGHT,
         filename="workflow.py",
         inputs_example='{\n  "draft": "We guarantee 200% returns forever.",\n  "audience": "general"\n}\n',
+        summary="LLM content review plus publish approval gate.",
         llm_backed=True,
     ),
 }
+
+
+def list_init_template_specs() -> list[tuple[str, TemplateSpec]]:
+    return [(key, TEMPLATES[key]) for key in sorted(TEMPLATES)]
+
+
+def init_template_cli_snippets(template_key: str) -> dict[str, str]:
+    """Copy-paste argv strings for docs and ``replayt init --list --output json``."""
+
+    return {
+        "init_here": f"replayt init --template {template_key}",
+        "init_with_ci_github": f"replayt init --template {template_key} --ci github",
+    }

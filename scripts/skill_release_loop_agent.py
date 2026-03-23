@@ -81,30 +81,38 @@ SKILL_RELEASE_PIPELINE_SCHEMA = "replayt.skill_release_pipeline.v1"
 
 SKILL_LOOP_MAIN_INJECTED_ENV_KEYS: tuple[str, ...] = (
     "REPO_ROOT",
+    "SKILL_COMMAND_SHA256",
     "SKILL_ITERATION",
     "SKILL_LOG_FILE",
+    "SKILL_LOG_REL",
     "SKILL_MAX_ITERATIONS",
     "SKILL_NAME",
     "SKILL_PATH",
     "SKILL_PIPELINE_SHA256",
     "SKILL_PROMPT_FILE",
+    "SKILL_PROMPT_REL",
     "SKILL_REQUESTED_NAME",
     "SKILL_ROOT",
     "SKILL_RUN_DIR",
+    "SKILL_RUN_DIR_REL",
     "SKILL_STEP_INDEX",
     "SKILL_STEP_TOTAL",
     "SKILL_TASK",
 )
 SKILL_LOOP_FIX_INJECTED_ENV_KEYS: tuple[str, ...] = (
     "REPO_ROOT",
+    "SKILL_COMMAND_SHA256",
     "SKILL_ITERATION",
     "SKILL_LOG_FILE",
+    "SKILL_LOG_REL",
     "SKILL_MAX_ITERATIONS",
     "SKILL_NAME",
     "SKILL_PIPELINE_SHA256",
     "SKILL_PROMPT_FILE",
+    "SKILL_PROMPT_REL",
     "SKILL_ROOT",
     "SKILL_RUN_DIR",
+    "SKILL_RUN_DIR_REL",
     "SKILL_STEP_INDEX",
     "SKILL_STEP_TOTAL",
     "SKILL_TASK",
@@ -140,15 +148,36 @@ def skill_pipeline_sha256(skill_names: list[str]) -> str:
     return hashlib.sha256("\n".join(skill_names).encode("utf-8")).hexdigest()
 
 
-def ensure_skill_release_pipeline_file(run_dir: Path, skill_names: list[str], task: str) -> str:
+def skill_command_template_sha256(skill_command: str) -> str:
+    """SHA-256 hex digest of the raw ``--skill-command`` template (UTF-8), for argv-contract gates."""
+
+    return hashlib.sha256(skill_command.encode("utf-8")).hexdigest()
+
+
+def path_under_repo_or_absolute(repo_root: str, target: str) -> str:
+    """Path under *repo_root* when possible; else absolute (e.g. different Windows drive)."""
+
+    root = Path(repo_root).resolve()
+    resolved = Path(target).resolve()
+    try:
+        return str(resolved.relative_to(root))
+    except ValueError:
+        return str(resolved)
+
+
+def ensure_skill_release_pipeline_file(
+    run_dir: Path, skill_names: list[str], task: str, skill_command: str
+) -> str:
     """Create run_dir/pipeline.json on first skill phase, or verify it matches --skills on resume."""
 
     sha = skill_pipeline_sha256(skill_names)
+    cmd_sha = skill_command_template_sha256(skill_command)
     path = run_dir / "pipeline.json"
     payload: dict[str, Any] = {
         "schema": SKILL_RELEASE_PIPELINE_SCHEMA,
         "skills": list(skill_names),
         "pipeline_sha256": sha,
+        "skill_command_sha256": cmd_sha,
         "task": task,
         "written_at": _utc_iso(),
     }
@@ -167,6 +196,13 @@ def ensure_skill_release_pipeline_file(run_dir: Path, skill_names: list[str], ta
                 f"{path} pipeline_sha256 {existing.get('pipeline_sha256')!r} != computed {sha!r}; "
                 "refusing to continue."
             )
+        existing_cmd_sha = existing.get("skill_command_sha256")
+        if isinstance(existing_cmd_sha, str) and len(existing_cmd_sha) == 64:
+            if existing_cmd_sha != cmd_sha:
+                raise LoopError(
+                    f"{path} skill_command_sha256 {existing_cmd_sha!r} != computed {cmd_sha!r}; "
+                    "use the same --skill-command as the original run or pick a fresh run directory."
+                )
         return sha
     tmp = path.with_suffix(path.suffix + ".tmp")
     tmp.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
@@ -193,6 +229,28 @@ def load_skill_release_pipeline_sha256(run_dir: Path) -> str:
     return sha
 
 
+def load_skill_command_sha256_from_pipeline(run_dir: Path) -> str | None:
+    """Return ``skill_command_sha256`` from *run_dir* / ``pipeline.json`` when present (legacy runs omit it)."""
+
+    path = run_dir / "pipeline.json"
+    if not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+    val = data.get("skill_command_sha256")
+    if isinstance(val, str) and len(val) == 64:
+        return val
+    return None
+
+
+def effective_skill_command_sha256(run_dir: Path, skill_command: str) -> str:
+    """Prefer the digest recorded in ``pipeline.json``; fall back to hashing the current ``--skill-command`` string."""
+
+    return load_skill_command_sha256_from_pipeline(run_dir) or skill_command_template_sha256(skill_command)
+
+
 def write_skill_invocation_json(
     *,
     prompt_path: Path,
@@ -209,10 +267,14 @@ def write_skill_invocation_json(
     step_index: int,
     step_total: int,
     pipeline_sha256: str,
+    skill_command_sha256: str,
     skill_requested_name: str | None = None,
 ) -> Path:
     """Atomically write machine-readable metadata for one skill / fix prompt invocation."""
     out = skill_invocation_json_path(prompt_path)
+    prompt_abs = str(prompt_path.resolve())
+    log_abs = str(Path(log_file).resolve())
+    run_dir_abs = str(Path(run_dir).resolve())
     payload: dict[str, Any] = {
         "schema": SKILL_INVOCATION_SCHEMA,
         "repo_root": repo_root,
@@ -220,9 +282,13 @@ def write_skill_invocation_json(
         "skill_name": skill_name,
         "skill_path": skill_path,
         "pipeline_sha256": pipeline_sha256,
-        "prompt_file": str(prompt_path.resolve()),
-        "log_file": str(Path(log_file).resolve()),
-        "run_dir": run_dir,
+        "skill_command_sha256": skill_command_sha256,
+        "prompt_file": prompt_abs,
+        "prompt_file_rel": path_under_repo_or_absolute(repo_root, prompt_abs),
+        "log_file": log_abs,
+        "log_file_rel": path_under_repo_or_absolute(repo_root, log_abs),
+        "run_dir": run_dir_abs,
+        "run_dir_rel": path_under_repo_or_absolute(repo_root, run_dir_abs),
         "injected_env_keys": sorted(injected_env_keys),
         "iteration": iteration,
         "max_iterations": max_iterations,
@@ -338,7 +404,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "--skill-command runs OpenAI Codex.\n"
             "--skill-command runs once per skill and can use placeholders:\n"
             "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {run_dir}\n"
-            "  {repo} {iteration} {max_iterations} {step_index} {step_total} {pipeline_sha256}\n"
+            "  {repo} {iteration} {max_iterations} {step_index} {step_total} {pipeline_sha256} "
+            "{skill_command_sha256}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
             "The same values are exported as environment variables prefixed with SKILL_ plus REPO_ROOT.\n"
             "Pipeline position within one iteration uses {step_index}/{step_total} (SKILL_STEP_*); "
@@ -773,9 +840,13 @@ def describe_skill_env_snippet(env: dict[str, str], *, task_max: int = 160) -> s
         "SKILL_STEP_INDEX",
         "SKILL_STEP_TOTAL",
         "SKILL_PIPELINE_SHA256",
+        "SKILL_COMMAND_SHA256",
         "SKILL_PROMPT_FILE",
+        "SKILL_PROMPT_REL",
         "SKILL_LOG_FILE",
+        "SKILL_LOG_REL",
         "SKILL_RUN_DIR",
+        "SKILL_RUN_DIR_REL",
     )
     lines = [f"{k}={env.get(k, '')}" for k in keys]
     task = env.get("SKILL_TASK", "")
@@ -1097,7 +1168,8 @@ def run_skill_iteration(
         + ("; resume skips steps whose logs end with exit_code=0." if resume else ".")
     )
     skill_names = [s.name for s in skills]
-    pipeline_sha256 = ensure_skill_release_pipeline_file(run_dir, skill_names, args.task)
+    pipeline_sha256 = ensure_skill_release_pipeline_file(run_dir, skill_names, args.task, args.skill_command)
+    skill_cmd_sha = skill_command_template_sha256(args.skill_command)
     step_total = len(skills)
     for step_index, skill in enumerate(skills, start=1):
         stem = f"iter-{iteration:02d}-{skill.name}"
@@ -1137,6 +1209,7 @@ def run_skill_iteration(
             step_index=step_index,
             step_total=step_total,
             pipeline_sha256=pipeline_sha256,
+            skill_command_sha256=skill_cmd_sha,
             skill_requested_name=skill.requested_name,
         )
         # Inject safe.directory so child processes (e.g. Codex sandbox running as a
@@ -1160,6 +1233,10 @@ def run_skill_iteration(
                 "SKILL_STEP_INDEX": str(step_index),
                 "SKILL_STEP_TOTAL": str(step_total),
                 "SKILL_PIPELINE_SHA256": pipeline_sha256,
+                "SKILL_COMMAND_SHA256": skill_cmd_sha,
+                "SKILL_PROMPT_REL": path_under_repo_or_absolute(repo_resolved, str(prompt_path)),
+                "SKILL_LOG_REL": path_under_repo_or_absolute(repo_resolved, str(log_path)),
+                "SKILL_RUN_DIR_REL": path_under_repo_or_absolute(repo_resolved, run_dir_resolved),
             }
         )
         augment_env_path_for_cursor_agent(env, args)
@@ -1179,6 +1256,7 @@ def run_skill_iteration(
                 "step_index": str(step_index),
                 "step_total": str(step_total),
                 "pipeline_sha256": pipeline_sha256,
+                "skill_command_sha256": skill_cmd_sha,
             },
         )
         progress_banner(f"Skill: {skill.name}")
@@ -1304,6 +1382,7 @@ def run_checks(
         + ("; resume skips checks whose logs end with exit_code=0." if resume else ".")
     )
     pipeline_sha256 = load_skill_release_pipeline_sha256(run_dir)
+    skill_cmd_sha = effective_skill_command_sha256(run_dir, args.skill_command)
     for index, template in enumerate(args.checks, start=1):
         log_path = run_dir / f"iter-{iteration:02d}-check-{index:02d}.log"
         if resume and log_path_last_exit_code(log_path) == 0:
@@ -1408,6 +1487,7 @@ def run_checks(
                 step_index=0,
                 step_total=0,
                 pipeline_sha256=pipeline_sha256,
+                skill_command_sha256=skill_cmd_sha,
             )
 
             fix_command = render_command(
@@ -1425,14 +1505,16 @@ def run_checks(
                     "step_index": "0",
                     "step_total": "0",
                     "pipeline_sha256": pipeline_sha256,
+                    "skill_command_sha256": skill_cmd_sha,
                 },
             )
 
             fix_env = os.environ.copy()
             _inject_git_safe_directory(fix_env, str(repo))
+            repo_s = str(repo.resolve())
             fix_env.update(
                 {
-                    "REPO_ROOT": str(repo),
+                    "REPO_ROOT": repo_s,
                     "SKILL_ROOT": str((repo / args.skill_root).resolve()),
                     "SKILL_NAME": "fix_check",
                     "SKILL_PROMPT_FILE": str(fix_prompt_path),
@@ -1444,6 +1526,10 @@ def run_checks(
                     "SKILL_STEP_INDEX": "0",
                     "SKILL_STEP_TOTAL": "0",
                     "SKILL_PIPELINE_SHA256": pipeline_sha256,
+                    "SKILL_COMMAND_SHA256": skill_cmd_sha,
+                    "SKILL_PROMPT_REL": path_under_repo_or_absolute(repo_s, str(fix_prompt_path)),
+                    "SKILL_LOG_REL": path_under_repo_or_absolute(repo_s, str(fix_log_path)),
+                    "SKILL_RUN_DIR_REL": path_under_repo_or_absolute(repo_s, run_dir_resolved),
                 }
             )
             augment_env_path_for_cursor_agent(fix_env, args)
@@ -1740,6 +1826,7 @@ def run_pre_tag_github_ci_with_fixes(
     fix_round = 0
     verify_append = False
     pipeline_sha256 = load_skill_release_pipeline_sha256(run_dir)
+    skill_cmd_sha = effective_skill_command_sha256(run_dir, args.skill_command)
 
     while True:
         if tracker is not None:
@@ -1808,6 +1895,7 @@ def run_pre_tag_github_ci_with_fixes(
             step_index=0,
             step_total=0,
             pipeline_sha256=pipeline_sha256,
+            skill_command_sha256=skill_cmd_sha,
         )
 
         fix_command = render_command(
@@ -1825,14 +1913,16 @@ def run_pre_tag_github_ci_with_fixes(
                 "step_index": "0",
                 "step_total": "0",
                 "pipeline_sha256": pipeline_sha256,
+                "skill_command_sha256": skill_cmd_sha,
             },
         )
 
         fix_env = os.environ.copy()
         _inject_git_safe_directory(fix_env, str(repo))
+        repo_s = str(repo.resolve())
         fix_env.update(
             {
-                "REPO_ROOT": str(repo),
+                "REPO_ROOT": repo_s,
                 "SKILL_ROOT": str((repo / args.skill_root).resolve()),
                 "SKILL_NAME": "fix_pre_tag_ci",
                 "SKILL_PROMPT_FILE": str(fix_prompt_path),
@@ -1844,6 +1934,10 @@ def run_pre_tag_github_ci_with_fixes(
                 "SKILL_STEP_INDEX": "0",
                 "SKILL_STEP_TOTAL": "0",
                 "SKILL_PIPELINE_SHA256": pipeline_sha256,
+                "SKILL_COMMAND_SHA256": skill_cmd_sha,
+                "SKILL_PROMPT_REL": path_under_repo_or_absolute(repo_s, str(fix_prompt_path)),
+                "SKILL_LOG_REL": path_under_repo_or_absolute(repo_s, str(fix_log_path)),
+                "SKILL_RUN_DIR_REL": path_under_repo_or_absolute(repo_s, run_dir_resolved),
             }
         )
         augment_env_path_for_cursor_agent(fix_env, args)

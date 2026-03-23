@@ -63,7 +63,8 @@ class TestDisplayGraph:
         ):
             obj = display_graph(wf)
         assert obj is not None
-        assert "mermaid" in obj.data
+        assert "graph TD" in obj.data
+        assert "jsdelivr" not in obj.data.lower()
 
     def test_mermaid_ids_do_not_collapse_distinct_state_names(self) -> None:
         wf = Workflow("collide")
@@ -151,7 +152,8 @@ class TestDisplayRun:
         assert "run_started" in html_out
         assert "state_entered" in html_out
         assert "run_completed" in html_out
-        assert "tailwindcss" in html_out
+        assert "replayt-nb-badge" in html_out
+        assert "cdn.tailwindcss.com" not in html_out.lower()
 
     def test_fallback_prints_when_no_ipython(self, capsys: Any) -> None:
         store = _FakeStore([{"type": "run_started", "ts": "t0", "payload": {"workflow_name": "w"}}])
@@ -160,6 +162,26 @@ class TestDisplayRun:
         assert result is None
         captured = capsys.readouterr()
         assert "r1" in captured.out
+
+    def test_run_completed_non_string_status_renders_without_error(self) -> None:
+        events = [
+            {
+                "type": "run_completed",
+                "ts": "2025-01-01T00:00:00Z",
+                "payload": {"status": 0},
+            },
+        ]
+        store = _FakeStore(events)
+        mock_display = MagicMock()
+        with (
+            patch("replayt.notebook._HAS_IPYTHON", True),
+            patch("replayt.notebook._IPyHTML", _FakeHTML),
+            patch("replayt.notebook._ipython_display", mock_display),
+        ):
+            obj = display_run(store, "run-num-status")
+        assert obj is not None
+        assert "0" in obj.data
+        assert "run_completed" in obj.data
 
     def test_handles_run_failed_event(self) -> None:
         events = [

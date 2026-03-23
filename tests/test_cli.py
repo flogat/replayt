@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
+import replayt
 from replayt.cli.main import REPLAY_HTML_CSS, _replay_html, app
 from replayt.cli.targets import load_target
 
@@ -509,6 +510,42 @@ def test_cli_module_target_syntax_error_onboarding(tmp_path: Path, monkeypatch: 
     assert "syntax error" in out.lower()
     assert "py_compile" in out
     assert "doctor" in out.lower()
+
+
+def test_cli_module_target_wrong_type_onboarding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pkg = tmp_path / "replayt_onb_wrongtype_pkg"
+    pkg.mkdir()
+    (pkg / "__init__.py").write_text("wf = 123\n", encoding="utf-8")
+    monkeypatch.syspath_prepend(str(tmp_path))
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["run", "replayt_onb_wrongtype_pkg:wf", "--log-dir", str(tmp_path), "--dry-run"],
+    )
+    assert result.exit_code == 2
+    out = (result.stdout or "") + (result.stderr or "")
+    assert "not replayt.workflow.Workflow" in out
+    assert "int" in out
+    assert "doctor" in out.lower()
+
+
+def test_cli_yaml_target_missing_pyyaml_onboarding(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    workflow_path = tmp_path / "mini_flow.yaml"
+    workflow_path.write_text("name: x\nversion: 1\ninitial: start\nsteps:\n  start: {}\n", encoding="utf-8")
+
+    def _boom(_path: object) -> dict[str, object]:
+        raise RuntimeError("Install replayt with the `yaml` extra: pip install replayt[yaml]")
+
+    monkeypatch.setattr("replayt.cli.targets.load_workflow_yaml", _boom)
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["run", str(workflow_path), "--log-dir", str(tmp_path), "--dry-run"],
+    )
+    assert result.exit_code == 2
+    out = (result.stdout or "") + (result.stderr or "")
+    assert "pip install replayt[yaml]" in out
+    assert "replayt run" in out
 
 
 def test_cli_run_resolves_target_from_replayt_target_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -1089,6 +1126,48 @@ def test_cli_init_scaffold(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> N
     assert r2.exit_code == 1
     r3 = runner.invoke(app, ["init", "--path", str(tmp_path), "--force"])
     assert r3.exit_code == 0
+
+
+def test_cli_init_list_text() -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["init", "--list"])
+    assert r.exit_code == 0
+    assert "Init templates:" in r.stdout
+    assert "  - basic:" in r.stdout
+    assert "replayt init --template basic" in r.stdout
+    assert "issue-triage" in r.stdout
+    assert "replayt init --template issue-triage" in r.stdout
+
+
+def test_cli_init_list_json() -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["init", "--list", "--output", "json"])
+    assert r.exit_code == 0
+    data = json.loads(r.stdout)
+    assert data["schema"] == "replayt.init_templates.v1"
+    keys = {t["key"] for t in data["templates"]}
+    assert keys == {
+        "approval",
+        "basic",
+        "issue-triage",
+        "publishing-preflight",
+        "tool-using",
+        "yaml",
+    }
+    basic = next(t for t in data["templates"] if t["key"] == "basic")
+    assert basic["workflow_file"] == "workflow.py"
+    assert basic["inputs_file"] == "inputs.example.json"
+    assert basic["llm_backed"] is False
+    assert basic["summary"]
+    assert basic["cli"]["init_here"] == "replayt init --template basic"
+    assert basic["cli"]["init_with_ci_github"] == "replayt init --template basic --ci github"
+
+
+def test_cli_init_list_rejects_ci_combo() -> None:
+    runner = CliRunner()
+    r = runner.invoke(app, ["init", "--list", "--ci", "github"])
+    assert r.exit_code != 0
+    assert "Cannot combine" in (r.stdout + r.stderr)
 
 
 @pytest.mark.parametrize(
@@ -2199,6 +2278,35 @@ def start(ctx):
     assert run_id in html_out.stdout
 
 
+def test_cli_replay_stakeholder_html_uses_style(tmp_path: Path) -> None:
+    workflow_path = tmp_path / "replay_style.py"
+    workflow_path.write_text(
+        """
+from replayt.workflow import Workflow
+
+wf = Workflow("replay_style_wf")
+wf.set_initial("start")
+
+@wf.step("start")
+def start(ctx):
+    ctx.set("ok", True)
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    run = runner.invoke(app, ["run", str(workflow_path), "--log-dir", str(tmp_path)])
+    assert run.exit_code == 0
+    run_id = next(line.split("=", 1)[1] for line in run.stdout.splitlines() if line.startswith("run_id="))
+    html_out = runner.invoke(
+        app,
+        ["replay", run_id, "--log-dir", str(tmp_path), "--format", "html", "--style", "stakeholder"],
+    )
+    assert html_out.exit_code == 0
+    assert "Run timeline" in html_out.stdout
+    assert "--style default" in html_out.stdout
+
+
 def test_cli_runs_and_doctor(tmp_path: Path) -> None:
     runner = CliRunner()
     run = runner.invoke(
@@ -3068,6 +3176,66 @@ def start(ctx):
     assert run_id in content
 
 
+def test_report_llm_model_filter_note_and_single_output(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    events = [
+        {
+            "ts": "2026-03-01T00:00:00+00:00",
+            "run_id": "r1",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-01T00:00:01+00:00",
+            "run_id": "r1",
+            "seq": 2,
+            "type": "structured_output",
+            "payload": {
+                "schema_name": "A",
+                "data": {"x": 1},
+                "effective": {"model": "m-small"},
+            },
+        },
+        {
+            "ts": "2026-03-01T00:00:02+00:00",
+            "run_id": "r1",
+            "seq": 3,
+            "type": "structured_output",
+            "payload": {
+                "schema_name": "B",
+                "data": {"x": 2},
+                "effective": {"model": "m-large"},
+            },
+        },
+        {
+            "ts": "2026-03-01T00:00:03+00:00",
+            "run_id": "r1",
+            "seq": 4,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    (log_dir / "r1.jsonl").write_text("\n".join(json.dumps(x) for x in events) + "\n", encoding="utf-8")
+
+    runner = CliRunner()
+    html = runner.invoke(app, ["report", "r1", "--log-dir", str(log_dir), "--llm-model", "m-large"])
+    assert html.exit_code == 0
+    assert "LLM model filter:" in html.stdout
+    assert "m-large" in html.stdout
+    assert "Structured Outputs" in html.stdout
+    assert html.stdout.count("m-small") == 0
+
+    md = runner.invoke(
+        app, ["report", "r1", "--log-dir", str(log_dir), "--format", "markdown", "--llm-model", "m-large"]
+    )
+    assert md.exit_code == 0
+    assert "**LLM model filter:**" in md.stdout
+    assert "`m-large`" in md.stdout
+    assert "B" in md.stdout
+
+
 def test_diff_command_text_and_json(tmp_path: Path) -> None:
     workflow_path = tmp_path / "diff_flow.py"
     workflow_path.write_text(
@@ -3186,6 +3354,95 @@ def test_diff_preserves_multiple_structured_outputs_with_same_schema_name(tmp_pa
     assert payload["structured_outputs"]["a_count"] == 2
     assert payload["structured_outputs"]["b_count"] == 2
     assert "1:Decision" in payload["structured_outputs"]["diffs"]
+
+
+def test_diff_llm_model_filter_slices_outputs_and_latency(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    run_a = [
+        {
+            "ts": "2026-03-01T00:00:00+00:00",
+            "run_id": "run-a",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-01T00:00:01+00:00",
+            "run_id": "run-a",
+            "seq": 2,
+            "type": "state_entered",
+            "payload": {"state": "s1"},
+        },
+        {
+            "ts": "2026-03-01T00:00:02+00:00",
+            "run_id": "run-a",
+            "seq": 3,
+            "type": "structured_output",
+            "payload": {
+                "state": "s1",
+                "schema_name": "Out",
+                "data": {"v": 1},
+                "effective": {"model": "model-a"},
+            },
+        },
+        {
+            "ts": "2026-03-01T00:00:03+00:00",
+            "run_id": "run-a",
+            "seq": 4,
+            "type": "llm_response",
+            "payload": {"effective": {"model": "model-a"}, "latency_ms": 10},
+        },
+        {
+            "ts": "2026-03-01T00:00:04+00:00",
+            "run_id": "run-a",
+            "seq": 5,
+            "type": "structured_output",
+            "payload": {
+                "state": "s2",
+                "schema_name": "Out",
+                "data": {"v": 2},
+                "effective": {"model": "model-b"},
+            },
+        },
+        {
+            "ts": "2026-03-01T00:00:05+00:00",
+            "run_id": "run-a",
+            "seq": 6,
+            "type": "llm_response",
+            "payload": {"effective": {"model": "model-b"}, "latency_ms": 20},
+        },
+        {
+            "ts": "2026-03-01T00:00:06+00:00",
+            "run_id": "run-a",
+            "seq": 7,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    run_b = [dict(e) for e in run_a]
+    for e in run_b:
+        e["run_id"] = "run-b"
+    (log_dir / "run-a.jsonl").write_text("\n".join(json.dumps(x) for x in run_a) + "\n", encoding="utf-8")
+    (log_dir / "run-b.jsonl").write_text("\n".join(json.dumps(x) for x in run_b) + "\n", encoding="utf-8")
+
+    runner = CliRunner()
+    r_all = runner.invoke(app, ["diff", "run-a", "run-b", "--log-dir", str(log_dir), "--output", "json"])
+    assert r_all.exit_code == 0
+    all_payload = json.loads(r_all.stdout)
+    assert all_payload["structured_outputs"]["a_count"] == 2
+    assert all_payload["latency"]["a_total_ms"] == 30
+
+    r_f = runner.invoke(
+        app,
+        ["diff", "run-a", "run-b", "--log-dir", str(log_dir), "--output", "json", "--llm-model", "model-a"],
+    )
+    assert r_f.exit_code == 0
+    f_payload = json.loads(r_f.stdout)
+    assert f_payload["llm_model_filter"] == ["model-a"]
+    assert f_payload["structured_outputs"]["a_count"] == 1
+    assert f_payload["structured_outputs"]["changed"] is False
+    assert f_payload["latency"]["a_total_ms"] == 10
 
 
 def test_diff_command_with_sqlite(tmp_path: Path) -> None:
@@ -5364,6 +5621,10 @@ def test_cli_ci_writes_summary_json(tmp_path: Path) -> None:
     assert data["sqlite"] is None
     assert isinstance(data.get("duration_ms"), int)
     assert data["duration_ms"] >= 0
+    assert data["replayt_version"] == getattr(replayt, "__version__", "unknown")
+    vi = sys.version_info
+    assert data["python_version"] == f"{vi.major}.{vi.minor}.{vi.micro}"
+    assert data["platform"] == sys.platform
 
 
 def test_cli_resume_hook_failure_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -5443,6 +5704,9 @@ def done(ctx):
         "json.dumps({"
         "'approval_id': os.environ.get('REPLAYT_APPROVAL_ID'), "
         "'reject': os.environ.get('REPLAYT_REJECT'), "
+        "'log_mode': os.environ.get('REPLAYT_LOG_MODE'), "
+        "'forbid_full': os.environ.get('REPLAYT_FORBID_LOG_MODE_FULL'), "
+        "'redact_keys': json.loads(os.environ['REPLAYT_REDACT_KEYS_JSON']), "
         "'contract_sha256': os.environ.get('REPLAYT_WORKFLOW_CONTRACT_SHA256'), "
         "'workflow_name': os.environ.get('REPLAYT_WORKFLOW_NAME'), "
         "'workflow_version': os.environ.get('REPLAYT_WORKFLOW_VERSION'), "
@@ -5456,6 +5720,8 @@ def done(ctx):
     )
     exe = json.dumps(sys.executable)
     (tmp_path / ".replaytrc.toml").write_text(
+        "forbid_log_mode_full = true\n"
+        'redact_keys = ["patient_id"]\n'
         f"resume_hook = [{exe}, \"-c\", {json.dumps(script)}]\n",
         encoding="utf-8",
     )
@@ -5501,6 +5767,9 @@ def done(ctx):
     assert data["metadata"] == {"deployment_tier": "staging"}
     assert data["tags"] == {"gate": "hr"}
     assert data["experiment"] == {"lane": "policy"}
+    assert data["log_mode"] == "redacted"
+    assert data["forbid_full"] == "1"
+    assert data["redact_keys"] == ["patient_id"]
 
 
 def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -5516,18 +5785,24 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
         "'dry_run': os.environ.get('REPLAYT_DRY_RUN'), "
         "'log_dir': os.environ.get('REPLAYT_LOG_DIR'), "
         "'log_mode': os.environ.get('REPLAYT_LOG_MODE'), "
+        "'forbid_full': os.environ.get('REPLAYT_FORBID_LOG_MODE_FULL'), "
+        "'redact_keys': json.loads(os.environ['REPLAYT_REDACT_KEYS_JSON']), "
         "'inputs': json.loads(os.environ['REPLAYT_RUN_INPUTS_JSON']), "
         "'tags': json.loads(os.environ['REPLAYT_RUN_TAGS_JSON']), "
         "'metadata': json.loads(os.environ['REPLAYT_RUN_METADATA_JSON']), "
         "'experiment': json.loads(os.environ['REPLAYT_RUN_EXPERIMENT_JSON']), "
         "'contract_sha256': os.environ.get('REPLAYT_WORKFLOW_CONTRACT_SHA256'), "
         "'workflow_name': os.environ.get('REPLAYT_WORKFLOW_NAME'), "
-        "'workflow_version': os.environ.get('REPLAYT_WORKFLOW_VERSION')"
+        "'workflow_version': os.environ.get('REPLAYT_WORKFLOW_VERSION'), "
+        "'replayt_version': os.environ.get('REPLAYT_REPLAYT_VERSION')"
         "}), encoding='utf-8')"
     )
     pyproject = tmp_path / "pyproject.toml"
     pyproject.write_text(
-        f"[tool.replayt]\nrun_hook = [{json.dumps(sys.executable)}, \"-c\", {json.dumps(script)}]\n",
+        "[tool.replayt]\n"
+        "forbid_log_mode_full = true\n"
+        'redact_keys = ["token", "Email"]\n'
+        f"run_hook = [{json.dumps(sys.executable)}, \"-c\", {json.dumps(script)}]\n",
         encoding="utf-8",
     )
     monkeypatch.chdir(tmp_path)
@@ -5569,6 +5844,8 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
     assert data["dry_run"] == "1"
     assert Path(data["log_dir"]) == (tmp_path / "logs").resolve()
     assert data["log_mode"] == "redacted"
+    assert data["forbid_full"] == "1"
+    assert data["redact_keys"] == ["Email", "token"]
     assert data["inputs"] == {"customer_name": "Sam", "policy": {"env": "prod"}}
     assert data["tags"] == {"deployment": "prod", "team": "platform"}
     assert data["metadata"] == {"change_ticket": "CHG-123", "deployment_tier": "prod"}
@@ -5577,6 +5854,7 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
     assert data["contract_sha256"] == exp_contract["contract_sha256"]
     assert data["workflow_name"] == exp_contract["workflow"]["name"]
     assert data["workflow_version"] == exp_contract["workflow"]["version"]
+    assert data["replayt_version"] == replayt.__version__
     assert data["mode"] == "run"
     assert data["target"] == "replayt_examples.e01_hello_world:wf"
     assert data["dry_run"] == "1"
@@ -6492,6 +6770,9 @@ def test_cli_run_summary_json_via_replayt_env(tmp_path: Path, monkeypatch: pytes
     assert data["status"] == "completed"
     assert data["exit_code"] == 0
     assert data["target"] == "replayt_examples.e01_hello_world:wf"
+    assert data["replayt_version"] == getattr(replayt, "__version__", "unknown")
+    assert data["python_version"] == f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    assert data["platform"] == sys.platform
 
 
 def test_cli_summary_json_merges_ci_metadata_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -6517,6 +6798,9 @@ def test_cli_summary_json_merges_ci_metadata_from_env(tmp_path: Path, monkeypatc
     assert r.exit_code == 0
     data = json.loads(summary.read_text(encoding="utf-8"))
     assert data["ci_metadata"] == {"pipeline_url": "https://ci.example/job/1", "commit": "abc"}
+    assert data["replayt_version"]
+    assert data["python_version"]
+    assert data["platform"] == sys.platform
 
 
 def test_cli_summary_json_rejects_invalid_ci_metadata_json(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -6669,6 +6953,7 @@ def test_cli_version_format_json() -> None:
     assert schemas["verify_seal_report"] == "replayt.verify_seal_report.v1"
     assert schemas["try_examples"] == "replayt.try_examples.v1"
     assert schemas["try_copy"] == "replayt.try_copy.v1"
+    assert schemas["init_templates"] == "replayt.init_templates.v1"
     from replayt.cli.run_support import (
         build_cli_exit_codes_report,
         build_cli_json_stdout_contract,
@@ -6682,6 +6967,10 @@ def test_cli_version_format_json() -> None:
 
     assert data["operational_paths"] == build_operational_paths_report()
     assert data["cli_machine_readable_schemas"]["operational_paths"] == "replayt.operational_paths.v1"
+    from replayt.cli.distribution_metadata import build_distribution_metadata_report
+
+    assert data["distribution_metadata"] == build_distribution_metadata_report()
+    assert data["cli_machine_readable_schemas"]["distribution_metadata"] == "replayt.distribution_metadata.v1"
     ph = data["policy_hook_env_catalog"]
     assert ph["subprocess_stdin"] == "devnull"
     hooks = ph["hooks"]
@@ -6689,7 +6978,10 @@ def test_cli_version_format_json() -> None:
     rh = hooks["run_hook"]
     assert rh["argv_env"] == "REPLAYT_RUN_HOOK"
     assert rh["argv_config_key"] == "run_hook"
+    assert "REPLAYT_REPLAYT_VERSION" in rh["injected_env_vars"]
     assert "REPLAYT_TARGET" in rh["injected_env_vars"]
+    assert "REPLAYT_FORBID_LOG_MODE_FULL" in rh["injected_env_vars"]
+    assert "REPLAYT_REDACT_KEYS_JSON" in rh["injected_env_vars"]
     assert "REPLAYT_WORKFLOW_CONTRACT_SHA256" in rh["injected_env_vars"]
     vh = hooks["verify_seal_hook"]
     assert vh["argv_env"] == "REPLAYT_VERIFY_SEAL_HOOK"
@@ -6707,6 +6999,9 @@ def test_cli_version_format_json() -> None:
     assert "REPLAYT_RUN_TAGS_JSON" in sh["injected_env_vars"]
     assert "REPLAYT_RUN_EXPERIMENT_JSON" in sh["injected_env_vars"]
     res_h = hooks["resume_hook"]
+    assert "REPLAYT_LOG_MODE" in res_h["injected_env_vars"]
+    assert "REPLAYT_FORBID_LOG_MODE_FULL" in res_h["injected_env_vars"]
+    assert "REPLAYT_REDACT_KEYS_JSON" in res_h["injected_env_vars"]
     assert "REPLAYT_RUN_METADATA_JSON" in res_h["injected_env_vars"]
     assert "REPLAYT_RUN_TAGS_JSON" in res_h["injected_env_vars"]
     assert "REPLAYT_RUN_EXPERIMENT_JSON" in res_h["injected_env_vars"]
@@ -6790,6 +7085,16 @@ def test_python_m_replayt_invokes_cli(tmp_path: Path) -> None:
     data = json.loads(proc.stdout)
     assert data["schema"] == "replayt.version_report.v1"
     assert data["replayt_version"] == rt.__version__
+    dm = data["distribution_metadata"]
+    assert dm["schema"] == "replayt.distribution_metadata.v1"
+    assert isinstance(dm["ok"], bool)
+    assert "detail" in dm
+    if dm["ok"]:
+        assert isinstance(dm["version"], str) and dm["version"].strip()
+        assert dm["requires_python"] is not None
+    else:
+        assert dm["version"] is None
+        assert dm["requires_python"] is None
 
 
 def test_cli_doctor_target_preflight_reports_validation(tmp_path: Path) -> None:
@@ -7043,9 +7348,12 @@ def test_cli_bundle_export_creates_tarball(tmp_path: Path) -> None:
     assert out_tar.is_file()
     with tarfile.open(out_tar, "r:gz") as tf:
         names = tf.getnames()
-    assert any(n.endswith("/report.html") for n in names)
-    assert any(n.endswith("/timeline.html") for n in names)
-    assert any(n.endswith("/events.jsonl") for n in names)
+        assert any(n.endswith("/report.html") for n in names)
+        assert any(n.endswith("/timeline.html") for n in names)
+        assert any(n.endswith("/events.jsonl") for n in names)
+        man_m = next(name for name in names if name.endswith("/manifest.json"))
+        man = json.loads(tf.extractfile(man_m).read().decode("utf-8"))
+    assert man.get("timeline_style") == "stakeholder"
 
 
 def test_cli_bundle_export_support_report_style(tmp_path: Path) -> None:
@@ -7081,7 +7389,13 @@ def test_cli_bundle_export_support_report_style(tmp_path: Path) -> None:
     with tarfile.open(out_tar, "r:gz") as tf:
         report_member = next(name for name in tf.getnames() if name.endswith("/report.html"))
         report_html = tf.extractfile(report_member).read().decode("utf-8")
+        timeline_member = next(name for name in tf.getnames() if name.endswith("/timeline.html"))
+        timeline_html = tf.extractfile(timeline_member).read().decode("utf-8")
+        man_m = next(name for name in tf.getnames() if name.endswith("/manifest.json"))
+        man = json.loads(tf.extractfile(man_m).read().decode("utf-8"))
     assert "Support handoff" in report_html
+    assert "Support handoff" in timeline_html
+    assert man.get("timeline_style") == "support"
 
 
 def test_cli_bundle_export_can_include_seal(tmp_path: Path) -> None:

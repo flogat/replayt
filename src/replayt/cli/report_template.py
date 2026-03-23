@@ -9,7 +9,7 @@ from datetime import datetime
 from itertools import zip_longest
 from typing import Any, Literal
 
-from replayt.cli.display import run_attention_summary
+from replayt.cli.display import payload_llm_model, run_attention_summary
 
 REPORT_CSS = """
 :root {{
@@ -100,6 +100,7 @@ REPORT_HTML = """\
         <p><span class="rp-label">Duration:</span> {duration}</p>
         {tags_html}
         {meta_html}
+        {llm_filter_html}
       </div>
     </section>
 
@@ -503,7 +504,9 @@ def _legacy_build_run_report_html(
 
     tags_html = ""
     if tags:
-        tag_strs = ", ".join(f"{html.escape(k)}={html.escape(v)}" for k, v in tags.items())
+        tag_strs = ", ".join(
+            f"{html.escape(str(k))}={html.escape(str(v))}" for k, v in tags.items()
+        )
         tags_html = f'<p><span class="rp-label">Tags:</span> {tag_strs}</p>'
     meta_html = ""
     if run_metadata:
@@ -520,7 +523,9 @@ def _legacy_build_run_report_html(
         elif s["state"] == states[-1]["state"] and status == "failed":
             dot_class = "rp-dot-err"
         timeline_items.append(
-            TIMELINE_ITEM.format(state=html.escape(s["state"]), ts=html.escape(s["ts"]), dot_class=dot_class)
+            TIMELINE_ITEM.format(
+                state=html.escape(str(s["state"])), ts=html.escape(str(s["ts"])), dot_class=dot_class
+            )
         )
     timeline_html = (
         "\n".join(timeline_items)
@@ -628,6 +633,7 @@ def _legacy_build_run_report_html(
         duration=html.escape(duration),
         tags_html=tags_html,
         meta_html=meta_html,
+        llm_filter_html="",
         attention_section="",
         approvals_section=approvals_section,
         timeline_html=timeline_html,
@@ -638,7 +644,32 @@ def _legacy_build_run_report_html(
     )
 
 
-def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
+def _llm_model_filter_note_html(flt: frozenset[str] | None) -> str:
+    if not flt:
+        return ""
+    models = ", ".join(html.escape(m) for m in sorted(flt))
+    return (
+        '<p class="rp-note"><span class="rp-label">LLM model filter:</span> '
+        f'<code class="rp-code">{models}</code> '
+        "(structured outputs, parse failures, and token totals include only matching "
+        "<code class=\"rp-code\">llm_response</code> / structured-output lines.)</p>"
+    )
+
+
+def _payload_matches_llm_model_filter(payload: Any, flt: frozenset[str] | None) -> bool:
+    if flt is None:
+        return True
+    if not isinstance(payload, dict):
+        return False
+    m = payload_llm_model(payload)
+    return m is not None and m in flt
+
+
+def aggregate_run_report_data(
+    events: list[dict[str, Any]],
+    *,
+    llm_model_filter: frozenset[str] | None = None,
+) -> dict[str, Any]:
     """Single pass over events for HTML reports and diff context (rich approval metadata)."""
 
     workflow_name = ""
@@ -687,19 +718,21 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
         elif typ == "state_entered":
             states.append({"state": str(payload.get("state", "")), "ts": ts})
         elif typ == "structured_output":
-            outputs.append({"schema_name": payload.get("schema_name", ""), "data": payload.get("data")})
+            if _payload_matches_llm_model_filter(payload, llm_model_filter):
+                outputs.append({"schema_name": payload.get("schema_name", ""), "data": payload.get("data")})
         elif typ == "structured_output_failed":
-            structured_output_failures.append(
-                {
-                    "state": payload.get("state"),
-                    "schema_name": payload.get("schema_name"),
-                    "stage": payload.get("stage"),
-                    "structured_output_mode": payload.get("structured_output_mode"),
-                    "error": payload.get("error"),
-                    "response_chars": payload.get("response_chars"),
-                    "ts": ts,
-                }
-            )
+            if _payload_matches_llm_model_filter(payload, llm_model_filter):
+                structured_output_failures.append(
+                    {
+                        "state": payload.get("state"),
+                        "schema_name": payload.get("schema_name"),
+                        "stage": payload.get("stage"),
+                        "structured_output_mode": payload.get("structured_output_mode"),
+                        "error": payload.get("error"),
+                        "response_chars": payload.get("response_chars"),
+                        "ts": ts,
+                    }
+                )
         elif typ == "tool_call":
             tool_calls.append(
                 {"tool": payload.get("name", ""), "seq": event.get("seq", ""), "args": payload.get("arguments")}
@@ -724,16 +757,17 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
                 }
             )
         elif typ == "llm_response":
-            usage = payload.get("usage") or {}
-            pt = usage.get("prompt_tokens")
-            ct = usage.get("completion_tokens")
-            tt = usage.get("total_tokens")
-            if isinstance(pt, int):
-                prompt_tokens += pt
-            if isinstance(ct, int):
-                completion_tokens += ct
-            if isinstance(tt, int):
-                total_tokens += tt
+            if _payload_matches_llm_model_filter(payload, llm_model_filter):
+                usage = payload.get("usage") or {}
+                pt = usage.get("prompt_tokens")
+                ct = usage.get("completion_tokens")
+                tt = usage.get("total_tokens")
+                if isinstance(pt, int):
+                    prompt_tokens += pt
+                if isinstance(ct, int):
+                    completion_tokens += ct
+                if isinstance(tt, int):
+                    total_tokens += tt
         elif typ == "retry_scheduled":
             retry_count += 1
             latest_retry = {
@@ -842,10 +876,14 @@ def aggregate_run_report_data(events: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def collect_report_context(events: list[dict[str, Any]]) -> dict[str, Any]:
+def collect_report_context(
+    events: list[dict[str, Any]],
+    *,
+    llm_model_filter: frozenset[str] | None = None,
+) -> dict[str, Any]:
     """Parse events into the same shape ``cmd_report`` uses (for single-run and diff reports)."""
 
-    agg = aggregate_run_report_data(events)
+    agg = aggregate_run_report_data(events, llm_model_filter=llm_model_filter)
     att = run_attention_summary(events)
     return {
         "workflow_name": agg["workflow_name"],
@@ -920,6 +958,7 @@ def build_report_diff_html(
     ctx_b: dict[str, Any],
     *,
     style: Literal["default", "stakeholder", "support"] = "default",
+    llm_model_filter: frozenset[str] | None = None,
 ) -> str:
     def state_chain(states: list[dict[str, str]]) -> str:
         return " -> ".join(s["state"] for s in states) if states else "(none)"
@@ -997,6 +1036,13 @@ def build_report_diff_html(
         doc_title = "Run comparison"
         html_title = "replayt report diff"
         intro = "Side-by-side summary from recorded JSONL (no model calls)."
+
+    if llm_model_filter:
+        intro += (
+            " Filtered to LLM model id(s): "
+            + ", ".join(sorted(llm_model_filter))
+            + " (structured outputs and token totals use the same rules as replayt report --llm-model)."
+        )
 
     wa_att = _format_attention_kv_html(ctx_a.get("attention_kind"), ctx_a.get("attention_summary"))
     wb_att = _format_attention_kv_html(ctx_b.get("attention_kind"), ctx_b.get("attention_summary"))
@@ -1080,6 +1126,7 @@ def build_report_diff_markdown(
     ctx_b: dict[str, Any],
     *,
     style: Literal["default", "stakeholder", "support"] = "default",
+    llm_model_filter: frozenset[str] | None = None,
 ) -> str:
     """Markdown variant of ``replayt report-diff`` for tickets and chat (no HTML)."""
 
@@ -1101,6 +1148,13 @@ def build_report_diff_markdown(
     else:
         doc_title = "Run comparison"
         intro = "Side-by-side summary from recorded JSONL (no model calls)."
+
+    if llm_model_filter:
+        intro += (
+            " Filtered to LLM model id(s): "
+            + ", ".join(sorted(llm_model_filter))
+            + " (structured outputs and token totals use the same rules as replayt report --llm-model)."
+        )
 
     lines: list[str] = [f"# {doc_title}", "", intro, "", "## Run A", ""]
     lines += [
@@ -1194,10 +1248,11 @@ def build_run_report_html(
     events: list[dict[str, Any]],
     *,
     style: Literal["default", "stakeholder", "support"] = "default",
+    llm_model_filter: frozenset[str] | None = None,
 ) -> str:
     """Build the same self-contained HTML as ``replayt report`` (for CLI and bundle export)."""
 
-    agg = aggregate_run_report_data(events)
+    agg = aggregate_run_report_data(events, llm_model_filter=llm_model_filter)
     workflow_name = agg["workflow_name"]
     workflow_version = agg["workflow_version"]
     status = agg["status"]
@@ -1240,7 +1295,9 @@ def build_run_report_html(
 
     tags_html = ""
     if tags:
-        tag_strs = ", ".join(f"{html.escape(k)}={html.escape(v)}" for k, v in tags.items())
+        tag_strs = ", ".join(
+            f"{html.escape(str(k))}={html.escape(str(v))}" for k, v in tags.items()
+        )
         tags_html = f'<p><span class="rp-label">Tags:</span> {tag_strs}</p>'
     meta_parts: list[str] = []
     if run_metadata:
@@ -1345,8 +1402,8 @@ def build_run_report_html(
             dot_class = "rp-dot-err"
         timeline_items.append(
             TIMELINE_ITEM.format(
-                state=html.escape(state_meta["state"]),
-                ts=html.escape(state_meta["ts"]),
+                state=html.escape(str(state_meta["state"])),
+                ts=html.escape(str(state_meta["ts"])),
                 dot_class=dot_class,
             )
         )
@@ -1533,6 +1590,7 @@ def build_run_report_html(
         duration=html.escape(duration),
         tags_html=tags_html,
         meta_html=meta_html,
+        llm_filter_html=_llm_model_filter_note_html(llm_model_filter),
         attention_section=attention_section,
         approvals_section=approvals_section,
         timeline_html=timeline_html,
@@ -1555,10 +1613,11 @@ def build_run_report_markdown(
     events: list[dict[str, Any]],
     *,
     style: Literal["default", "stakeholder", "support"] = "default",
+    llm_model_filter: frozenset[str] | None = None,
 ) -> str:
     """Plain Markdown variant of ``replayt report`` for tickets, chat, and email (no HTML)."""
 
-    agg = aggregate_run_report_data(events)
+    agg = aggregate_run_report_data(events, llm_model_filter=llm_model_filter)
     workflow_name = agg["workflow_name"]
     workflow_version = agg["workflow_version"]
     status = agg["status"]
@@ -1607,6 +1666,12 @@ def build_run_report_markdown(
     ]
     lines.extend(_report_attention_md_lines(events))
     lines += [f"- **Duration:** {duration}"]
+    if llm_model_filter:
+        models = ", ".join(sorted(llm_model_filter))
+        lines.append(
+            f"- **LLM model filter:** `{models}` (structured outputs, parse failures, and token totals "
+            "include only matching `llm_response` / structured-output lines.)"
+        )
     if tags:
         tag_strs = ", ".join(f"{k}={v}" for k, v in tags.items())
         lines.append(f"- **Tags:** {tag_strs}")
