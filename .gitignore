@@ -12,6 +12,7 @@ venv/
 env/
 .idea/
 .vscode/
+.cursor/skills/
 *.sqlite3
 .replayt/
 *.log
