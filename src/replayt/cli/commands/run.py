@@ -248,7 +248,9 @@ def cmd_init(
             for key, spec in specs:
                 mode = "llm-backed" if spec.llm_backed else "deterministic"
                 typer.echo(f"  - {key}: {spec.summary} [{mode}]")
-                typer.echo(f"      {init_template_cli_snippets(key)['init_here']}")
+                snips = init_template_cli_snippets(key)
+                typer.echo(f"      {snips['init_here']}")
+                typer.echo(f"      {snips['run_explicit']}")
         raise typer.Exit(code=0)
 
     if template not in TEMPLATES:
@@ -1093,6 +1095,7 @@ def cmd_resume(
                 hook,
                 target=target,
                 run_id=run_id,
+                log_dir=log_dir,
                 approval_id=approval_id,
                 reject=reject,
                 log_mode=log_mode,

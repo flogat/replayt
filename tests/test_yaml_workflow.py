@@ -33,6 +33,14 @@ edges:
     assert spec["edges"] == [{"from": "validate", "to": "done"}]
 
 
+def test_load_workflow_yaml_invalid_syntax_includes_path(tmp_path: Path) -> None:
+    path = tmp_path / "broken.yaml"
+    path.write_text("name: [\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Invalid YAML in workflow file") as excinfo:
+        load_workflow_yaml(path)
+    assert str(path) in str(excinfo.value)
+
+
 def test_workflow_from_spec_records_declared_edges() -> None:
     wf = workflow_from_spec(
         {

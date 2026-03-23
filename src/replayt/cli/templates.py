@@ -395,7 +395,20 @@ def list_init_template_specs() -> list[tuple[str, TemplateSpec]]:
 def init_template_cli_snippets(template_key: str) -> dict[str, str]:
     """Copy-paste argv strings for docs and ``replayt init --list --output json``."""
 
-    return {
+    spec = TEMPLATES[template_key]
+    wf = spec.filename
+    inputs_fn = spec.inputs_filename
+    out: dict[str, str] = {
         "init_here": f"replayt init --template {template_key}",
         "init_with_ci_github": f"replayt init --template {template_key} --ci github",
+        "doctor_target": f"replayt doctor --skip-connectivity --target {wf}",
+        "validate_explicit": f"replayt validate {wf} --inputs-file {inputs_fn}",
+        "dry_check_explicit": f"replayt run {wf} --dry-check --inputs-file {inputs_fn}",
+        "run_explicit": f"replayt run {wf} --inputs-file {inputs_fn}",
+        "ci_dry_check_explicit": f"replayt ci {wf} --dry-check --strict-graph --inputs-file {inputs_fn}",
+        "dry_check": "replayt run --dry-check",
+        "run": "replayt run",
     }
+    if spec.llm_backed:
+        out["dry_run"] = "replayt run --dry-run"
+    return out

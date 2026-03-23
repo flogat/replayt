@@ -62,6 +62,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 
 - `state` (string)
 - `effective` (object): resolved settings for this call, including `model`, `temperature`, `top_p`, optional `frequency_penalty` / `presence_penalty` / `seed` (omitted from the HTTP payload when null), optional `stop` (array of up to four strings; omitted from the HTTP payload when unset), optional `extra_body` (small provider-specific JSON fields merged into the request body), `max_tokens`, `timeout_seconds`, `base_url`, `extra_header_names`, optional `provider`, optional `structured_output_mode`, and optional `experiment`
+- `schema_name` (string, optional): Pydantic model class name for `ctx.llm.parse(...)` calls (same string as on `structured_output` / `structured_output_failed`); also set when `ctx.llm.complete_text(..., schema_name=...)` tags a freeform completion; otherwise omitted
 - `messages_sha256` (string): stable SHA-256 fingerprint of the exact message list sent to the provider
 - `effective_sha256` (string): stable SHA-256 fingerprint of the logged `effective` settings object
 - `schema_sha256` (string, optional): stable SHA-256 fingerprint of `model_type.model_json_schema()` for `ctx.llm.parse(...)`
@@ -74,6 +75,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `model` (string)
 - `usage` (object, optional)
 - `effective` (object): same shape as on `llm_request`
+- `schema_name` (string, optional): same as on `llm_request` when present (parse traffic or tagged `complete_text`)
 - `messages_sha256` (string): same fingerprint as on `llm_request`
 - `effective_sha256` (string): same fingerprint as on `llm_request`
 - `schema_sha256` (string, optional): same fingerprint as on `llm_request` for structured parses

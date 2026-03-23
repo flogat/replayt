@@ -183,6 +183,21 @@ class TestDisplayRun:
         assert "0" in obj.data
         assert "run_completed" in obj.data
 
+    def test_non_string_event_type_renders_without_crash(self) -> None:
+        events = [
+            {"type": ["weird"], "ts": "t0", "payload": {}},
+        ]
+        store = _FakeStore(events)
+        mock_display = MagicMock()
+        with (
+            patch("replayt.notebook._HAS_IPYTHON", True),
+            patch("replayt.notebook._IPyHTML", _FakeHTML),
+            patch("replayt.notebook._ipython_display", mock_display),
+        ):
+            obj = display_run(store, "run-weird-type")
+        assert obj is not None
+        assert "replayt-nb-badge--default" in obj.data
+
     def test_handles_run_failed_event(self) -> None:
         events = [
             {

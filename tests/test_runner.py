@@ -328,6 +328,8 @@ def test_runner_persists_llm_request_schema_fingerprints(tmp_path: Path) -> None
     request = next(e["payload"] for e in events if e["type"] == "llm_request")
     response = next(e["payload"] for e in events if e["type"] == "llm_response")
     structured = next(e["payload"] for e in events if e["type"] == "structured_output")
+    assert request["schema_name"] == "Decision"
+    assert response["schema_name"] == "Decision"
     assert request["messages_sha256"] == _sha256_json(request["messages"])
     assert request["effective_sha256"] == _sha256_json(request["effective"])
     assert request["schema_sha256"] == _sha256_json(Decision.model_json_schema())

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from replayt.graph_export import workflow_to_mermaid
+from replayt.graph_export import mermaid_label, workflow_to_mermaid
 from replayt.workflow import Workflow
 
 
@@ -42,6 +42,11 @@ def test_mermaid_ids_do_not_collapse_distinct_state_names() -> None:
     ids = [line.split("[", 1)[0].strip() for line in m.splitlines() if '["a-' in line or '["a_' in line]
     assert len(ids) == 2
     assert ids[0] != ids[1]
+
+
+def test_mermaid_label_coerces_non_string() -> None:
+    assert "&lt;" not in mermaid_label(1)
+    assert "1" in mermaid_label(1)
 
 
 def test_mermaid_escapes_quoted_state_names() -> None:

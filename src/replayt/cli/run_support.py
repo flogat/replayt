@@ -381,11 +381,13 @@ def invoke_run_hook(
 ) -> None:
     """Run a pre-run policy hook before the workflow starts writing events."""
 
+    root = log_dir.resolve()
     extra_env = {
         "REPLAYT_TARGET": target,
         "REPLAYT_RUN_ID": run_id,
         "REPLAYT_RUN_MODE": "resume" if resume else "run",
-        "REPLAYT_LOG_DIR": str(log_dir.resolve()),
+        "REPLAYT_LOG_DIR": str(root),
+        "REPLAYT_RUN_JSONL": str((root / f"{run_id}.jsonl").resolve()),
         "REPLAYT_DRY_RUN": "1" if dry_run else "0",
         **_privacy_contract_hook_env(
             log_mode=log_mode,
@@ -412,6 +414,7 @@ def invoke_resume_hook(
     *,
     target: str,
     run_id: str,
+    log_dir: Path,
     approval_id: str,
     reject: bool,
     log_mode: str,
@@ -425,9 +428,12 @@ def invoke_resume_hook(
 ) -> None:
     """Run *argv* with extra ``REPLAYT_*`` env vars; *argv* must come from trusted config."""
 
+    root = log_dir.resolve()
     extra = {
         "REPLAYT_TARGET": target,
         "REPLAYT_RUN_ID": run_id,
+        "REPLAYT_LOG_DIR": str(root),
+        "REPLAYT_RUN_JSONL": str((root / f"{run_id}.jsonl").resolve()),
         "REPLAYT_APPROVAL_ID": approval_id,
         "REPLAYT_REJECT": "1" if reject else "0",
         **_privacy_contract_hook_env(
@@ -604,6 +610,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
+                    "REPLAYT_RUN_JSONL",
                     "REPLAYT_RUN_METADATA_JSON",
                     "REPLAYT_RUN_MODE",
                     "REPLAYT_RUN_TAGS_JSON",
@@ -622,12 +629,14 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                 {
                     "REPLAYT_APPROVAL_ID",
                     "REPLAYT_FORBID_LOG_MODE_FULL",
+                    "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
                     "REPLAYT_REJECT",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
+                    "REPLAYT_RUN_JSONL",
                     "REPLAYT_RUN_METADATA_JSON",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_TARGET",
@@ -905,8 +914,35 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "cli_machine_readable_schemas on this report. Each route includes trust_profile, an index into "
             "trust_profiles for subprocess/MCP allowlists. replayt log-schema always prints the bundled "
             "Draft JSON Schema for one JSONL line (stdout) and is not tied to cli_machine_readable_schemas. "
-            "replayt ci still prints a one-line stderr reminder when --output json is used."
+            "replayt ci still prints a one-line stderr reminder when --output json is used. See "
+            "subprocess_stream_semantics for stdout vs stderr expectations when wrapping the CLI."
         ),
+        "subprocess_stream_semantics": {
+            "stdout": {
+                "encoding": "utf-8",
+                "when_json_route_active": (
+                    "Exactly one JSON value is written to stdout (a single object) before the process exits; "
+                    "no NDJSON prefix or trailing non-JSON lines."
+                ),
+            },
+            "stderr": {
+                "may_contain_human_or_progress_hints_when_stdout_is_json": True,
+                "documented_cases": [
+                    {
+                        "subcommand": "ci",
+                        "summary": (
+                            "Always emits a one-line exit-code legend on stderr before the run (text or JSON "
+                            "stdout); parse JSON from stdout only."
+                        ),
+                    },
+                ],
+            },
+            "wrapper_note": (
+                "Subprocess and MCP hosts should capture stdout and stderr separately; use json.loads on "
+                "stdout after exit when the JSON route flags in subcommands match, and treat stderr as "
+                "diagnostic unless you explicitly parse it."
+            ),
+        },
         "trust_profiles": dict(sorted(CLI_JSON_STDOUT_TRUST_PROFILES.items())),
         "subcommands": {
             "ci": [

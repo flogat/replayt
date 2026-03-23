@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import platform
 import sys
 from typing import Literal
 
@@ -52,9 +53,13 @@ MAINTAINER_SCRIPT_SCHEMAS: dict[str, str] = {
 
 def build_version_report() -> dict[str, object]:
     vi = sys.version_info
+    impl = sys.implementation
+    impl_version = ".".join(str(part) for part in impl.version)
+    cache_tag = getattr(impl, "cache_tag", None)
     return {
         "schema": VERSION_REPORT_SCHEMA,
         "replayt_version": replayt.__version__,
+        "replayt_version_tuple": list(replayt.__version_tuple__),
         "python": {
             "version": f"{vi.major}.{vi.minor}.{vi.micro}",
             "major": vi.major,
@@ -62,8 +67,14 @@ def build_version_report() -> dict[str, object]:
             "micro": vi.micro,
             "releaselevel": vi.releaselevel,
             "serial": vi.serial,
+            "implementation": {
+                "name": impl.name,
+                "version": impl_version,
+                "cache_tag": cache_tag,
+            },
         },
         "platform": sys.platform,
+        "platform_machine": platform.machine(),
         "cli_subcommands": _registered_cli_subcommands(),
         "supported_project_config_keys": sorted(SUPPORTED_CONFIG_KEYS),
         "maintainer_script_schemas": dict(sorted(MAINTAINER_SCRIPT_SCHEMAS.items())),

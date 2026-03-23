@@ -19,6 +19,7 @@ from replayt.cli.display import (
     experiment_filters_match,
     format_timeline_seq,
     inspect_stakeholder_markdown,
+    jsonl_type_str,
     parse_duration,
     parse_finish_reason_filters,
     parse_iso_ts,
@@ -75,7 +76,7 @@ def _event_type_filters(event_types: list[str] | None) -> frozenset[str] | None:
 def _filter_events_by_type(events: list[dict[str, Any]], filters: frozenset[str] | None) -> list[dict[str, Any]]:
     if filters is None:
         return events
-    return [e for e in events if e.get("type") in filters]
+    return [e for e in events if jsonl_type_str(e.get("type")) in filters]
 
 
 def _filter_events_by_note_kind(
@@ -95,7 +96,7 @@ def _filter_events_by_note_kind(
             if isinstance(kind, str) and kind in filters:
                 filtered.append(event)
             continue
-        if event_type_filters is not None and typ in event_type_filters:
+        if event_type_filters is not None and jsonl_type_str(typ) in event_type_filters:
             filtered.append(event)
     return filtered
 
@@ -117,7 +118,7 @@ def _filter_events_by_finish_reason(
             if isinstance(fr, str) and fr in filters:
                 filtered.append(event)
             continue
-        if event_type_filters is not None and typ in event_type_filters:
+        if event_type_filters is not None and jsonl_type_str(typ) in event_type_filters:
             filtered.append(event)
     return filtered
 
@@ -139,7 +140,7 @@ def _filter_events_by_tool_name(
             if isinstance(name, str) and name in filters:
                 filtered.append(event)
             continue
-        if event_type_filters is not None and typ in event_type_filters:
+        if event_type_filters is not None and jsonl_type_str(typ) in event_type_filters:
             filtered.append(event)
     return filtered
 
@@ -155,13 +156,13 @@ def _filter_events_by_structured_schema_name(
     filtered: list[dict[str, Any]] = []
     for event in events:
         typ = event.get("type")
-        if typ in {"structured_output", "structured_output_failed"}:
+        if jsonl_type_str(typ) in {"structured_output", "structured_output_failed", "llm_request", "llm_response"}:
             payload = event.get("payload") or {}
             sn = payload.get("schema_name")
             if isinstance(sn, str) and sn in filters:
                 filtered.append(event)
             continue
-        if event_type_filters is not None and typ in event_type_filters:
+        if event_type_filters is not None and jsonl_type_str(typ) in event_type_filters:
             filtered.append(event)
     return filtered
 
@@ -177,14 +178,14 @@ def _filter_events_by_llm_model(
     filtered: list[dict[str, Any]] = []
     for event in events:
         typ = event.get("type")
-        if typ in {"llm_request", "llm_response", "structured_output", "structured_output_failed"}:
+        if jsonl_type_str(typ) in {"llm_request", "llm_response", "structured_output", "structured_output_failed"}:
             payload = event.get("payload") or {}
             if isinstance(payload, dict):
                 m = payload_llm_model(payload)
                 if m is not None and m in filters:
                     filtered.append(event)
             continue
-        if event_type_filters is not None and typ in event_type_filters:
+        if event_type_filters is not None and jsonl_type_str(typ) in event_type_filters:
             filtered.append(event)
     return filtered
 
@@ -319,8 +320,9 @@ def cmd_inspect(
         "--structured-schema",
         help=(
             "Only include `structured_output` / `structured_output_failed` events whose payload "
-            "`schema_name` matches (repeatable; OR). Without --event-type, narrows the list to "
-            "those events only."
+            "`schema_name` matches, or `llm_request` / `llm_response` lines that carry the same "
+            "field (for example `complete_text(..., schema_name=...)`); repeatable; OR. "
+            "Without --event-type, narrows the list to matching events only."
         ),
     ),
     llm_model: list[str] | None = typer.Option(
@@ -739,8 +741,9 @@ def cmd_runs(
         None,
         "--structured-schema",
         help=(
-            "Only runs that logged `structured_output` or `structured_output_failed` with this "
-            "`schema_name` (exact match; repeatable; OR)."
+            "Only runs that logged this `schema_name` on `structured_output`, "
+            "`structured_output_failed`, or tagged `llm_request` / `llm_response` lines "
+            "(exact match; repeatable; OR)."
         ),
     ),
     note_kind: list[str] | None = typer.Option(
@@ -910,8 +913,9 @@ def cmd_stats(
         None,
         "--structured-schema",
         help=(
-            "Only runs that logged `structured_output` or `structured_output_failed` with this "
-            "`schema_name` (exact match; repeatable; OR)."
+            "Only runs that logged this `schema_name` on `structured_output`, "
+            "`structured_output_failed`, or tagged `llm_request` / `llm_response` lines "
+            "(exact match; repeatable; OR)."
         ),
     ),
     note_kind: list[str] | None = typer.Option(

@@ -511,6 +511,8 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     cmd_template = "echo {skill_root}"
     expected_cmd_sha = mod.skill_command_template_sha256(cmd_template)
     assert env["SKILL_COMMAND_SHA256"] == expected_cmd_sha
+    expected_task_sha = mod.skill_loop_task_sha256(args.task)
+    assert env["SKILL_TASK_SHA256"] == expected_task_sha
     assert env["SKILL_PROMPT_REL"] == mod.path_under_repo_or_absolute(
         str(repo.resolve()), str((run_dir / "iter-01-demo.prompt.md").resolve())
     )
@@ -520,6 +522,7 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert inv["schema"] == mod.SKILL_INVOCATION_SCHEMA
     assert inv["pipeline_sha256"] == expected_pipeline
     assert inv["skill_command_sha256"] == expected_cmd_sha
+    assert inv["task_sha256"] == expected_task_sha
     assert inv["prompt_file_rel"] == env["SKILL_PROMPT_REL"]
     assert inv["log_file_rel"] == env["SKILL_LOG_REL"]
     assert inv["run_dir_rel"] == env["SKILL_RUN_DIR_REL"]
@@ -542,6 +545,7 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert pipe["skills"] == ["demo"]
     assert pipe["pipeline_sha256"] == expected_pipeline
     assert pipe["skill_command_sha256"] == expected_cmd_sha
+    assert pipe["task_sha256"] == expected_task_sha
 
 
 def test_skill_pipeline_file_rejects_reordered_skills_on_resume(tmp_path: Path) -> None:
@@ -560,6 +564,39 @@ def test_skill_pipeline_file_rejects_skill_command_change_on_resume(tmp_path: Pa
     mod.ensure_skill_release_pipeline_file(run_dir, ["a", "b"], "task", "backend-a")
     with pytest.raises(mod.LoopError, match="skill_command_sha256"):
         mod.ensure_skill_release_pipeline_file(run_dir, ["a", "b"], "task", "backend-b")
+
+
+def test_skill_pipeline_file_rejects_task_change_on_resume(tmp_path: Path) -> None:
+    mod = _load_script()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    mod.ensure_skill_release_pipeline_file(run_dir, ["a", "b"], "first task", "backend-a")
+    with pytest.raises(mod.LoopError, match="task_sha256"):
+        mod.ensure_skill_release_pipeline_file(run_dir, ["a", "b"], "second task", "backend-a")
+
+
+def test_skill_pipeline_resume_ignores_missing_task_sha256(tmp_path: Path) -> None:
+    mod = _load_script()
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    sha = mod.skill_pipeline_sha256(["a", "b"])
+    cmd_sha = mod.skill_command_template_sha256("backend-a")
+    (run_dir / "pipeline.json").write_text(
+        json.dumps(
+            {
+                "schema": mod.SKILL_RELEASE_PIPELINE_SCHEMA,
+                "skills": ["a", "b"],
+                "pipeline_sha256": sha,
+                "skill_command_sha256": cmd_sha,
+                "task": "legacy",
+                "written_at": "2026-01-01T00:00:00+00:00",
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert mod.ensure_skill_release_pipeline_file(run_dir, ["a", "b"], "new task", "backend-a") == sha
 
 
 def test_skill_pipeline_resume_ignores_missing_skill_command_sha256(tmp_path: Path) -> None:
@@ -707,6 +744,7 @@ def _pre_tag_fix_args(mod, repo: Path, *, max_fix: int) -> argparse.Namespace:
         skill_root=".cursor/skills",
         max_iterations=3,
         status_interval=0.0,
+        task="pre-tag unit test",
     )
 
 

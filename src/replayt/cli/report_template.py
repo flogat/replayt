@@ -9,7 +9,12 @@ from datetime import datetime
 from itertools import zip_longest
 from typing import Any, Literal
 
-from replayt.cli.display import payload_llm_model, run_attention_summary
+from replayt.cli.display import (
+    payload_llm_model,
+    run_attention_summary,
+    stakeholder_report_handoff_html,
+    stakeholder_report_handoff_markdown,
+)
 
 REPORT_CSS = """
 :root {{
@@ -105,6 +110,8 @@ REPORT_HTML = """\
     </section>
 
     {attention_section}
+
+    {handoff_section}
 
     {approvals_section}
 
@@ -622,6 +629,10 @@ def _legacy_build_run_report_html(
         )
         report_title = "Run Report"
 
+    handoff_section = ""
+    if style == "stakeholder":
+        handoff_section = stakeholder_report_handoff_html(run_id, events)
+
     return REPORT_HTML.format(
         report_title=html.escape(report_title),
         run_id=html.escape(run_id),
@@ -635,6 +646,7 @@ def _legacy_build_run_report_html(
         meta_html=meta_html,
         llm_filter_html="",
         attention_section="",
+        handoff_section=handoff_section,
         approvals_section=approvals_section,
         timeline_html=timeline_html,
         outputs_section=outputs_section,
@@ -1393,6 +1405,10 @@ def build_run_report_html(
         attention_title = "Support summary" if style == "support" else "Action summary"
         attention_section = ATTENTION_SECTION.format(title=attention_title, items="\n".join(attention_items))
 
+    handoff_section = ""
+    if style in {"stakeholder", "support"}:
+        handoff_section = stakeholder_report_handoff_html(run_id, events)
+
     timeline_items: list[str] = []
     for state_meta in states:
         dot_class = "rp-dot-muted"
@@ -1592,6 +1608,7 @@ def build_run_report_html(
         meta_html=meta_html,
         llm_filter_html=_llm_model_filter_note_html(llm_model_filter),
         attention_section=attention_section,
+        handoff_section=handoff_section,
         approvals_section=approvals_section,
         timeline_html=timeline_html,
         outputs_section=outputs_section,
@@ -1751,6 +1768,10 @@ def build_run_report_markdown(
         lines.append(f"## {att_title}")
         lines.append("")
         lines.append("\n".join(attention_blocks))
+
+    if style in {"stakeholder", "support"}:
+        lines.append(stakeholder_report_handoff_markdown(run_id, events).rstrip("\n"))
+        lines.append("")
 
     if approvals:
         lines.append("## Approvals")

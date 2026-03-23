@@ -717,6 +717,7 @@ class LLMBridge:
         response_format: dict[str, Any] | None = None,
         effective_extras: dict[str, Any] | None = None,
         schema_json: dict[str, Any] | None = None,
+        schema_name: str | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
     ) -> tuple[str, dict[str, Any], dict[str, str], dict[str, Any]]:
         state = self._state_getter()
@@ -750,6 +751,8 @@ class LLMBridge:
 
         req_payload: dict[str, Any] = {"state": state, "effective": effective}
         req_payload.update(fingerprints)
+        if schema_name is not None:
+            req_payload["schema_name"] = schema_name
         if self._log_mode == LogMode.full:
             req_payload["messages"] = messages
         elif self._log_mode == LogMode.redacted:
@@ -798,6 +801,8 @@ class LLMBridge:
         fp = data.get("system_fingerprint")
         if isinstance(fp, str) and fp.strip():
             resp_payload["system_fingerprint"] = fp.strip()
+        if schema_name is not None:
+            resp_payload["schema_name"] = schema_name
         if self._log_mode == LogMode.full:
             resp_payload["content"] = content
         elif self._log_mode == LogMode.redacted:
@@ -880,7 +885,9 @@ class LLMBridge:
         extra_headers: dict[str, str] | None = None,
         extra_body: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
+        schema_name: str | None = None,
     ) -> str:
+        sn = str(schema_name).strip() if schema_name is not None else None
         text, _effective, _fingerprints, _meta = self._request_text(
             messages=messages,
             model=model,
@@ -896,6 +903,7 @@ class LLMBridge:
             extra_headers=extra_headers,
             extra_body=extra_body,
             stop=stop,
+            schema_name=sn or None,
         )
         return text
 
@@ -983,6 +991,7 @@ class LLMBridge:
             response_format=response_format,
             effective_extras={"structured_output_mode": structured_output_mode},
             schema_json=schema_json,
+            schema_name=model_type.__name__,
             stop=stop,
         )
         cap = self._client.settings.max_parse_response_chars

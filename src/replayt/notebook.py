@@ -101,7 +101,7 @@ def display_graph(wf: Workflow) -> Any:
 
 
 def _event_type_badge(typ: str) -> str:
-    key = typ if typ in {
+    key = typ if isinstance(typ, str) and typ in {
         "run_started",
         "state_entered",
         "structured_output",
@@ -160,13 +160,15 @@ def display_run(store: EventStore, run_id: str) -> Any:
 
     rows: list[str] = []
     for i, ev in enumerate(events):
-        typ = ev.get("type", "unknown")
+        raw_typ = ev.get("type")
+        typ_s = str(raw_typ) if raw_typ is not None else "unknown"
         ts = ev.get("ts", "")
         payload = ev.get("payload") or {}
-        badge = _event_type_badge(str(typ))
-        detail = _render_payload_detail(str(typ), payload)
+        badge = _event_type_badge(typ_s)
+        detail = _render_payload_detail(typ_s, payload)
 
-        row_cls = "replayt-nb-row replayt-nb-row--state" if typ == "state_entered" else "replayt-nb-row"
+        is_state_row = isinstance(raw_typ, str) and raw_typ == "state_entered"
+        row_cls = "replayt-nb-row replayt-nb-row--state" if is_state_row else "replayt-nb-row"
 
         rows.append(
             f'<div class="{row_cls}">'

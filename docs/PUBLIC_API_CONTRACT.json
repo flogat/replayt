@@ -1,5 +1,5 @@
 {
-  "export_count": 17,
+  "export_count": 18,
   "exports": [
     {
       "kind": "class",
@@ -71,6 +71,12 @@
       "kind": "class",
       "name": "Workflow",
       "source_module": "replayt.workflow",
+      "status": "present"
+    },
+    {
+      "kind": "tuple",
+      "name": "__version_tuple__",
+      "source_module": "replayt",
       "status": "present"
     },
     {

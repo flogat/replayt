@@ -9,7 +9,7 @@ from replayt.workflow import Workflow
 def mermaid_label(text: str) -> str:
     """Escape Mermaid node labels so quotes and HTML-sensitive characters stay parse-safe."""
 
-    return html.escape(text, quote=True)
+    return html.escape(str(text), quote=True)
 
 
 def workflow_to_mermaid(wf: Workflow) -> str:

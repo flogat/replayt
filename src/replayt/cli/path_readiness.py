@@ -204,6 +204,7 @@ def build_operational_paths_report() -> dict[str, object]:
     """Cwd-resolved paths for CI wrappers (``replayt version --format json``)."""
 
     from replayt.cli.ci_artifacts import (
+        resolve_ci_artifacts,
         resolve_ci_junit_path,
         resolve_ci_summary_json_path,
         step_summary_env_snapshot,
@@ -214,6 +215,20 @@ def build_operational_paths_report() -> dict[str, object]:
     log_dir = resolve_log_dir(DEFAULT_LOG_DIR).resolve()
     junit = resolve_ci_junit_path(None)
     summary_json = resolve_ci_summary_json_path(None)
+    artifacts = resolve_ci_artifacts(
+        explicit_junit_xml=None,
+        explicit_summary_json=None,
+        explicit_github_summary=False,
+    )
+    readiness = ci_artifact_readiness_checks(
+        junit_xml=artifacts.junit_xml,
+        summary_json=artifacts.summary_json,
+        github_summary_requested=artifacts.github_summary_requested,
+        github_step_summary=artifacts.github_step_summary,
+    )
+    readiness_payload = [
+        {"name": c.name, "ok": c.ok, "detail": c.detail, "path": c.path} for c in readiness
+    ]
     return {
         "schema": "replayt.operational_paths.v1",
         "cwd": str(cwd),
@@ -223,4 +238,6 @@ def build_operational_paths_report() -> dict[str, object]:
             "junit_xml": str(junit.resolve()) if junit is not None else None,
             "summary_json": str(summary_json.resolve()) if summary_json is not None else None,
         },
+        "ci_artifact_readiness": readiness_payload,
+        "ci_artifact_readiness_ok": all(c.ok for c in readiness),
     }

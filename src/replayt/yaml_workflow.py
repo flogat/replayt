@@ -80,7 +80,11 @@ def load_workflow_yaml(path: Path) -> dict[str, Any]:
     except ImportError as e:  # pragma: no cover
         msg = "Install replayt with the `yaml` extra: pip install replayt[yaml]"
         raise RuntimeError(msg) from e
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    text = path.read_text(encoding="utf-8")
+    try:
+        raw = yaml.safe_load(text)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML in workflow file {path}: {e}") from e
     if not isinstance(raw, dict):
         raise ValueError("YAML root must be a mapping")
     return raw

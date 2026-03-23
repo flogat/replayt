@@ -39,6 +39,17 @@ main{max-width:56rem;margin:0 auto}
 """
 
 
+def jsonl_type_str(typ: Any) -> str | None:
+    """Return *typ* when it is a string (normal JSONL ``type`` field), else ``None``.
+
+    Well-formed replayt logs always use string event types. Hand-edited or hostile JSONL may
+    use other JSON types; using such values in ``value in frozenset`` or ``value in {...}``
+    can raise ``TypeError`` (unhashable types).
+    """
+
+    return typ if isinstance(typ, str) else None
+
+
 def event_summary(events: list[dict[str, Any]]) -> dict[str, Any]:
     summary: dict[str, Any] = {
         "status": "unknown",
@@ -244,6 +255,169 @@ def _md_inline_code(text: str) -> str:
     return f"`{safe}`"
 
 
+def _stakeholder_paused_resume_rows(
+    run_id: str,
+    summary: dict[str, Any],
+    attention: dict[str, Any],
+) -> list[tuple[str, str]]:
+    """Label + command for ``replayt resume`` after approval (inspect + report handoff)."""
+
+    status = str(summary.get("status") or "")
+    if status != "paused":
+        return []
+    pending = attention.get("pending_approvals") or []
+    target_note = "Replace TARGET with your MODULE:wf or workflow path."
+    if len(pending) == 1:
+        aid = pending[0].get("approval_id")
+        if aid not in (None, ""):
+            return [
+                (
+                    "Resume after approval",
+                    f"replayt resume TARGET {run_id} --approval {aid}  # {target_note}",
+                )
+            ]
+        return [
+            (
+                "Resume after approval",
+                f"replayt resume TARGET {run_id} --approval <approval_id>  # {target_note}",
+            )
+        ]
+    if len(pending) > 1:
+        ids = [
+            str(p.get("approval_id") or "").strip()
+            for p in pending
+            if str(p.get("approval_id") or "").strip()
+        ]
+        if ids:
+            pending_note = "pending approval ids: " + ", ".join(ids)
+            return [
+                (
+                    "Resume after approvals",
+                    f"replayt resume TARGET {run_id} --approval <approval_id>  # {target_note} {pending_note}",
+                )
+            ]
+        return [
+            (
+                "Resume after approvals",
+                f"replayt resume TARGET {run_id} --approval <approval_id>  # {target_note}",
+            )
+        ]
+    return [
+        (
+            "Resume after approval",
+            f"replayt resume TARGET {run_id} --approval <approval_id>  # {target_note} "
+            f"See replayt inspect {run_id} --output json for details.",
+        )
+    ]
+
+
+def _stakeholder_report_handoff_rows(run_id: str, events: list[dict[str, Any]]) -> list[tuple[str, str]]:
+    """Ordered (label, command) lines for stakeholder/support report handoff panels."""
+
+    summary = event_summary(events)
+    attention = run_attention_summary(events)
+    status = str(summary.get("status") or "")
+    rows: list[tuple[str, str]] = [
+        ("Inspect (paste-friendly summary)", f"replayt inspect {run_id} --output markdown"),
+        (
+            "Regenerate stakeholder report (Markdown)",
+            f"replayt report {run_id} --format markdown --style stakeholder",
+        ),
+        (
+            "Regenerate stakeholder report (HTML)",
+            f"replayt report {run_id} --format html --style stakeholder --out report.html",
+        ),
+        ("Offline timeline HTML", f"replayt replay {run_id} --format html --style stakeholder --out run.html"),
+    ]
+    if status == "failed":
+        rows.append(("Inspect (JSON for engineers)", f"replayt inspect {run_id} --output json"))
+    rows.extend(_stakeholder_paused_resume_rows(run_id, summary, attention))
+    return rows
+
+
+def stakeholder_report_handoff_markdown(run_id: str, events: list[dict[str, Any]]) -> str:
+    """Markdown section with copy-paste CLI commands for stakeholder/support HTML and Markdown reports."""
+
+    lines: list[str] = [
+        "## Stakeholder CLI handoff",
+        "",
+        "Copy-paste commands for operators. Repeat `--log-dir`, `--log-subdir`, or `--sqlite` on each command "
+        "when you are not using the default log store.",
+        "",
+    ]
+    for label, cmd in _stakeholder_report_handoff_rows(run_id, events):
+        safe_cmd = cmd.replace("`", "'")
+        lines.append(f"- **{label}:** `{safe_cmd}`")
+    return "\n".join(lines) + "\n"
+
+
+def stakeholder_report_handoff_html(run_id: str, events: list[dict[str, Any]]) -> str:
+    """HTML fragment (section) matching :func:`stakeholder_report_handoff_markdown`."""
+
+    intro = (
+        "Copy-paste commands for operators. Repeat --log-dir, --log-subdir, or --sqlite on each command "
+        "when you are not using the default log store."
+    )
+    row_html: list[str] = [f'        <p class="rp-muted">{html.escape(intro)}</p>']
+    for label, cmd in _stakeholder_report_handoff_rows(run_id, events):
+        row_html.append(
+            '        <p class="rp-handoff-row">'
+            f'<span class="rp-label">{html.escape(label)}</span><br/>'
+            '<code class="rp-code rp-pre" style="display:block;margin-top:0.35rem;white-space:pre-wrap;">'
+            f"{html.escape(cmd)}"
+            "</code></p>"
+        )
+    inner = "\n".join(row_html)
+    return (
+        '    <section class="rp-section">\n'
+        '      <h2 class="rp-h2">Stakeholder CLI handoff</h2>\n'
+        '      <div class="rp-card rp-card-tight">\n'
+        f"{inner}\n"
+        "      </div>\n"
+        "    </section>\n"
+    )
+
+
+def _stakeholder_paused_resume_md_bullets(
+    run_id: str,
+    summary: dict[str, Any],
+    attention: dict[str, Any],
+) -> list[str]:
+    """Markdown bullets for ``replayt resume`` (inspect suggested next steps; prose matches prior CLI copy)."""
+
+    lines: list[str] = []
+    for label, cmd in _stakeholder_paused_resume_rows(run_id, summary, attention):
+        cmd_base = cmd.split("  # ", 1)[0].strip()
+        if label == "Resume after approval" and "See replayt inspect" in cmd:
+            lines.append(
+                f"- After approval: `replayt resume TARGET {run_id} --approval <approval_id>` "
+                f"(replace `TARGET`; see `replayt inspect {run_id} --output json` for details)."
+            )
+            continue
+        if label == "Resume after approval":
+            lines.append(
+                f"- After approval: `{cmd_base}` (replace `TARGET` with your `MODULE:wf` or workflow path)."
+            )
+        elif label == "Resume after approvals":
+            pending = attention.get("pending_approvals") or []
+            ids = [
+                str(p.get("approval_id") or "").strip()
+                for p in pending
+                if str(p.get("approval_id") or "").strip()
+            ]
+            if ids:
+                quoted = ", ".join(_md_inline_code(i) for i in ids)
+                lines.append(
+                    f"- After approvals: `{cmd_base}` (replace `TARGET`; pending ids: {quoted})."
+                )
+            else:
+                lines.append(
+                    f"- After approvals: `{cmd_base}` "
+                    "(replace `TARGET` with your `MODULE:wf` or workflow path)."
+                )
+    return lines
+
+
 def inspect_stakeholder_markdown(run_id: str, events: list[dict[str, Any]]) -> str:
     """Short Markdown blurb for PM/support paste (full run; not filtered event lists)."""
 
@@ -275,43 +449,7 @@ def inspect_stakeholder_markdown(run_id: str, events: list[dict[str, Any]]) -> s
         f"`replayt replay {run_id} --format html --style stakeholder --out run.html` "
         "(same log flags as above)."
     )
-    status = str(summary.get("status") or "")
-    pending = attention.get("pending_approvals") or []
-    if status == "paused":
-        if len(pending) == 1:
-            aid = pending[0].get("approval_id")
-            if aid not in (None, ""):
-                lines.append(
-                    f"- After approval: `replayt resume TARGET {run_id} --approval {aid}` "
-                    "(replace `TARGET` with your `MODULE:wf` or workflow path)."
-                )
-            else:
-                lines.append(
-                    f"- After approval: `replayt resume TARGET {run_id} --approval <approval_id>` "
-                    "(replace `TARGET` with your `MODULE:wf` or workflow path)."
-                )
-        elif len(pending) > 1:
-            ids = [
-                str(p.get("approval_id") or "").strip()
-                for p in pending
-                if str(p.get("approval_id") or "").strip()
-            ]
-            if ids:
-                quoted = ", ".join(_md_inline_code(i) for i in ids)
-                lines.append(
-                    f"- After approvals: `replayt resume TARGET {run_id} --approval <approval_id>` "
-                    f"(replace `TARGET`; pending ids: {quoted})."
-                )
-            else:
-                lines.append(
-                    f"- After approvals: `replayt resume TARGET {run_id} --approval <approval_id>` "
-                    "(replace `TARGET` with your `MODULE:wf` or workflow path)."
-                )
-        else:
-            lines.append(
-                f"- After approval: `replayt resume TARGET {run_id} --approval <approval_id>` "
-                f"(replace `TARGET`; see `replayt inspect {run_id} --output json` for details)."
-            )
+    lines.extend(_stakeholder_paused_resume_md_bullets(run_id, summary, attention))
     return "\n".join(lines) + "\n"
 
 
@@ -343,14 +481,15 @@ def replay_timeline_lines(
 ) -> list[str]:
     lines: list[str] = []
     for e in events:
-        typ = e.get("type")
-        typ_s = str(typ) if typ is not None else None
-        if _replay_omit_event_type(typ_s, style=style):
+        raw_typ = e.get("type")
+        typ_key = jsonl_type_str(raw_typ)
+        display_typ = str(raw_typ) if raw_typ is not None else "unknown"
+        if _replay_omit_event_type(typ_key, style=style):
             continue
         payload = e.get("payload") or {}
         seq_s = format_timeline_seq(e.get("seq"))
-        line = f"{seq_s}  {typ}"
-        if typ in {
+        line = f"{seq_s}  {display_typ}"
+        if typ_key in {
             "state_entered",
             "state_exited",
             "transition",
@@ -541,7 +680,8 @@ def parse_structured_schema_name_filters(raw: list[str] | None) -> frozenset[str
         if not name:
             raise typer.BadParameter(
                 "Empty --structured-schema is not allowed; omit the flag or pass a `schema_name` "
-                "(exact match on `structured_output` / `structured_output_failed` events; repeat for OR)."
+                "(exact match on `structured_output` / `structured_output_failed` and, when present, "
+                "`llm_request` / `llm_response` payload `schema_name`; repeat for OR)."
             )
         normalized.append(name)
     return frozenset(normalized)
@@ -553,7 +693,12 @@ def run_matches_structured_schema_name_filter(
     if wanted is None:
         return True
     for e in events:
-        if e.get("type") not in {"structured_output", "structured_output_failed"}:
+        if jsonl_type_str(e.get("type")) not in {
+            "structured_output",
+            "structured_output_failed",
+            "llm_request",
+            "llm_response",
+        }:
             continue
         payload = e.get("payload") or {}
         sn = payload.get("schema_name")
@@ -638,7 +783,7 @@ def run_matches_llm_model_filter(events: list[dict[str, Any]], wanted: frozenset
     if wanted is None:
         return True
     for e in events:
-        typ = e.get("type")
+        typ = jsonl_type_str(e.get("type"))
         if typ not in {"llm_request", "llm_response", "structured_output", "structured_output_failed"}:
             continue
         payload = e.get("payload") or {}

@@ -73,6 +73,7 @@ def test_llm_bridge_with_settings_merges_experiment_into_effective() -> None:
 
     req = next(p for t, p in events if t == "llm_request")
     assert req["effective"]["experiment"] == {"run_id": "r1", "prompt_hash": "abc"}
+    assert "schema_name" not in req
 
 
 def test_llm_bridge_float_max_tokens_from_defaults_passed_to_client() -> None:
@@ -262,6 +263,40 @@ def test_llm_bridge_complete_text_emits_stable_request_fingerprints() -> None:
     assert resp["messages_sha256"] == req["messages_sha256"]
     assert resp["effective_sha256"] == req["effective_sha256"]
     assert "schema_sha256" not in resp
+
+
+def test_llm_bridge_complete_text_optional_schema_name() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="k", model="m")
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.0,
+            schema_name="  SandboxDraft  ",
+        )
+
+    req = next(p for t, p in events if t == "llm_request")
+    resp = next(p for t, p in events if t == "llm_response")
+    assert req["schema_name"] == "SandboxDraft"
+    assert resp["schema_name"] == "SandboxDraft"
+
+    events.clear()
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(
+            messages=[{"role": "user", "content": "hi"}],
+            temperature=0.0,
+            schema_name="   ",
+        )
+    req2 = next(p for t, p in events if t == "llm_request")
+    assert "schema_name" not in req2
 
 
 def test_llm_bridge_call_extra_body_empty_dict_clears_defaults() -> None:
@@ -509,6 +544,7 @@ def test_llm_bridge_parse_with_native_response_format_logs_mode() -> None:
     assert response_format["type"] == "json_schema"
     assert response_format["json_schema"]["name"] == "Answer"
     req = next(p for t, p in events if t == "llm_request")
+    assert req["schema_name"] == "Answer"
     assert req["effective"]["structured_output_mode"] == "native_json_schema"
 
 
@@ -539,6 +575,8 @@ def test_llm_bridge_parse_success_emits_schema_and_request_fingerprints() -> Non
     req = next(p for t, p in events if t == "llm_request")
     resp = next(p for t, p in events if t == "llm_response")
     structured = next(p for t, p in events if t == "structured_output")
+    assert req["schema_name"] == "Answer"
+    assert resp["schema_name"] == "Answer"
     assert req["messages_sha256"] == _sha256_json(req["messages"])
     assert req["effective_sha256"] == _sha256_json(req["effective"])
     assert req["schema_sha256"] == _sha256_json(Answer.model_json_schema())
@@ -577,6 +615,9 @@ def test_llm_bridge_parse_emits_structured_output_failed_on_validation_error() -
 
     failure = next(p for t, p in events if t == "structured_output_failed")
     req = next(p for t, p in events if t == "llm_request")
+    resp = next(p for t, p in events if t == "llm_response")
+    assert req["schema_name"] == "Answer"
+    assert resp["schema_name"] == "Answer"
     assert failure["schema_name"] == "Answer"
     assert failure["stage"] == "schema_validate"
     assert failure["structured_output_mode"] == "prompt_only"

@@ -18,6 +18,17 @@ def _workflow_objects(obj: Any) -> list[tuple[str, Workflow]]:
     return [(name, value) for name, value in vars(obj).items() if isinstance(value, Workflow)]
 
 
+def _suggest_workflow_attr_name(workflows: list[tuple[str, Workflow]]) -> str:
+    """Pick a conventional export name for copy-paste hints (prefer ``wf``, then ``workflow``)."""
+
+    names = [name for name, _ in workflows]
+    if "wf" in names:
+        return "wf"
+    if "workflow" in names:
+        return "workflow"
+    return min(names)
+
+
 # Dotted Python module path without ":" — common first-hour mistake (MODULE:VAR).
 _DOTTED_MODULEISH = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)+$")
 
@@ -244,6 +255,22 @@ def load_target(target: str) -> Workflow:
                 raise
     elif ":" in target and not _is_windows_drive_path_target(target):
         mod_name, attr = target.split(":", 1)
+        mod_name = mod_name.strip()
+        attr = attr.strip()
+        if not mod_name or not attr:
+            raise typer.BadParameter(
+                f"Target {target!r} is not a valid MODULE:VAR reference: "
+                "both the import path and the variable name must be non-empty "
+                "(for example `replayt_examples.e01_hello_world:wf`). "
+                "On Windows, absolute paths like `C:\\path\\to\\workflow.py` are files, not MODULE:VAR."
+            )
+        if ":" in attr:
+            raise typer.BadParameter(
+                f"Target {target!r} has more than one ':' in the MODULE:VAR form. "
+                "Use exactly one colon between the import path and the Workflow variable "
+                f"(for example `{mod_name}:wf`). "
+                "On Windows, `C:\\...` paths are filesystem targets, not MODULE:VAR."
+            )
         try:
             mod = importlib.import_module(mod_name)
         except ModuleNotFoundError as exc:
@@ -256,11 +283,18 @@ def load_target(target: str) -> Workflow:
             workflows = _workflow_objects(mod)
             if workflows:
                 names = ", ".join(name for name, _ in workflows)
+                pick = _suggest_workflow_attr_name(workflows)
+                suggest = f"{mod_name}:{pick}"
                 raise typer.BadParameter(
-                    f"Module {mod_name!r} has no attribute {attr!r}; available Workflow objects: {names}"
+                    f"Module {mod_name!r} has no attribute {attr!r}. "
+                    f"It exports Workflow objects named: {names}. "
+                    f"Try `replayt run {suggest}` (use the name your module actually defines). "
+                    f"Graph preflight without LLM calls: `replayt doctor --skip-connectivity --target {suggest}`."
                 )
             raise typer.BadParameter(
-                f"Module {mod_name!r} has no attribute {attr!r} and exports no Workflow objects."
+                f"Module {mod_name!r} has no attribute {attr!r} and exports no top-level Workflow objects. "
+                "Define a `Workflow` at module scope (see `docs/QUICKSTART.md`) and pass `module:variable` "
+                f"where `variable` matches that name. Tip: `python -c \"import {mod_name}\"` should succeed first."
             )
         obj = getattr(mod, attr)
     else:
