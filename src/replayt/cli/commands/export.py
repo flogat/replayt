@@ -44,6 +44,8 @@ from replayt.cli.run_support import (
     run_started_envelope_ts_from_jsonl_path,
     run_started_hook_json_blobs_from_events,
     run_started_hook_json_blobs_from_jsonl_path,
+    run_started_initial_state_from_events,
+    run_started_initial_state_from_jsonl_path,
     run_started_inputs_json_from_events,
     run_started_inputs_json_from_jsonl_path,
     run_started_runtime_json_from_events,
@@ -101,6 +103,7 @@ def _maybe_invoke_export_hook(
     meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_events(events)
     inputs_j = run_started_inputs_json_from_events(events)
     runtime_j = run_started_runtime_json_from_events(events)
+    initial_st = run_started_initial_state_from_events(events)
     started_ts = run_started_envelope_ts_from_events(events)
     try:
         invoke_export_hook(
@@ -125,6 +128,7 @@ def _maybe_invoke_export_hook(
             policy_hook_context_json=policy_hook_context_json,
             run_started_ts=started_ts,
             runtime_json=runtime_j,
+            initial_state=initial_st,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -159,6 +163,7 @@ def _maybe_invoke_seal_hook(
     meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
     inputs_j = run_started_inputs_json_from_jsonl_path(jsonl_path)
     runtime_j = run_started_runtime_json_from_jsonl_path(jsonl_path)
+    initial_st = run_started_initial_state_from_jsonl_path(jsonl_path)
     started_ts = run_started_envelope_ts_from_jsonl_path(jsonl_path)
     try:
         invoke_seal_hook(
@@ -178,6 +183,7 @@ def _maybe_invoke_seal_hook(
             policy_hook_context_json=policy_hook_context_json,
             run_started_ts=started_ts,
             runtime_json=runtime_j,
+            initial_state=initial_st,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -214,6 +220,7 @@ def _maybe_invoke_verify_seal_hook(
     meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
     inputs_j = run_started_inputs_json_from_jsonl_path(jsonl_path)
     runtime_j = run_started_runtime_json_from_jsonl_path(jsonl_path)
+    initial_st = run_started_initial_state_from_jsonl_path(jsonl_path)
     started_ts = run_started_envelope_ts_from_jsonl_path(jsonl_path)
     try:
         invoke_verify_seal_hook(
@@ -235,6 +242,7 @@ def _maybe_invoke_verify_seal_hook(
             policy_hook_context_json=policy_hook_context_json,
             run_started_ts=started_ts,
             runtime_json=runtime_j,
+            initial_state=initial_st,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:

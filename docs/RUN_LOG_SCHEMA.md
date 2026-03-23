@@ -10,7 +10,7 @@ Common envelope keys on every line:
 - `type` (string): event kind
 - `payload` (object): event-specific data
 
-Use `replayt log-schema` for the bundled JSON Schema and this page for the main payload shapes.
+Use `replayt log-schema` for the bundled JSON Schema and this page for the main payload shapes. For the sorted allowlist of envelope `type` strings replayt core emits (CI and MCP wrappers), read **`jsonl_event_types_contract`** on **`replayt version --format json`** (`replayt.jsonl_event_types_contract.v1`).
 
 ## `run_started`
 
@@ -39,7 +39,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `trust_boundary.warnings`: soft local-policy findings such as `log_mode=full` or a risky `OPENAI_BASE_URL`
 - `policy_hooks.run` / `policy_hooks.resume` (object, optional): compact CLI policy-hook breadcrumbs with `source`, `argv0`, and `arg_count` when trusted external gate subprocesses were configured for the run lifecycle
 
-Trusted policy hooks (**`run_hook`** on **`--resume`**, **`resume_hook`**, **`export_hook`**, **`seal_hook`**, **`verify_seal_hook`**) may receive this snapshot again as env **`REPLAYT_RUN_STARTED_RUNTIME_JSON`**: canonical sorted JSON of the **`runtime`** object, or **`{}`** when **`runtime`** was omitted or null (see [`CLI.md`](CLI.md) / **`policy_hook_env_catalog`**).
+Trusted policy hooks (**`run_hook`** on **`--resume`**, **`resume_hook`**, **`export_hook`**, **`seal_hook`**, **`verify_seal_hook`**) may receive this snapshot again as env **`REPLAYT_RUN_STARTED_RUNTIME_JSON`**: canonical sorted JSON of the **`runtime`** object, or **`{}`** when **`runtime`** was omitted or null (see [`CLI.md`](CLI.md) / **`policy_hook_env_catalog`**). The same hooks may receive **`REPLAYT_RUN_STARTED_INITIAL_STATE`**: a plain string equal to **`initial_state`**, or **`""`** when that key is absent on a readable **`run_started`** payload (**`run_hook`** on a brand-new run sets it from the loaded workflow before **`run_started`** exists when the workflow has an initial state; omitted when **`run_started`** is missing or unreadable on **`--resume`** and when a brand-new workflow has no initial state).
 
 ## State flow
 
@@ -57,6 +57,22 @@ Trusted policy hooks (**`run_hook`** on **`--resume`**, **`resume_hook`**, **`ex
 - `from_state` (string)
 - `to_state` (string)
 - `reason` (string, optional)
+
+## Pause and resume helpers
+
+### `context_snapshot`
+
+- `state` (string): workflow state when the pause was taken
+- `data` (object): JSON-serializable snapshot of `RunContext.data` used to restore context on `Runner.run(..., resume=True)`
+
+Emitted immediately before `run_paused` when a step raises `ApprovalPending`.
+
+### `approval_applied`
+
+- `approval_state` (string): state where the run paused for approval
+- `resumed_at_state` (string): state the runner continues from after replaying `approval_resolved` and paired `approval_requested` metadata
+
+Emitted only on resume when those two states differ (for example dynamic `on_approve` targets).
 
 ## LLM events
 
@@ -91,6 +107,9 @@ Trusted policy hooks (**`run_hook`** on **`--resume`**, **`resume_hook`**, **`ex
 - `system_fingerprint` (string, optional): provider fingerprint when returned (OpenAI-style reproducibility hint)
 - `http_attempts` (integer, optional): how many HTTP POST attempts the OpenAI-compat client made for this completion (1 on the first success; greater than 1 when earlier responses were retryable 429 / 5xx and the client backed off)
 - `http_status` (integer, optional): HTTP status code of the successful chat-completions response (typically `200`)
+- `http_response_request_id` (string, optional): bounded copy of `x-request-id` or `x-correlation-id` from the successful HTTP response when the gateway sends one (vendor support correlation)
+- `http_response_processing_ms` (integer, optional): when present, parsed from the `openai-processing-ms` response header (OpenAI-style server timing hint)
+- `http_response_cf_ray` (string, optional): bounded copy of `cf-ray` when Cloudflare (or similar) adds it
 - `content_preview` (string, optional): truncated in `redacted` mode only
 - `content` (string): only when logging mode is `full`
 
@@ -112,6 +131,9 @@ Trusted policy hooks (**`run_hook`** on **`--resume`**, **`resume_hook`**, **`ex
 - `system_fingerprint` (string, optional): provider fingerprint when returned
 - `http_attempts` (integer, optional): same as on the preceding `llm_response` when the OpenAI-compat client recorded transport metadata
 - `http_status` (integer, optional): same as on the preceding `llm_response` when present
+- `http_response_request_id` (string, optional): same as on the preceding `llm_response` when present
+- `http_response_processing_ms` (integer, optional): same as on the preceding `llm_response` when present
+- `http_response_cf_ray` (string, optional): same as on the preceding `llm_response` when present
 
 ### `structured_output_failed`
 
@@ -188,6 +210,14 @@ Emitted immediately before `run_failed` when a step handler exhausts retries, wh
 
 Failed runs emit `run_failed` first and then a final `run_completed` with `status: "failed"`.
 
+### `run_interrupted`
+
+- `reason` (string): for example `subprocess_timeout` when `replayt run --timeout` stops the child process
+- `timeout_seconds` (number): wall-clock limit that fired
+- `note` (string, optional): short reminder whether the event reached JSONL only or the SQLite mirror
+
+Emitted by the **CLI parent** when a timeout wrapper kills the isolated subprocess; it is not produced by `Runner.run` and does not replace the normal `run_failed` / `run_completed` pair from an in-process run.
+
 ## Approval events
 
 ### `approval_requested`
@@ -212,6 +242,10 @@ Project config `approval_actor_required_keys = [...]` or CLI `--require-actor-ke
 
 - `reason` (string), for example `approval_required`
 - `approval_id` (string, optional)
+- `on_approve` (string, optional): next state name when the pending approval is approved (may be omitted)
+- `on_reject` (string, optional): next state name when the pending approval is rejected (may be omitted)
+
+These optional transition hints pair with `approval_resolved` during resume; they are not a second control-flow mechanism outside explicit returns.
 
 ## Logging modes
 

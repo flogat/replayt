@@ -36,6 +36,19 @@ def _optional_tool_call_id(value: Any) -> str | None:
     return s or None
 
 
+def _openai_chat_tool_result_content(value: Any) -> str:
+    """Stringify a tool return value for OpenAI Chat Completions ``role: "tool"`` message ``content``."""
+
+    if isinstance(value, str):
+        return value
+    if isinstance(value, BaseModel):
+        return value.model_dump_json()
+    try:
+        return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+    except TypeError:
+        return str(value)
+
+
 def _first_paragraph_doc(fn: Callable[..., Any]) -> str | None:
     raw = inspect.getdoc(fn)
     if not raw:
@@ -366,6 +379,51 @@ class ToolRegistry:
             oid = _optional_tool_call_id(tc.get("id"))
             results.append(self.call(name, args, tool_call_id=oid))
         return results
+
+    def openai_chat_tool_result_messages(
+        self,
+        tool_calls: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+        results: list[Any] | tuple[Any, ...] | None,
+    ) -> list[dict[str, Any]]:
+        """Build OpenAI Chat Completions ``messages`` entries with ``role: "tool"`` for the next turn.
+
+        After :meth:`apply_openai_chat_tool_calls`, append the assistant message (with ``tool_calls``)
+        plus these rows before calling ``chat.completions.create`` again. Each element of
+        ``tool_calls`` must match the vendor shape (same as :meth:`apply_openai_chat_tool_calls`) and
+        include a non-empty string ``id``; OpenAI rejects follow-up turns without ``tool_call_id``.
+
+        ``results`` must have the same length as ``tool_calls`` (typically the list returned by
+        :meth:`apply_openai_chat_tool_calls`). Non-string values are JSON-encoded (sorted object keys;
+        :class:`~pydantic.BaseModel` results use :meth:`~pydantic.BaseModel.model_dump_json`).
+
+        This is a pure message-shaping helper: it does not emit JSONL or invoke tools.
+        """
+
+        if not tool_calls:
+            if results:
+                raise ValueError("openai_chat_tool_result_messages: results given but tool_calls is empty")
+            return []
+        if results is None:
+            raise ValueError("openai_chat_tool_result_messages: results is required when tool_calls is non-empty")
+        if len(tool_calls) != len(results):
+            raise ValueError(
+                "openai_chat_tool_result_messages: tool_calls and results must have the same length "
+                f"(got {len(tool_calls)} vs {len(results)})"
+            )
+        out: list[dict[str, Any]] = []
+        for i, (tc, res) in enumerate(zip(tool_calls, results, strict=True)):
+            if not isinstance(tc, dict):
+                msg = f"tool_calls[{i}]: expected dict, got {type(tc).__name__}"
+                raise TypeError(msg)
+            tcid = _optional_tool_call_id(tc.get("id"))
+            if not tcid:
+                msg = (
+                    f"tool_calls[{i}]: missing non-empty string id "
+                    "(OpenAI requires tool_call_id on each tool message)"
+                )
+                raise ValueError(msg)
+            out.append({"role": "tool", "tool_call_id": tcid, "content": _openai_chat_tool_result_content(res)})
+        return out
 
     def call(
         self,

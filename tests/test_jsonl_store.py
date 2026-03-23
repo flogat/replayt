@@ -55,6 +55,21 @@ def test_jsonl_append_event_monotonic_seq_after_non_object_json_tail(tmp_path: P
     assert ev["seq"] == 3
 
 
+def test_jsonl_append_event_monotonic_seq_after_non_numeric_seq_tail(tmp_path: Path) -> None:
+    """Tail line may be a JSON object with an unusable ``seq`` (mirrors full-scan tolerance)."""
+
+    path = tmp_path / "badseq_tail.jsonl"
+    path.write_text(
+        '{"ts":"t","run_id":"badseq_tail","seq":1,"type":"run_started","payload":{}}\n'
+        '{"ts":"t","run_id":"badseq_tail","seq":2,"type":"state_entered","payload":{}}\n'
+        '{"ts":"t","run_id":"badseq_tail","seq":"nope","type":"state_entered","payload":{}}\n',
+        encoding="utf-8",
+    )
+    store = JSONLStore(tmp_path)
+    ev = store.append_event("badseq_tail", ts="t3", typ="state_entered", payload={})
+    assert ev["seq"] == 3
+
+
 def test_jsonl_append_event_tail_seq_on_long_log(tmp_path: Path) -> None:
     store = JSONLStore(tmp_path)
     rid = "longrun"

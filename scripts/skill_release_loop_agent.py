@@ -133,14 +133,19 @@ def skill_loop_task_sha256(task: str) -> str:
 
 
 def path_under_repo_or_absolute(repo_root: str, target: str) -> str:
-    """Path under *repo_root* when possible; else absolute (e.g. different Windows drive)."""
+    """Path under *repo_root* when possible; else absolute (e.g. different Windows drive).
+
+    Uses POSIX separators (forward slashes) on every platform so ``SKILL_*_REL`` env values,
+    ``--skill-command`` ``*_rel`` placeholders, and ``replayt.skill_invocation.v1`` ``*_rel``
+    fields stay stable for ``jq``, URLs, and cross-OS artifact keys.
+    """
 
     root = Path(repo_root).resolve()
     resolved = Path(target).resolve()
     try:
-        return str(resolved.relative_to(root))
+        return resolved.relative_to(root).as_posix()
     except ValueError:
-        return str(resolved)
+        return resolved.as_posix()
 
 
 def skill_command_rel_placeholders(

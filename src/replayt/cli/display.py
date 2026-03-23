@@ -7,6 +7,7 @@ import json
 import re
 from collections import defaultdict, deque
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Literal
 
 import typer
@@ -691,6 +692,123 @@ def inspect_stakeholder_markdown(
             "same log flags as above)."
         )
     lines.extend(_stakeholder_paused_resume_md_bullets(run_id, summary, attention))
+    return "\n".join(lines) + "\n"
+
+
+def _runs_inventory_md_cell(val: Any, *, max_len: int = 96) -> str:
+    """Escape a value for a GitHub-flavored Markdown table cell."""
+
+    s = "" if val in (None, "") else str(val)
+    s = s.replace("|", "\\|").replace("\n", " ").strip()
+    if len(s) > max_len:
+        s = s[: max_len - 1] + "…"
+    return s
+
+
+def _runs_inventory_handoff_rows(style: Literal["stakeholder", "support"]) -> list[tuple[str, str]]:
+    """Copy-paste command rows for run-inventory Markdown; use literal ``RUN_ID`` placeholder."""
+
+    bundle_infix = "support" if style == "support" else "stakeholder"
+    regen_md_lbl = (
+        "Regenerate support report (Markdown)"
+        if style == "support"
+        else "Regenerate stakeholder report (Markdown)"
+    )
+    regen_html_lbl = (
+        "Regenerate support report (HTML)"
+        if style == "support"
+        else "Regenerate stakeholder report (HTML)"
+    )
+    bundle_lbl = "Support bundle (.tar.gz)" if style == "support" else "Stakeholder bundle (.tar.gz)"
+    return [
+        (
+            "Inspect (paste-friendly summary)",
+            f"replayt inspect RUN_ID --output markdown --style {style}",
+        ),
+        (regen_md_lbl, f"replayt report RUN_ID --format markdown --style {style}"),
+        (
+            regen_html_lbl,
+            f"replayt report RUN_ID --format html --style {style} --out report.html",
+        ),
+        (
+            "Offline timeline HTML",
+            f"replayt replay RUN_ID --format html --style {style} --out run.html",
+        ),
+        (
+            bundle_lbl,
+            f"replayt bundle-export RUN_ID --out RUN_ID-{bundle_infix}-bundle.tar.gz --report-style {style}",
+        ),
+        ("Machine-readable inventory", "replayt runs --output json"),
+        ("Inspect (JSON for engineers)", "replayt inspect RUN_ID --output json"),
+    ]
+
+
+def runs_inventory_markdown(
+    runs_data: list[tuple[str, dict[str, Any], dict[str, Any], int | None]],
+    *,
+    log_dir: Path,
+    sqlite: Path | None,
+    limit: int,
+    generated_at_iso: str,
+    style: Literal["stakeholder", "support"] = "stakeholder",
+) -> str:
+    """Markdown document: filtered run table plus the same stakeholder handoff commands as single-run reports."""
+
+    if style == "support":
+        lines: list[str] = ["## Support triage — run inventory", ""]
+    else:
+        lines = ["## Recent replayt runs", ""]
+    lines.append(f"- **Generated at:** `{generated_at_iso}`")
+    ld = str(log_dir).replace("`", "'")
+    lines.append(f"- **Log directory:** `{ld}`")
+    if sqlite is not None:
+        sq = str(sqlite.resolve()).replace("`", "'")
+        lines.append(f"- **SQLite mirror:** `{sq}`")
+    lines.append(f"- **Listing limit:** `{limit}`")
+    lines.append(f"- **Rows shown:** {len(runs_data)}")
+    lines.append("")
+    if not runs_data:
+        lines.append("No runs matched this query.")
+    else:
+        lines.extend(
+            [
+                "| run_id | status | workflow | last_event | attention |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for rid, summary, attention, _age in runs_data:
+            wf = f"{summary.get('workflow_name')}@{summary.get('workflow_version')}"
+            att_raw = str(attention.get("attention_summary") or "").strip()
+            att = att_raw if att_raw else "—"
+            lines.append(
+                f"| {_runs_inventory_md_cell(rid)} | {_runs_inventory_md_cell(summary.get('status'))} | "
+                f"{_runs_inventory_md_cell(wf)} | {_runs_inventory_md_cell(summary.get('last_ts'))} | "
+                f"{_runs_inventory_md_cell(att)} |"
+            )
+        lines.append("")
+    lines.extend(
+        [
+            "## Stakeholder CLI handoff",
+            "",
+            "Replace `RUN_ID` with a run id from the table above. Repeat `--log-dir`, `--log-subdir`, or `--sqlite` "
+            "on each command when you are not using the default log store.",
+            "",
+        ]
+    )
+    for label, cmd in _runs_inventory_handoff_rows(style):
+        safe_cmd = cmd.replace("`", "'")
+        lines.append(f"- **{label}:** `{safe_cmd}`")
+    lines.extend(
+        [
+            "",
+            "**Paused runs:** read pending `approval_id` values from `replayt inspect RUN_ID --output json`, then "
+            "`replayt resume TARGET RUN_ID --approval <approval_id>` (replace `TARGET` with your workflow entry).",
+            "",
+            "**Failed runs:** use JSON inspect alongside stakeholder or support reports when engineers need payload "
+            "detail.",
+            "",
+        ]
+    )
     return "\n".join(lines) + "\n"
 
 

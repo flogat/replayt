@@ -2759,9 +2759,45 @@ def test_cli_read_commands_do_not_create_missing_log_dir(tmp_path: Path) -> None
 
     assert runs.exit_code == 0
     assert "No runs found" in runs.stdout
+    assert "e01_hello_world" in runs.stderr
+    assert "replayt try --list" in runs.stderr
     assert stats.exit_code == 0
     assert json.loads(stats.stdout)["runs_total_on_disk"] == 0
     assert not missing_log_dir.exists()
+
+
+def test_cli_runs_empty_after_status_filter_prints_filter_hint(tmp_path: Path) -> None:
+    log_dir = tmp_path / "logs"
+    log_dir.mkdir()
+    rid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890"
+    jsonl = log_dir / f"{rid}.jsonl"
+    jsonl.write_text(
+        json.dumps(
+            {
+                "seq": 1,
+                "type": "run_started",
+                "ts": "2026-01-01T00:00:00Z",
+                "payload": {"workflow_name": "w", "workflow_version": "1"},
+            }
+        )
+        + "\n"
+        + json.dumps(
+            {
+                "seq": 2,
+                "type": "run_completed",
+                "ts": "2026-01-01T00:00:01Z",
+                "payload": {"status": "completed"},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    runner = CliRunner()
+    result = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--status", "paused"])
+    assert result.exit_code == 0
+    assert "No runs found" in result.stdout
+    assert "none matched your filters" in result.stderr
+    assert "e01_hello_world" not in result.stderr
 
 
 def test_replay_html_embeds_valid_css() -> None:
@@ -4053,6 +4089,7 @@ def test_cli_export_hook_receives_policy_context(tmp_path: Path, monkeypatch: py
         "if os.environ.get('REPLAYT_WORKFLOW_META_JSON') else None), "
         "'inputs': json.loads(os.environ['REPLAYT_RUN_INPUTS_JSON']), "
         "'runtime': json.loads(os.environ['REPLAYT_RUN_STARTED_RUNTIME_JSON']), "
+        "'initial_state': os.environ.get('REPLAYT_RUN_STARTED_INITIAL_STATE'), "
         "'workflow_entry_path': os.environ.get('REPLAYT_WORKFLOW_ENTRY_PATH'), "
         "'run_started_ts': os.environ.get('REPLAYT_RUN_STARTED_TS'), "
         "'policy_hook_name': os.environ.get('REPLAYT_POLICY_HOOK_NAME')"
@@ -4126,6 +4163,7 @@ def test_cli_export_hook_receives_policy_context(tmp_path: Path, monkeypatch: py
     assert data["workflow_meta"] is None
     assert data["inputs"] == {"customer_name": "Sam"}
     assert data["policy_hook_name"] == "export_hook"
+    assert data["initial_state"] == "greet"
     assert data["runtime"]["engine"]["log_mode"] == "redacted"
     import replayt_examples.e01_hello_world as e01_mod
 
@@ -4554,6 +4592,90 @@ def test_cli_runs_output_json_reports_filters_and_age(tmp_path: Path, monkeypatc
     assert data["runs"][0]["attention_summary"] == "awaiting approval ship"
     assert data["runs"][0]["pending_approvals"][0]["approval_id"] == "ship"
     assert data["runs"][0]["last_event_age_seconds"] == 9000
+
+
+def test_cli_runs_output_markdown_table_and_handoff(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    lines = [
+        {
+            "ts": "2026-03-22T09:00:00+00:00",
+            "run_id": "rid-md",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "demo", "workflow_version": "2"},
+        },
+        {
+            "ts": "2026-03-22T09:00:01+00:00",
+            "run_id": "rid-md",
+            "seq": 2,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    (log_dir / "rid-md.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--output", "markdown"])
+    assert result.exit_code == 0
+    assert "## Recent replayt runs" in result.stdout
+    assert "| rid-md |" in result.stdout
+    assert "demo@2" in result.stdout
+    assert "## Stakeholder CLI handoff" in result.stdout
+    assert "replayt inspect RUN_ID --output markdown --style stakeholder" in result.stdout
+    assert "replayt bundle-export RUN_ID --out RUN_ID-stakeholder-bundle.tar.gz" in result.stdout
+
+
+def test_cli_runs_output_markdown_support_style_title(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    lines = [
+        {
+            "ts": "2026-03-22T09:00:00+00:00",
+            "run_id": "rid-s",
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {
+            "ts": "2026-03-22T09:00:01+00:00",
+            "run_id": "rid-s",
+            "seq": 2,
+            "type": "run_completed",
+            "payload": {"status": "completed"},
+        },
+    ]
+    (log_dir / "rid-s.jsonl").write_text("\n".join(json.dumps(x) for x in lines) + "\n", encoding="utf-8")
+
+    runner = CliRunner()
+    result = runner.invoke(
+        app,
+        ["runs", "--log-dir", str(log_dir), "--output", "markdown", "--style", "support"],
+    )
+    assert result.exit_code == 0
+    assert "## Support triage — run inventory" in result.stdout
+    assert "replayt inspect RUN_ID --output markdown --style support" in result.stdout
+    assert "RUN_ID-support-bundle.tar.gz" in result.stdout
+
+
+def test_cli_runs_style_support_rejected_without_markdown_output(tmp_path: Path) -> None:
+    log_dir = tmp_path / "runs"
+    log_dir.mkdir()
+    runner = CliRunner()
+    result = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--style", "support"])
+    assert result.exit_code != 0
+    assert "support only applies" in result.stderr.lower()
+
+
+def test_cli_runs_output_markdown_empty_store_stderr_hints(tmp_path: Path) -> None:
+    log_dir = tmp_path / "no_runs"
+    log_dir.mkdir()
+    runner = CliRunner()
+    result = runner.invoke(app, ["runs", "--log-dir", str(log_dir), "--output", "markdown"])
+    assert result.exit_code == 0
+    assert "No runs matched this query" in result.stdout
+    assert "## Stakeholder CLI handoff" in result.stdout
+    assert "Hint:" in result.stderr
 
 
 def test_cli_runs_output_json_includes_failure_attention_and_parse_context(tmp_path: Path) -> None:
@@ -6133,9 +6255,11 @@ def test_cli_ci_writes_summary_json(tmp_path: Path) -> None:
     assert data["python_version"] == f"{vi.major}.{vi.minor}.{vi.micro}"
     assert data["python_implementation"] == platform.python_implementation()
     assert data["python_cache_tag"] == getattr(sys.implementation, "cache_tag", None)
+    assert data["python_utf8_mode"] == int(sys.flags.utf8_mode)
     assert data["python_executable"] == sys.executable
     assert data["platform"] == sys.platform
     assert data["machine"] == platform.machine()
+    assert data["os_cpu_count"] == os.cpu_count()
     assert data["filesystem_encoding"] == (sys.getfilesystemencoding() or "")
     assert data["stdout_encoding"] == getattr(sys.stdout, "encoding", None)
     if sys.platform == "win32":
@@ -6161,6 +6285,8 @@ def test_ci_run_summary_runtime_fields_ci_markers(monkeypatch: pytest.MonkeyPatc
     assert fields["ci_marker_env"]["GITHUB_ACTIONS"] is True
     assert fields["ci_marker_env"]["GITLAB_CI"] is False
     assert fields["python_cache_tag"] == getattr(sys.implementation, "cache_tag", None)
+    assert fields["python_utf8_mode"] == int(sys.flags.utf8_mode)
+    assert fields["os_cpu_count"] == os.cpu_count()
     off = fields["host_clock_utc_offset_minutes"]
     assert off is None or isinstance(off, int)
 
@@ -6262,6 +6388,7 @@ def done(ctx):
         "'runtime': json.loads(os.environ['REPLAYT_RUN_STARTED_RUNTIME_JSON']), "
         "'workflow_entry_path': os.environ.get('REPLAYT_WORKFLOW_ENTRY_PATH'), "
         "'run_started_ts': os.environ.get('REPLAYT_RUN_STARTED_TS'), "
+        "'initial_state': os.environ.get('REPLAYT_RUN_STARTED_INITIAL_STATE'), "
         "'policy_hook_name': os.environ.get('REPLAYT_POLICY_HOOK_NAME')"
         "}), encoding='utf-8')"
     )
@@ -6328,6 +6455,7 @@ def done(ctx):
 
     assert Path(data["workflow_entry_path"]).resolve() == Path(resume_hook_policy_wf_mod.__file__).resolve()
     assert data["policy_hook_name"] == "resume_hook"
+    assert data["initial_state"] == "gate"
     assert data["run_started_ts"] == run_started_envelope_ts_from_jsonl_path(Path(tmp_path) / f"{run_id}.jsonl")
 
 
@@ -6358,6 +6486,7 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
         "'run_started_ts': os.environ.get('REPLAYT_RUN_STARTED_TS'), "
         "'runtime': (json.loads(os.environ['REPLAYT_RUN_STARTED_RUNTIME_JSON']) "
         "if os.environ.get('REPLAYT_RUN_STARTED_RUNTIME_JSON') else None), "
+        "'initial_state': os.environ.get('REPLAYT_RUN_STARTED_INITIAL_STATE'), "
         "'policy_hook_name': os.environ.get('REPLAYT_POLICY_HOOK_NAME'), "
         "'replayt_version': os.environ.get('REPLAYT_REPLAYT_VERSION')"
         "}), encoding='utf-8')"
@@ -6427,6 +6556,7 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
     assert data["policy_hook_name"] == "run_hook"
     assert data.get("run_started_ts") is None
     assert data.get("runtime") is None
+    assert data["initial_state"] == "greet"
     assert data["mode"] == "run"
     assert data["target"] == "replayt_examples.e01_hello_world:wf"
     assert data["dry_run"] == "1"
@@ -6472,7 +6602,8 @@ def done(ctx):
         "import json, os; "
         "from pathlib import Path; "
         "rec = {'mode': os.environ.get('REPLAYT_RUN_MODE'), "
-        "'run_started_ts': os.environ.get('REPLAYT_RUN_STARTED_TS')}; "
+        "'run_started_ts': os.environ.get('REPLAYT_RUN_STARTED_TS'), "
+        "'initial_state': os.environ.get('REPLAYT_RUN_STARTED_INITIAL_STATE')}; "
         "Path(os.environ['HOOK_LOG']).open('a', encoding='utf-8').write(json.dumps(rec) + '\\n')"
     )
     (tmp_path / ".replaytrc.toml").write_text(
@@ -6497,6 +6628,7 @@ def done(ctx):
     first_hook = json.loads(lines[0])
     assert first_hook["mode"] == "run"
     assert first_hook["run_started_ts"] is None
+    assert first_hook["initial_state"] == "gate"
 
     jsonl_first_ts = run_started_envelope_ts_from_jsonl_path(tmp_path / f"{run_id}.jsonl")
     assert jsonl_first_ts is not None
@@ -6511,6 +6643,7 @@ def done(ctx):
     second_hook = json.loads(lines2[1])
     assert second_hook["mode"] == "resume"
     assert second_hook["run_started_ts"] == jsonl_first_ts
+    assert second_hook["initial_state"] == "gate"
 
 
 def test_cli_run_hook_receives_policy_hook_context_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -6888,6 +7021,159 @@ def a(ctx):
     r = runner.invoke(
         app,
         ["validate", str(wf_path), "--print-run-one-liner", "--format", "json"],
+    )
+    assert r.exit_code == 2
+    assert "Cannot combine" in r.stderr
+
+
+def test_cli_validate_print_ci_one_liner_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "expects_wf_ci.py"
+    wf_path.write_text(
+        """
+from typing import Optional
+from replayt.workflow import Workflow
+wf = Workflow("expects_wf_ci")
+wf.set_initial("a")
+@wf.step("a", expects={"title": str, "count": int})
+def a(ctx):
+    return None
+@wf.step("b", expects={"extra": str, "maybe": Optional[str]})
+def b(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(app, ["validate", str(wf_path), "--print-ci-one-liner"])
+    assert r.exit_code == 0
+    line = r.stdout.strip()
+    assert line.startswith("replayt ci ")
+    parts = shlex.split(line)
+    assert parts[:2] == ["replayt", "ci"]
+    i = parts.index("--inputs-json")
+    assert json.loads(parts[i + 1]) == {"count": 0, "extra": "", "maybe": "", "title": ""}
+    assert "--strict-graph" not in parts
+    assert "Tip:" in r.stderr
+
+
+def test_cli_validate_print_ci_one_liner_strict_graph(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "two_state_ci.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("two_ci")
+wf.set_initial("a")
+wf.note_transition("a", "b")
+@wf.step("a")
+def a(ctx):
+    return "b"
+@wf.step("b")
+def b(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(app, ["validate", str(wf_path), "--strict-graph", "--print-ci-one-liner"])
+    assert r.exit_code == 0
+    parts = shlex.split(r.stdout.strip())
+    assert parts[-1] == "--strict-graph"
+
+
+def test_cli_validate_print_ci_one_liner_skipped_when_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wf_path = tmp_path / "bad_ci.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("bad_ci")
+wf.set_initial("missing")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(app, ["validate", str(wf_path), "--print-ci-one-liner"])
+    assert r.exit_code == 1
+    assert r.stdout.strip() == ""
+
+
+def test_cli_validate_print_ci_one_liner_rejects_json_format_combo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wf_path = tmp_path / "v_ci.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v_ci")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["validate", str(wf_path), "--print-ci-one-liner", "--format", "json"],
+    )
+    assert r.exit_code == 2
+    assert "Cannot combine" in r.stderr
+
+
+def test_cli_validate_print_ci_one_liner_rejects_inputs_template_combo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wf_path = tmp_path / "v3_ci.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v3_ci")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["validate", str(wf_path), "--print-ci-one-liner", "--print-inputs-template"],
+    )
+    assert r.exit_code == 2
+    assert "Cannot combine" in r.stderr
+
+
+def test_cli_validate_print_ci_one_liner_rejects_run_one_liner_combo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wf_path = tmp_path / "v4_ci.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v4_ci")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["validate", str(wf_path), "--print-ci-one-liner", "--print-run-one-liner"],
     )
     assert r.exit_code == 2
     assert "Cannot combine" in r.stderr
@@ -7861,9 +8147,11 @@ def test_cli_run_summary_json_via_replayt_env(tmp_path: Path, monkeypatch: pytes
     assert data["python_version"] == f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
     assert data["python_implementation"] == platform.python_implementation()
     assert data["python_cache_tag"] == getattr(sys.implementation, "cache_tag", None)
+    assert data["python_utf8_mode"] == int(sys.flags.utf8_mode)
     assert data["python_executable"] == sys.executable
     assert data["platform"] == sys.platform
     assert data["machine"] == platform.machine()
+    assert data["os_cpu_count"] == os.cpu_count()
     assert data["filesystem_encoding"] == (sys.getfilesystemencoding() or "")
     assert data["stdout_encoding"] == getattr(sys.stdout, "encoding", None)
     if sys.platform == "win32":
@@ -8083,6 +8371,7 @@ def test_cli_version_format_json() -> None:
     assert schemas["run_result"] == "replayt.run_result.v1"
     assert schemas["run_result_status_contract"] == "replayt.run_result_status_contract.v1"
     assert schemas["log_mode_contract"] == "replayt.log_mode_contract.v1"
+    assert schemas["jsonl_event_types_contract"] == "replayt.jsonl_event_types_contract.v1"
     assert schemas["inspect_report"] == "replayt.inspect_report.v1"
     assert schemas["runs_report"] == "replayt.runs_report.v1"
     assert schemas["stats_report"] == "replayt.stats_report.v1"
@@ -8102,6 +8391,7 @@ def test_cli_version_format_json() -> None:
         build_cli_exit_codes_report,
         build_cli_json_stdout_contract,
         build_cli_stdio_contract,
+        build_jsonl_event_types_contract,
         build_log_mode_contract,
         build_run_result_status_contract,
     )
@@ -8109,6 +8399,7 @@ def test_cli_version_format_json() -> None:
     assert data["cli_exit_codes"] == build_cli_exit_codes_report()
     assert data["run_result_status_contract"] == build_run_result_status_contract()
     assert data["log_mode_contract"] == build_log_mode_contract()
+    assert data["jsonl_event_types_contract"] == build_jsonl_event_types_contract()
     assert data["cli_stdio_contract"] == build_cli_stdio_contract()
     cjson = data["cli_json_stdout_contract"]
     assert cjson == build_cli_json_stdout_contract()
@@ -8124,6 +8415,14 @@ def test_cli_version_format_json() -> None:
             ec = row["exit_codes_with_json_on_stdout"]
             assert ec == sorted(set(ec))
             assert all(isinstance(x, int) for x in ec)
+            pr = row["positional_required"]
+            po = row["positional_optional"]
+            assert isinstance(pr, list) and isinstance(po, list)
+            assert all(isinstance(x, str) and x for x in pr)
+            assert all(isinstance(x, str) and x for x in po)
+            allowed_slots = {"TARGET", "RUN_ID", "RUN_A", "RUN_B"}
+            assert set(pr) <= allowed_slots and set(po) <= allowed_slots
+            assert not (set(pr) & set(po))
     run_json_routes = cjson["subcommands"]["run"]
     assert [
         r["exit_codes_with_json_on_stdout"] for r in run_json_routes if r["schema_key"] == "run_result"
@@ -8135,6 +8434,12 @@ def test_cli_version_format_json() -> None:
     assert cjson["subcommands"]["doctor"][0]["exit_codes_with_json_on_stdout"] == [0, 1]
     assert cjson["subcommands"]["verify-seal"][0]["exit_codes_with_json_on_stdout"] == [0, 1]
     assert cjson["subcommands"]["inspect"][0]["exit_codes_with_json_on_stdout"] == [0]
+    assert cjson["subcommands"]["inspect"][0]["positional_required"] == ["RUN_ID"]
+    assert cjson["subcommands"]["inspect"][0]["positional_optional"] == []
+    assert cjson["subcommands"]["diff"][0]["positional_required"] == ["RUN_A", "RUN_B"]
+    assert cjson["subcommands"]["run"][1]["positional_optional"] == ["TARGET"]
+    assert cjson["subcommands"]["version"][0]["positional_required"] == []
+    assert cjson["subcommands"]["version"][0]["positional_optional"] == []
     contract_routes = cjson["subcommands"]["contract"]
     assert [
         r["exit_codes_with_json_on_stdout"] for r in contract_routes if r["schema_key"] == "workflow_contract_check"
@@ -8183,6 +8488,7 @@ def test_cli_version_format_json() -> None:
         assert "REPLAYT_POLICY_HOOK_CONTEXT_JSON" in hook_data["injected_env_vars"]
         assert "REPLAYT_POLICY_HOOK_NAME" in hook_data["injected_env_vars"]
         assert "REPLAYT_RUN_STARTED_RUNTIME_JSON" in hook_data["injected_env_vars"]
+        assert "REPLAYT_RUN_STARTED_INITIAL_STATE" in hook_data["injected_env_vars"]
         assert "REPLAYT_RUN_STARTED_TS" in hook_data["injected_env_vars"]
     rh = hooks["run_hook"]
     assert rh["argv_env"] == "REPLAYT_RUN_HOOK"
@@ -8392,6 +8698,46 @@ def test_log_mode_contract_stable_shape() -> None:
     assert doc["project_config_key"] == "log_mode"
     assert doc["policy_hook_env_var"] == "REPLAYT_LOG_MODE"
     assert doc["project_setting_precedence_cross_reference"] == "log_mode"
+
+
+def test_jsonl_event_types_contract_stable_shape() -> None:
+    from replayt.cli.run_support import (
+        JSONL_EVENT_TYPES_CONTRACT_SCHEMA,
+        LOG_MODE_CONTRACT_SCHEMA,
+        build_jsonl_event_types_contract,
+    )
+
+    doc = build_jsonl_event_types_contract()
+    assert doc["schema"] == JSONL_EVENT_TYPES_CONTRACT_SCHEMA
+    assert doc["payload"]["envelope_type_field"] == "type"
+    assert doc["log_mode_contract_cross_reference"] == LOG_MODE_CONTRACT_SCHEMA
+    vals = [e["value"] for e in doc["event_types"]]
+    assert vals == sorted(vals)
+    assert set(vals) == {
+        "approval_applied",
+        "approval_requested",
+        "approval_resolved",
+        "context_snapshot",
+        "llm_request",
+        "llm_response",
+        "retry_scheduled",
+        "run_completed",
+        "run_failed",
+        "run_interrupted",
+        "run_paused",
+        "run_started",
+        "state_entered",
+        "state_exited",
+        "step_error",
+        "step_note",
+        "structured_output",
+        "structured_output_failed",
+        "tool_call",
+        "tool_result",
+        "transition",
+    }
+    for row in doc["event_types"]:
+        assert "summary" in row and row["summary"]
 
 
 def test_project_setting_precedence_contract_stable_shape() -> None:

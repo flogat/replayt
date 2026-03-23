@@ -57,6 +57,8 @@ from replayt.cli.run_support import (
     run_started_envelope_ts_from_events,
     run_started_envelope_ts_from_jsonl_path,
     run_started_hook_json_blobs_from_events,
+    run_started_initial_state_from_events,
+    run_started_initial_state_from_jsonl_path,
     run_started_inputs_json_from_events,
     run_started_runtime_json_from_events,
     run_started_runtime_json_from_jsonl_path,
@@ -666,10 +668,14 @@ def cmd_run(
     wf_meta_json = workflow_meta_json_for_run_hook(wf)
     run_started_ts_for_hook: str | None = None
     runtime_json_for_hook: str | None = None
+    initial_state_for_hook: str | None = None
     if resume:
         jsonl_for_hook = log_dir.resolve() / f"{run_id}.jsonl"
         run_started_ts_for_hook = run_started_envelope_ts_from_jsonl_path(jsonl_for_hook)
         runtime_json_for_hook = run_started_runtime_json_from_jsonl_path(jsonl_for_hook)
+        initial_state_for_hook = run_started_initial_state_from_jsonl_path(jsonl_for_hook)
+    elif wf.initial_state is not None:
+        initial_state_for_hook = str(wf.initial_state)
     hook = run_hook_argv(cfg)
     if hook:
         hook_timeout = run_hook_timeout_seconds(cfg)
@@ -694,6 +700,7 @@ def cmd_run(
                 policy_hook_context_json=policy_hook_canonical,
                 run_started_ts=run_started_ts_for_hook,
                 runtime_json=runtime_json_for_hook,
+                initial_state=initial_state_for_hook,
                 timeout_seconds=hook_timeout,
             )
         except subprocess.TimeoutExpired as exc:
@@ -1274,6 +1281,7 @@ def cmd_resume(
         )
         inputs_json = run_started_inputs_json_from_events(pre_events)
         runtime_json = run_started_runtime_json_from_events(pre_events)
+        initial_state = run_started_initial_state_from_events(pre_events)
         started_ts = run_started_envelope_ts_from_events(pre_events)
         hook_timeout = resume_hook_timeout_seconds(cfg)
         try:
@@ -1297,6 +1305,7 @@ def cmd_resume(
                 policy_hook_context_json=policy_hook_canonical,
                 run_started_ts=started_ts,
                 runtime_json=runtime_json,
+                initial_state=initial_state,
             )
         except subprocess.TimeoutExpired as exc:
             lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"

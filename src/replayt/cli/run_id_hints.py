@@ -50,3 +50,42 @@ def echo_missing_run_hints(
         "(REPLAYT_LOG_DIR, project log_dir, log subdirectory and SQLite options when applicable).",
         err=True,
     )
+
+
+def echo_empty_runs_hints(
+    *,
+    store_empty: bool,
+    filters_active: bool,
+    cli_log_dir: Path,
+    log_subdir: str | None,
+    sqlite: Path | None,
+) -> None:
+    """Print stderr lines when ``replayt runs`` text output has no rows."""
+
+    if store_empty:
+        typer.echo(
+            "Hint: this log store has no run IDs yet. Complete one workflow (for example "
+            "`replayt try --example e01_hello_world --live` or `replayt run replayt_examples.e01_hello_world:wf`); "
+            "the CLI prints run_id=<uuid> when a run starts.",
+            err=True,
+        )
+        typer.echo("Hint: list packaged examples with `replayt try --list`.", err=True)
+    elif filters_active:
+        typer.echo(
+            "Hint: runs exist in this log store but none matched your filters; "
+            "remove or relax flags such as --status, --tag, --run-meta, --tool, --older-than, or --newer-than.",
+            err=True,
+        )
+    else:
+        typer.echo(
+            "Hint: runs exist but none matched the listing limit or internal filters; "
+            "try a larger `--limit` or check `replayt stats` for aggregate counts.",
+            err=True,
+        )
+    typer.echo(
+        "Hint: if you expected older runs, use the same log store as the original replayt run "
+        "(REPLAYT_LOG_DIR, project log_dir, log subdirectory and SQLite options when applicable).",
+        err=True,
+    )
+    cmd = suggested_runs_list_command(cli_log_dir=cli_log_dir, log_subdir=log_subdir, sqlite=sqlite)
+    typer.echo(f"Hint: re-list with the same store flags you use for inspect/replay: `{cmd}`", err=True)

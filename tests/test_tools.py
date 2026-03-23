@@ -186,6 +186,62 @@ def test_apply_openai_chat_tool_calls_empty() -> None:
     assert reg.apply_openai_chat_tool_calls([]) == []
 
 
+def test_openai_chat_tool_result_messages_empty() -> None:
+    def emit(_typ: str, _payload: dict[str, Any]) -> None:
+        return None
+
+    reg = ToolRegistry(emit=emit, state_getter=lambda: "main")
+    assert reg.openai_chat_tool_result_messages(None, None) == []
+    assert reg.openai_chat_tool_result_messages([], []) == []
+    with pytest.raises(ValueError, match="results given but tool_calls is empty"):
+        reg.openai_chat_tool_result_messages([], ["x"])
+
+
+def test_openai_chat_tool_result_messages_shapes() -> None:
+    def emit(_typ: str, _payload: dict[str, Any]) -> None:
+        return None
+
+    reg = ToolRegistry(emit=emit, state_getter=lambda: "main")
+
+    class Hit(BaseModel):
+        q: str
+
+    tcs = [
+        {"id": "call_a", "type": "function", "function": {"name": "n", "arguments": "{}"}},
+        {"id": "call_b", "type": "function", "function": {"name": "n", "arguments": "{}"}},
+    ]
+    rows = reg.openai_chat_tool_result_messages(
+        tcs,
+        ["plain", {"b": 2, "a": 1}],
+    )
+    assert len(rows) == 2
+    assert rows[0] == {"role": "tool", "tool_call_id": "call_a", "content": "plain"}
+    assert rows[1] == {"role": "tool", "tool_call_id": "call_b", "content": '{"a": 1, "b": 2}'}
+
+    rows2 = reg.openai_chat_tool_result_messages(
+        [{"id": "c1", "type": "function", "function": {"name": "n", "arguments": "{}"}}],
+        [Hit(q="z")],
+    )
+    assert rows2[0]["role"] == "tool" and rows2[0]["tool_call_id"] == "c1"
+    assert json.loads(rows2[0]["content"]) == {"q": "z"}
+
+    with pytest.raises(ValueError, match="same length"):
+        reg.openai_chat_tool_result_messages(tcs, ["only_one"])
+
+    with pytest.raises(ValueError, match="missing non-empty string id"):
+        reg.openai_chat_tool_result_messages(
+            [{"type": "function", "function": {"name": "x", "arguments": "{}"}}],
+            [1],
+        )
+
+    with pytest.raises(ValueError, match="results is required"):
+        one_tc = [{"id": "x", "type": "function", "function": {"name": "n", "arguments": "{}"}}]
+        reg.openai_chat_tool_result_messages(one_tc, None)  # type: ignore[arg-type]
+
+    with pytest.raises(TypeError, match="expected dict"):
+        reg.openai_chat_tool_result_messages([object()], [1])  # type: ignore[list-item]
+
+
 def test_apply_openai_chat_tool_calls_order_and_json_args() -> None:
     events: list[tuple[str, dict[str, Any]]] = []
 

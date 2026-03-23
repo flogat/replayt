@@ -265,6 +265,10 @@ def test_docs_index_report_passes_for_complete_repo_fixture(tmp_path: Path) -> N
 
     assert report["ok"] is True
     assert report["issues"] == []
+    exp = report["expected_docs_targets"]
+    idx = report["indexed_docs_targets"]
+    assert report["expected_docs_targets_sha256"] == mod._sorted_str_list_sha256(exp)
+    assert report["indexed_docs_targets_sha256"] == mod._sorted_str_list_sha256(idx)
 
 
 def test_docs_index_report_flags_missing_doc_entry_and_broken_link(tmp_path: Path) -> None:
@@ -297,6 +301,12 @@ def test_docs_index_report_flags_missing_doc_entry_and_broken_link(tmp_path: Pat
     assert report["ok"] is False
     assert "README.md has broken link: docs/MISSING.md" in report["issues"]
     assert "docs/README.md is missing an index entry for docs/SCOPE.md" in report["issues"]
+    assert report["expected_docs_targets_sha256"] == mod._sorted_str_list_sha256(
+        report["expected_docs_targets"]
+    )
+    assert report["indexed_docs_targets_sha256"] == mod._sorted_str_list_sha256(
+        report["indexed_docs_targets"]
+    )
 
 
 def test_changelog_report_parses_unreleased_items(tmp_path: Path) -> None:

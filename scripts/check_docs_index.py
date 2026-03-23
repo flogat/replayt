@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -53,6 +54,11 @@ def expected_docs_targets(repo_root: Path) -> set[Path]:
     return expected
 
 
+def _sorted_str_list_sha256(strings: list[str]) -> str:
+    payload = json.dumps(strings, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
 def docs_index_targets(repo_root: Path) -> set[Path]:
     index_path = repo_root / "docs" / "README.md"
     targets: set[Path] = set()
@@ -80,13 +86,18 @@ def build_report(repo_root: Path) -> dict[str, Any]:
     for path in missing:
         issues.append(f"docs/README.md is missing an index entry for {path}")
 
+    expected_list = sorted(path.relative_to(repo_root).as_posix() for path in expected)
+    indexed_list = sorted(path.relative_to(repo_root).as_posix() for path in indexed)
+
     return {
         "schema": SCHEMA,
         "repo_root": str(repo_root),
         "ok": not issues,
         "checked_files": ["README.md", "docs/README.md"],
-        "expected_docs_targets": sorted(path.relative_to(repo_root).as_posix() for path in expected),
-        "indexed_docs_targets": sorted(path.relative_to(repo_root).as_posix() for path in indexed),
+        "expected_docs_targets": expected_list,
+        "expected_docs_targets_sha256": _sorted_str_list_sha256(expected_list),
+        "indexed_docs_targets": indexed_list,
+        "indexed_docs_targets_sha256": _sorted_str_list_sha256(indexed_list),
         "issues": issues,
     }
 

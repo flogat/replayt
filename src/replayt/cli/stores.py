@@ -14,11 +14,12 @@ from replayt.persistence.jsonl import resolve_jsonl_posix_new_file_mode_from_env
 
 def make_store(log_dir: Path, sqlite: Path | None, *, strict_mirror: bool = False) -> JSONLStore | MultiStore:
     log_dir.mkdir(parents=True, exist_ok=True)
-    primary = JSONLStore(log_dir, posix_new_file_mode=resolve_jsonl_posix_new_file_mode_from_env())
+    posix_mode = resolve_jsonl_posix_new_file_mode_from_env()
+    primary = JSONLStore(log_dir, posix_new_file_mode=posix_mode)
     if sqlite is None:
         return primary
     sqlite.parent.mkdir(parents=True, exist_ok=True)
-    return MultiStore(primary, SQLiteStore(sqlite), strict_mirror=strict_mirror)
+    return MultiStore(primary, SQLiteStore(sqlite, posix_new_db_file_mode=posix_mode), strict_mirror=strict_mirror)
 
 
 def close_store(store: JSONLStore | MultiStore | SQLiteStore) -> None:

@@ -301,6 +301,71 @@ def test_llm_bridge_llm_response_logs_http_transport_metadata() -> None:
     assert resp["http_status"] == 200
 
 
+def test_llm_bridge_llm_response_logs_http_correlation_headers() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    body_ok = b'{"choices":[{"message":{"content":"hi"}}],"usage":{}}'
+
+    def responder(*_a, **_k):
+        return _stream_cm(
+            _FakeStreamResp(
+                body_ok,
+                headers={
+                    "X-Request-Id": "req-test-1",
+                    "openai-processing-ms": "15",
+                    "CF-Ray": "ray-edge-9",
+                },
+            )
+        )
+
+    fake_http = _FakeHTTPClient(responder)
+    settings = LLMSettings(api_key="k", model="m", base_url="http://127.0.0.1:9999/v1")
+    client = OpenAICompatClient(settings, http_client=fake_http)
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+
+    bridge.complete_text(messages=[{"role": "user", "content": "x"}], temperature=0.0)
+
+    resp = next(p for t, p in events if t == "llm_response")
+    assert resp["http_response_request_id"] == "req-test-1"
+    assert resp["http_response_processing_ms"] == 15
+    assert resp["http_response_cf_ray"] == "ray-edge-9"
+
+
+def test_llm_bridge_structured_output_mirrors_http_correlation_headers() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    body_ok = b'{"choices":[{"message":{"content":"{\\"value\\": 3}"}}],"usage":{}}'
+
+    def responder(*_a, **_k):
+        return _stream_cm(
+            _FakeStreamResp(
+                body_ok,
+                headers={"x-request-id": "parse-req-2", "openai-processing-ms": "3"},
+            )
+        )
+
+    fake_http = _FakeHTTPClient(responder)
+    settings = LLMSettings(api_key="k", model="m", base_url="http://127.0.0.1:9999/v1")
+    client = OpenAICompatClient(settings, http_client=fake_http)
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+
+    out = bridge.parse(Answer, messages=[{"role": "user", "content": "Return JSON."}], temperature=0.0)
+    assert out.value == 3
+
+    resp = next(p for t, p in events if t == "llm_response")
+    so = next(p for t, p in events if t == "structured_output")
+    assert resp["http_response_request_id"] == "parse-req-2"
+    assert resp["http_response_processing_ms"] == 3
+    assert so["http_response_request_id"] == resp["http_response_request_id"]
+    assert so["http_response_processing_ms"] == resp["http_response_processing_ms"]
+
+
 def test_llm_bridge_llm_response_logs_finish_reason_and_provider_ids() -> None:
     events: list[tuple[str, dict]] = []
 
@@ -1148,7 +1213,16 @@ def test_openai_compat_retries_503_then_succeeds() -> None:
     def responder(*_a, **_k):
         st = next(statuses)
         body = body_ok if st == 200 else b"{}"
-        return _stream_cm(_FakeStreamResp(body, status=st))
+        h = (
+            {
+                "x-request-id": "after-retry",
+                "openai-processing-ms": "9",
+                "cf-ray": "cf-after-retry",
+            }
+            if st == 200
+            else {}
+        )
+        return _stream_cm(_FakeStreamResp(body, status=st, headers=h))
 
     fake_http = _FakeHTTPClient(responder)
     client = OpenAICompatClient(
@@ -1163,7 +1237,13 @@ def test_openai_compat_retries_503_then_succeeds() -> None:
         )
     assert data["choices"][0]["message"]["content"] == "{}"
     assert len(fake_http.calls) == 2
-    assert transport == {"http_attempts": 2, "http_status": 200}
+    assert transport == {
+        "http_attempts": 2,
+        "http_status": 200,
+        "http_response_request_id": "after-retry",
+        "http_response_processing_ms": 9,
+        "http_response_cf_ray": "cf-after-retry",
+    }
 
 
 def test_openai_compat_http_retries_kw_overrides_settings() -> None:

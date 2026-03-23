@@ -22,12 +22,14 @@ from replayt.cli.config import (
 from replayt.cli.distribution_metadata import DISTRIBUTION_METADATA_SCHEMA, build_distribution_metadata_report
 from replayt.cli.path_readiness import build_operational_paths_report
 from replayt.cli.run_support import (
+    JSONL_EVENT_TYPES_CONTRACT_SCHEMA,
     LOG_MODE_CONTRACT_SCHEMA,
     RUN_RESULT_SCHEMA,
     RUN_RESULT_STATUS_CONTRACT_SCHEMA,
     build_cli_exit_codes_report,
     build_cli_json_stdout_contract,
     build_cli_stdio_contract,
+    build_jsonl_event_types_contract,
     build_log_mode_contract,
     build_policy_hook_env_catalog,
     build_run_result_status_contract,
@@ -102,6 +104,7 @@ def build_version_report() -> dict[str, object]:
         "cli_exit_codes": build_cli_exit_codes_report(),
         "run_result_status_contract": build_run_result_status_contract(),
         "log_mode_contract": build_log_mode_contract(),
+        "jsonl_event_types_contract": build_jsonl_event_types_contract(),
         "cli_stdio_contract": build_cli_stdio_contract(),
         "cli_json_stdout_contract": build_cli_json_stdout_contract(),
         "project_config_discovery": build_project_config_discovery_report(),
@@ -129,6 +132,7 @@ def build_version_report() -> dict[str, object]:
             "run_result": RUN_RESULT_SCHEMA,
             "run_result_status_contract": RUN_RESULT_STATUS_CONTRACT_SCHEMA,
             "log_mode_contract": LOG_MODE_CONTRACT_SCHEMA,
+            "jsonl_event_types_contract": JSONL_EVENT_TYPES_CONTRACT_SCHEMA,
             "inspect_report": "replayt.inspect_report.v1",
             "runs_report": "replayt.runs_report.v1",
             "stats_report": "replayt.stats_report.v1",

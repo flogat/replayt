@@ -61,19 +61,31 @@ _SKILL_LOOP_ENV_KEY_DESCRIPTIONS: dict[str, str] = {
     "SKILL_COMMAND_SHA256": "SHA-256 hex (UTF-8) of the raw --skill-command template string.",
     "SKILL_ITERATION": "1-based outer loop iteration index (string).",
     "SKILL_INVOCATION_FILE": "Absolute path to this step's replayt.skill_invocation.v1 sidecar (*.invocation.json).",
-    "SKILL_INVOCATION_REL": "Sidecar path relative to REPO_ROOT when under the repo, else absolute.",
+    "SKILL_INVOCATION_REL": (
+        "Sidecar path relative to REPO_ROOT when under the repo, else absolute; "
+        "POSIX separators (forward slashes) on all platforms."
+    ),
     "SKILL_LOG_FILE": "Absolute path to the log file for this invocation.",
-    "SKILL_LOG_REL": "Log path relative to REPO_ROOT when under the repo, else absolute.",
+    "SKILL_LOG_REL": (
+        "Log path relative to REPO_ROOT when under the repo, else absolute; "
+        "POSIX separators (forward slashes) on all platforms."
+    ),
     "SKILL_MAX_ITERATIONS": "Configured --max-iterations (string).",
     "SKILL_NAME": "Resolved skill folder name, or fix_check for automated fix prompts.",
     "SKILL_PATH": "Filesystem path to the skill folder or marker for fix_check (main loop only).",
     "SKILL_PIPELINE_SHA256": "SHA-256 hex of the ordered skill list for this run directory.",
     "SKILL_PROMPT_FILE": "Absolute path to the generated *.prompt.md file.",
-    "SKILL_PROMPT_REL": "Prompt path relative to REPO_ROOT when under the repo, else absolute.",
+    "SKILL_PROMPT_REL": (
+        "Prompt path relative to REPO_ROOT when under the repo, else absolute; "
+        "POSIX separators (forward slashes) on all platforms."
+    ),
     "SKILL_REQUESTED_NAME": "CLI --skills name before alias resolution (main loop only).",
     "SKILL_ROOT": "Absolute path to the skill root directory (--skill-root).",
     "SKILL_RUN_DIR": "Absolute path to this skill-release run directory.",
-    "SKILL_RUN_DIR_REL": "Run directory relative to REPO_ROOT when under the repo, else absolute.",
+    "SKILL_RUN_DIR_REL": (
+        "Run directory relative to REPO_ROOT when under the repo, else absolute; "
+        "POSIX separators (forward slashes) on all platforms."
+    ),
     "SKILL_RUN_STAMP": "Basename of SKILL_RUN_DIR (for example YYYYMMDD-HHMMSS for default run folders).",
     "SKILL_STEP_INDEX": "1-based index within the skill list for this iteration (string); 0 for fix steps.",
     "SKILL_STEP_TOTAL": "Total skills in the pipeline (string); 0 for fix steps.",

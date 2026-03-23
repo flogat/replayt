@@ -22,6 +22,7 @@ from replayt.workflow import Workflow
 RUN_RESULT_SCHEMA = "replayt.run_result.v1"
 RUN_RESULT_STATUS_CONTRACT_SCHEMA = "replayt.run_result_status_contract.v1"
 LOG_MODE_CONTRACT_SCHEMA = "replayt.log_mode_contract.v1"
+JSONL_EVENT_TYPES_CONTRACT_SCHEMA = "replayt.jsonl_event_types_contract.v1"
 
 # Injected into every trusted policy-hook subprocess; values match ``policy_hook_env_catalog`` hook keys.
 POLICY_HOOK_NAME_ENV_VAR = "REPLAYT_POLICY_HOOK_NAME"
@@ -221,6 +222,44 @@ def run_started_runtime_json_from_jsonl_path(path: Path) -> str | None:
     if not isinstance(payload, dict):
         return None
     return run_started_runtime_json_from_payload(payload)
+
+
+def run_started_initial_state_from_payload(payload: dict[str, Any]) -> str | None:
+    """Plain-string env value for ``run_started.initial_state``; ``None`` if *payload* is not a dict."""
+
+    if not isinstance(payload, dict):
+        return None
+    v = payload.get("initial_state")
+    if v is None:
+        return ""
+    if isinstance(v, str):
+        return v
+    return str(v)
+
+
+def run_started_initial_state_from_events(events: list[dict[str, Any]]) -> str | None:
+    """``initial_state`` string from the first ``run_started`` event in *events*."""
+
+    for event in events:
+        if event.get("type") != "run_started":
+            continue
+        payload = event.get("payload") or {}
+        if not isinstance(payload, dict):
+            return None
+        return run_started_initial_state_from_payload(payload)
+    return None
+
+
+def run_started_initial_state_from_jsonl_path(path: Path) -> str | None:
+    """Same as :func:`run_started_initial_state_from_events` but scans the JSONL file on disk."""
+
+    event = first_jsonl_event_with_type(path, event_type="run_started")
+    if event is None:
+        return None
+    payload = event.get("payload") or {}
+    if not isinstance(payload, dict):
+        return None
+    return run_started_initial_state_from_payload(payload)
 
 
 def run_started_envelope_ts_from_event(event: dict[str, Any]) -> str | None:
@@ -540,6 +579,7 @@ def invoke_run_hook(
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
     runtime_json: str | None = None,
+    initial_state: str | None = None,
     timeout_seconds: float | None,
 ) -> None:
     """Run a pre-run policy hook before the workflow starts writing events."""
@@ -567,6 +607,8 @@ def invoke_run_hook(
         extra_env["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     if runtime_json is not None:
         extra_env["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
+    if initial_state is not None:
+        extra_env["REPLAYT_RUN_STARTED_INITIAL_STATE"] = initial_state
     if tags_json is not None:
         extra_env["REPLAYT_RUN_TAGS_JSON"] = tags_json
     if metadata_json is not None:
@@ -602,6 +644,7 @@ def invoke_resume_hook(
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
     runtime_json: str | None = None,
+    initial_state: str | None = None,
 ) -> None:
     """Run *argv* with extra ``REPLAYT_*`` env vars; *argv* must come from trusted config."""
 
@@ -633,6 +676,8 @@ def invoke_resume_hook(
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     if runtime_json is not None:
         extra["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
+    if initial_state is not None:
+        extra["REPLAYT_RUN_STARTED_INITIAL_STATE"] = initial_state
     extra.update(_workflow_entry_path_hook_env(target))
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     _merge_run_started_ts_env(extra, run_started_ts)
@@ -665,6 +710,7 @@ def invoke_export_hook(
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
     runtime_json: str | None = None,
+    initial_state: str | None = None,
 ) -> None:
     """Run *argv* before ``export-run`` / ``bundle-export`` writes the archive; *argv* is trusted config only."""
 
@@ -702,6 +748,8 @@ def invoke_export_hook(
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     if runtime_json is not None:
         extra["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
+    if initial_state is not None:
+        extra["REPLAYT_RUN_STARTED_INITIAL_STATE"] = initial_state
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
@@ -728,6 +776,7 @@ def invoke_seal_hook(
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
     runtime_json: str | None = None,
+    initial_state: str | None = None,
 ) -> None:
     """Run *argv* before ``replayt seal`` writes the manifest; *argv* is trusted config only."""
 
@@ -756,6 +805,8 @@ def invoke_seal_hook(
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     if runtime_json is not None:
         extra["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
+    if initial_state is not None:
+        extra["REPLAYT_RUN_STARTED_INITIAL_STATE"] = initial_state
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
@@ -784,6 +835,7 @@ def invoke_verify_seal_hook(
     policy_hook_context_json: str | None = None,
     run_started_ts: str | None = None,
     runtime_json: str | None = None,
+    initial_state: str | None = None,
 ) -> None:
     """Run *argv* after ``replayt verify-seal`` digests match; *argv* is trusted config only."""
 
@@ -814,6 +866,8 @@ def invoke_verify_seal_hook(
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     if runtime_json is not None:
         extra["REPLAYT_RUN_STARTED_RUNTIME_JSON"] = runtime_json
+    if initial_state is not None:
+        extra["REPLAYT_RUN_STARTED_INITIAL_STATE"] = initial_state
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
@@ -842,6 +896,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_JSONL",
                     "REPLAYT_RUN_METADATA_JSON",
                     "REPLAYT_RUN_MODE",
+                    "REPLAYT_RUN_STARTED_INITIAL_STATE",
                     "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
@@ -874,6 +929,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_JSONL",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_INITIAL_STATE",
                     "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
@@ -908,6 +964,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_INITIAL_STATE",
                     "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
@@ -937,6 +994,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_INITIAL_STATE",
                     "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
@@ -966,6 +1024,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_INITIAL_STATE",
                     "REPLAYT_RUN_STARTED_RUNTIME_JSON",
                     "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
@@ -1207,12 +1266,16 @@ def _stdout_json_route(
     when: str | None = None,
     boolean_flag: bool | None = None,
     exit_codes_with_json_on_stdout: tuple[int, ...] | None = None,
+    positional_required: tuple[str, ...] = (),
+    positional_optional: tuple[str, ...] = (),
 ) -> dict[str, Any]:
     row: dict[str, Any] = {
         "route_id": route_id,
         "option": option,
         "schema_key": schema_key,
         "trust_profile": trust_profile,
+        "positional_required": list(positional_required),
+        "positional_optional": list(positional_optional),
     }
     if short is not None:
         row["short"] = short
@@ -1273,7 +1336,11 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "array order under subcommands. Each route lists exit_codes_with_json_on_stdout: sorted "
             "exit codes that can occur after replayt wrote that schema's JSON object to stdout (Typer "
             "pre-dispatch failures and many pre-callback validation errors typically exit without JSON on "
-            "stdout; see typer_pre_dispatch_phase). Each route includes trust_profile, an index into "
+            "stdout; see typer_pre_dispatch_phase). positional_required and positional_optional are ordered "
+            "Typer positional argv slots (stable names: TARGET, RUN_ID, RUN_A, RUN_B) for MCP tool arg "
+            "schemas; they are not full argv templates (see rejection blocklist). Optional TARGET may still "
+            "resolve from env or project config (cli_run_defaults_contract). "
+            "Each route includes trust_profile, an index into "
             "trust_profiles for subprocess/MCP allowlists. replayt log-schema always prints the bundled "
             "Draft JSON Schema for one JSONL line (stdout) and is not tied to cli_machine_readable_schemas. "
             "replayt ci still prints a one-line stderr reminder when --output json is used. See "
@@ -1351,6 +1418,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     schema_key="validate_report",
                     when="with --dry-check (graph/input validation only)",
                     exit_codes_with_json_on_stdout=(0, 1),
+                    positional_optional=("TARGET",),
                 ),
                 _stdout_json_route(
                     runx,
@@ -1361,6 +1429,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     schema_key="run_result",
                     when="without --dry-check (normal run or --dry-run trace)",
                     exit_codes_with_json_on_stdout=(0, 1, 2),
+                    positional_optional=("TARGET",),
                 ),
             ],
             "config": [
@@ -1383,6 +1452,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     schema_key="workflow_contract_check",
                     when="with --check SNAPSHOT (drift report; exit 1 when not ok)",
                     exit_codes_with_json_on_stdout=(0, 1),
+                    positional_optional=("TARGET",),
                 ),
                 _stdout_json_route(
                     inv,
@@ -1392,6 +1462,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="workflow_contract",
                     when="without --check (live contract snapshot)",
+                    positional_optional=("TARGET",),
                 ),
             ],
             "diff": [
@@ -1402,6 +1473,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     short="-o",
                     equals="json",
                     schema_key="diff_report",
+                    positional_required=("RUN_A", "RUN_B"),
                 )
             ],
             "doctor": [
@@ -1434,6 +1506,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     short="-o",
                     equals="json",
                     schema_key="inspect_report",
+                    positional_required=("RUN_ID",),
                 ),
                 _stdout_json_route(
                     inv,
@@ -1442,6 +1515,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     schema_key="inspect_report",
                     when="same payload as --output json",
                     boolean_flag=True,
+                    positional_required=("RUN_ID",),
                 ),
             ],
             "runs": [
@@ -1464,6 +1538,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     schema_key="validate_report",
                     when="with --dry-check (graph/input validation only)",
                     exit_codes_with_json_on_stdout=(0, 1),
+                    positional_optional=("TARGET",),
                 ),
                 _stdout_json_route(
                     runx,
@@ -1474,6 +1549,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     schema_key="run_result",
                     when="without --dry-check (normal run or --dry-run trace)",
                     exit_codes_with_json_on_stdout=(0, 1, 2),
+                    positional_optional=("TARGET",),
                 ),
             ],
             "seal": [
@@ -1484,6 +1560,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     short="-o",
                     equals="json",
                     schema_key="seal",
+                    positional_required=("RUN_ID",),
                 )
             ],
             "stats": [
@@ -1554,6 +1631,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="validate_report",
                     exit_codes_with_json_on_stdout=(0, 1),
+                    positional_optional=("TARGET",),
                 )
             ],
             "verify-seal": [
@@ -1565,6 +1643,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="verify_seal_report",
                     exit_codes_with_json_on_stdout=(0, 1),
+                    positional_required=("RUN_ID",),
                 )
             ],
             "version": [
@@ -1633,6 +1712,89 @@ def build_log_mode_contract() -> dict[str, Any]:
             "Precedence for default redacted vs project log_mode is documented on project_setting_precedence_contract.",
         ],
         "project_setting_precedence_cross_reference": "log_mode",
+    }
+
+
+def build_jsonl_event_types_contract() -> dict[str, Any]:
+    """Canonical JSONL envelope ``type`` strings replayt core emits (``replayt version --format json``)."""
+
+    summaries: dict[str, str] = {
+        "approval_applied": (
+            "Emitted on resume when the runner continues from a different state than the pause point; "
+            "pairs with a transition whose reason is approval_resolved."
+        ),
+        "approval_requested": (
+            "Human gate requested from a step; payload may include on_approve / on_reject targets for resume pairing."
+        ),
+        "approval_resolved": (
+            "Written by replayt resume or an approval bridge; records the decision for a prior approval_requested."
+        ),
+        "context_snapshot": (
+            "Serializable RunContext.data snapshot taken when pausing for approval so resume can restore state."
+        ),
+        "llm_request": (
+            "Outbound LLM call: effective settings, message fingerprints, and optional bodies when log_mode allows."
+        ),
+        "llm_response": (
+            "Provider response metadata (and optional bodies in full mode) for the matching llm_request."
+        ),
+        "retry_scheduled": (
+            "Step handler failed transiently; runner will retry up to the state's max_attempts."
+        ),
+        "run_completed": (
+            "Terminal line: final_state and status completed or failed (failed runs also emit run_failed first)."
+        ),
+        "run_failed": (
+            "Structured failure before the matching run_completed with status failed."
+        ),
+        "run_interrupted": (
+            "Appended by the replayt run parent when --timeout expires: child subprocess was killed; "
+            "not a runner-emitted terminal pair (see run_failed / run_completed)."
+        ),
+        "run_paused": (
+            "Workflow paused (for example approval_required) with optional approval_id."
+        ),
+        "run_started": (
+            "First line for a new run: workflow identity, inputs snapshot, tags, metadata, and runtime fingerprint."
+        ),
+        "state_entered": "Runner entered a workflow state before invoking its handler.",
+        "state_exited": "Handler returned; records next_state (may be null when the run ends).",
+        "step_error": (
+            "Error classified to a specific state immediately before run_failed on exhausted retries or hard failures."
+        ),
+        "step_note": "Application breadcrumb from ctx.note (kind, optional summary and small data).",
+        "structured_output": "Validated Pydantic model dump from ctx.llm.parse (or tagged complete_text).",
+        "structured_output_failed": (
+            "Parse or validation failure for structured output, with stage and optional validation_issue rows."
+        ),
+        "tool_call": "Registered tool invocation with name and arguments (optional vendor tool_call_id).",
+        "tool_result": "Tool outcome or error for the matching tool_call (optional tool_call_id).",
+        "transition": "Explicit graph edge from_state to to_state with optional reason string.",
+    }
+    types_sorted = sorted(summaries.keys())
+    return {
+        "schema": JSONL_EVENT_TYPES_CONTRACT_SCHEMA,
+        "payload": {
+            "envelope_type_field": "type",
+            "payload_object_field": "payload",
+            "run_log_schema_doc": "docs/RUN_LOG_SCHEMA.md",
+        },
+        "event_types": [{"value": t, "summary": summaries[t]} for t in types_sorted],
+        "notes": [
+            (
+                "These type strings are what replayt core emits plus first-party CLI append paths (for example "
+                "resume/approval and run_interrupted on replayt run --timeout) for the documented JSONL timeline; "
+                "external writers (for example approval bridges) should use the same strings and payload shapes "
+                "from docs/RUN_LOG_SCHEMA.md when appending lines."
+            ),
+            (
+                "Use ctx.note (step_note) for small application breadcrumbs instead of inventing new envelope type "
+                "strings; keep foreign or vendor-specific audit payloads in sidecar files when they are not part "
+                "of the replay contract."
+            ),
+            "New first-class event kinds should be rare; ship them with a minor replayt bump and extend this contract.",
+        ],
+        "log_mode_contract_cross_reference": LOG_MODE_CONTRACT_SCHEMA,
     }
 
 

@@ -1,11 +1,32 @@
 from __future__ import annotations
 
 import json
+import logging
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 from replayt.persistence.jsonl import _validate_run_id
+
+_log = logging.getLogger(__name__)
+
+
+def _apply_posix_sqlite_paths_mode(db_path: Path, mode: int) -> None:
+    """chmod the main DB file and any WAL/SHM sidecars that already exist."""
+
+    if os.name == "nt":  # pragma: no cover
+        return
+    paths = [db_path]
+    for suffix in ("-wal", "-shm"):
+        sidecar = db_path.parent / f"{db_path.name}{suffix}"
+        if sidecar.is_file():
+            paths.append(sidecar)
+    for path in paths:
+        try:
+            os.chmod(path, mode)
+        except OSError:
+            _log.warning("Could not chmod SQLite path to %03o: %s", mode, path, exc_info=True)
 
 
 class SQLiteStore:
@@ -16,18 +37,28 @@ class SQLiteStore:
         instance, or external synchronisation must be provided.
     """
 
-    def __init__(self, db_path: Path, *, read_only: bool = False) -> None:
+    def __init__(
+        self,
+        db_path: Path,
+        *,
+        read_only: bool = False,
+        posix_new_db_file_mode: int | None = 0o600,
+    ) -> None:
         self.db_path = db_path
         self._read_only = read_only
+        self._posix_new_db_file_mode = None if os.name == "nt" else posix_new_db_file_mode
         if read_only:
             # ``as_uri()`` percent-encodes spaces and punctuation so ``?mode=ro`` cannot collide
             # with characters in the path (unlike raw ``file:{as_posix()}?...``).
             uri = db_path.expanduser().resolve().as_uri()
             self._cx = sqlite3.connect(f"{uri}?mode=ro", uri=True)
         else:
+            existed = db_path.is_file()
             self.db_path.parent.mkdir(parents=True, exist_ok=True)
             self._cx = sqlite3.connect(db_path)
             self._init_db()
+            if not existed and self._posix_new_db_file_mode is not None:
+                _apply_posix_sqlite_paths_mode(db_path, self._posix_new_db_file_mode)
 
     def close(self) -> None:
         self._cx.close()

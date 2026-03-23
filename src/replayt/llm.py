@@ -332,6 +332,59 @@ _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _RETRY_BASE_DELAY = 1.0
 _RETRY_MAX_DELAY = 30.0
 
+# Bounded gateway response metadata for JSONL correlation (vendor dashboards, edge traces).
+_MAX_HTTP_CORRELATION_ID_CHARS = 128
+_MAX_HTTP_RESPONSE_PROCESSING_MS = 3_600_000
+
+_CORRELATION_TRANSPORT_KEYS: tuple[str, ...] = (
+    "http_response_request_id",
+    "http_response_processing_ms",
+    "http_response_cf_ray",
+)
+
+
+def _header_get_ci(headers: Any, name: str) -> str | None:
+    """Return a stripped header value, case-insensitive for plain dict-like mappings."""
+
+    if headers is None:
+        return None
+    getter = getattr(headers, "get", None)
+    if callable(getter):
+        v = getter(name)
+        if v is not None:
+            s = str(v).strip()
+            return s or None
+    try:
+        want = name.lower()
+        for k, val in headers.items():
+            if str(k).lower() == want:
+                s = str(val).strip()
+                return s or None
+    except (AttributeError, TypeError):
+        pass
+    return None
+
+
+def _http_correlation_breadcrumbs(headers: Any) -> dict[str, Any]:
+    """Pick small, stable fields from successful chat-completions HTTP response headers."""
+
+    out: dict[str, Any] = {}
+    rid = _header_get_ci(headers, "x-request-id") or _header_get_ci(headers, "x-correlation-id")
+    if rid is not None and len(rid) <= _MAX_HTTP_CORRELATION_ID_CHARS:
+        out["http_response_request_id"] = rid
+    proc_raw = _header_get_ci(headers, "openai-processing-ms")
+    if proc_raw is not None:
+        try:
+            ms = int(proc_raw)
+            if 0 <= ms <= _MAX_HTTP_RESPONSE_PROCESSING_MS:
+                out["http_response_processing_ms"] = ms
+        except ValueError:
+            pass
+    cf = _header_get_ci(headers, "cf-ray")
+    if cf is not None and len(cf) <= _MAX_HTTP_CORRELATION_ID_CHARS:
+        out["http_response_cf_ray"] = cf
+    return out
+
 
 def _retry_after_delay_seconds(raw: str | None) -> float:
     """Parse ``Retry-After`` as a non-negative delay in seconds (numeric form only).
@@ -527,6 +580,8 @@ class OpenAICompatClient:
                         except ValueError:
                             pass
                     raw = _read_response_body_capped(r, cap)
+                    # Snapshot headers before exiting the stream context (response may be closed after ``with``).
+                    http_correlation = _http_correlation_breadcrumbs(r.headers)
                 try:
                     text = raw.decode("utf-8")
                 except UnicodeDecodeError as exc:
@@ -543,6 +598,7 @@ class OpenAICompatClient:
                     transport_meta.clear()
                     transport_meta["http_attempts"] = attempt + 1
                     transport_meta["http_status"] = status_code
+                    transport_meta.update(http_correlation)
                 return parsed
             except httpx.TransportError:
                 if attempt < max_attempts - 1:
@@ -960,6 +1016,9 @@ class LLMBridge:
             resp_payload["http_attempts"] = ha
         if isinstance(hs, int):
             resp_payload["http_status"] = hs
+        for ck in _CORRELATION_TRANSPORT_KEYS:
+            if ck in transport:
+                resp_payload[ck] = transport[ck]
         if self._log_mode == LogMode.full:
             resp_payload["content"] = content
         elif self._log_mode == LogMode.redacted:
@@ -978,6 +1037,9 @@ class LLMBridge:
             structured_meta["http_attempts"] = ha
         if isinstance(hs, int):
             structured_meta["http_status"] = hs
+        for ck in _CORRELATION_TRANSPORT_KEYS:
+            if ck in transport:
+                structured_meta[ck] = transport[ck]
         return content, effective, fingerprints, structured_meta
 
     def _emit_structured_output_failed(

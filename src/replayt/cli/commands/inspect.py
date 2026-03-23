@@ -47,10 +47,11 @@ from replayt.cli.display import (
     run_matches_structured_schema_name_filter,
     run_matches_tool_name_filter,
     run_meta_filters_match,
+    runs_inventory_markdown,
     stakeholder_report_diff_handoff_markdown,
     tags_match,
 )
-from replayt.cli.run_id_hints import echo_missing_run_hints, exit_on_invalid_run_id
+from replayt.cli.run_id_hints import echo_empty_runs_hints, echo_missing_run_hints, exit_on_invalid_run_id
 from replayt.cli.stores import read_store
 from replayt.cli.targets import load_target
 from replayt.cli.validation import (
@@ -700,7 +701,7 @@ def cmd_validate(
         help=(
             "After a successful graph check, print a compact JSON object on stdout: union of every "
             "@wf.step(expects=...) key with type-shaped placeholders (conflicting types use null). "
-            "Mutually exclusive with --format json."
+            "Mutually exclusive with --format json, --print-run-one-liner, and --print-ci-one-liner."
         ),
     ),
     print_run_one_liner: bool = typer.Option(
@@ -709,7 +710,18 @@ def cmd_validate(
         help=(
             "After a successful graph check, print one POSIX-shell line: replayt run TARGET --inputs-json … "
             "using the same placeholder union as --print-inputs-template; includes --strict-graph when you "
-            "passed --strict-graph. Mutually exclusive with --format json and --print-inputs-template."
+            "passed --strict-graph. Mutually exclusive with --format json, --print-inputs-template, and "
+            "--print-ci-one-liner."
+        ),
+    ),
+    print_ci_one_liner: bool = typer.Option(
+        False,
+        "--print-ci-one-liner",
+        help=(
+            "After a successful graph check, print one POSIX-shell line: replayt ci TARGET --inputs-json … "
+            "using the same placeholder union as --print-inputs-template; includes --strict-graph when you "
+            "passed --strict-graph. Mutually exclusive with --format json, --print-inputs-template, and "
+            "--print-run-one-liner."
         ),
     ),
     output: Literal["text", "json"] = typer.Option(
@@ -725,9 +737,19 @@ def cmd_validate(
         raise typer.BadParameter("Cannot combine --print-inputs-template with --format json (stdout conflict).")
     if print_run_one_liner and output == "json":
         raise typer.BadParameter("Cannot combine --print-run-one-liner with --format json (stdout conflict).")
+    if print_ci_one_liner and output == "json":
+        raise typer.BadParameter("Cannot combine --print-ci-one-liner with --format json (stdout conflict).")
     if print_inputs_template and print_run_one_liner:
         raise typer.BadParameter(
             "Cannot combine --print-inputs-template with --print-run-one-liner (stdout conflict)."
+        )
+    if print_inputs_template and print_ci_one_liner:
+        raise typer.BadParameter(
+            "Cannot combine --print-inputs-template with --print-ci-one-liner (stdout conflict)."
+        )
+    if print_run_one_liner and print_ci_one_liner:
+        raise typer.BadParameter(
+            "Cannot combine --print-run-one-liner with --print-ci-one-liner (stdout conflict)."
         )
 
     cfg, cfg_path, _unknown, _shadowed = get_project_config()
@@ -777,6 +799,19 @@ def cmd_validate(
             err=True,
         )
         raise typer.Exit(code=0)
+    if print_ci_one_liner:
+        tpl = workflow_inputs_template(wf)
+        compact = json.dumps(tpl, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
+        argv_ci: list[str] = ["replayt", "ci", target, "--inputs-json", compact]
+        if strict_graph:
+            argv_ci.append("--strict-graph")
+        typer.echo(shlex.join(argv_ci))
+        typer.echo(
+            "Tip: stdout is the command only; paste into CI YAML or a POSIX shell (add --summary-json, "
+            "--junit-xml, or --github-summary as needed).",
+            err=True,
+        )
+        raise typer.Exit(code=0)
     typer.echo(
         f"OK: {wf.name}@{wf.version} ({len(wf.step_names())} states, {len(wf.edges())} edges)"
     )
@@ -784,7 +819,8 @@ def cmd_validate(
     typer.echo(f"Next: replayt run {target}{strict_tail} --dry-check")
     typer.echo(
         f"Then: replayt run {target}{strict_tail} with inputs "
-        "(`--input key=value`, `--inputs-file`, or project defaults); see docs/QUICKSTART.md."
+        "(`--input key=value`, `--inputs-file`, or project defaults); see docs/QUICKSTART.md. "
+        "For a CI job line with placeholder inputs, use --print-ci-one-liner."
     )
 
 
@@ -854,9 +890,25 @@ def cmd_runs(
             "line (`effective.model` when present, else top-level `model`; exact match; repeatable; OR)."
         ),
     ),
-    output: Literal["text", "json"] = typer.Option("text", "--output", "-o", help="text or json."),
+    output: Literal["text", "json", "markdown"] = typer.Option(
+        "text",
+        "--output",
+        "-o",
+        help="text (default), json (machine-readable), or markdown (paste-friendly inventory + handoff).",
+    ),
+    style: Literal["stakeholder", "support"] = typer.Option(
+        "stakeholder",
+        "--style",
+        help=(
+            "With --output markdown only: stakeholder (default) or support copy-paste lines "
+            "matching replayt report / replay / bundle-export --style / --report-style."
+        ),
+    ),
 ) -> None:
     """List recent local runs from JSONL logs."""
+
+    if output != "markdown" and style == "support":
+        raise typer.BadParameter("--style support only applies with --output markdown.")
 
     status_filters = _run_status_filters(status)
     older_than_seconds = _duration_filter_seconds(older_than, flag_name="--older-than")
@@ -871,9 +923,24 @@ def cmd_runs(
     llm_model_filters = parse_llm_model_filters(llm_model)
     log_dir = resolve_log_dir(log_dir, log_subdir)
     now = datetime.now(timezone.utc)
+    filters_active = (
+        status_filters is not None
+        or bool(tag_filters)
+        or bool(meta_filters)
+        or bool(exp_filters)
+        or bool(tool_filters)
+        or bool(schema_filters)
+        or bool(note_kind_filters)
+        or bool(finish_reason_filters)
+        or bool(llm_model_filters)
+        or older_than_seconds is not None
+        or newer_than_seconds is not None
+    )
+    store_had_any_run_id = False
     with read_store(log_dir, sqlite) as store:
         runs_data: list[tuple[str, dict[str, Any], dict[str, Any], int | None]] = []
         for rid in store.list_run_ids():
+            store_had_any_run_id = True
             events = store.load_events(rid)
             summary = event_summary(events)
             attention = run_attention_summary(events)
@@ -914,6 +981,26 @@ def cmd_runs(
 
     runs_data.sort(key=_run_sort_key, reverse=True)
     runs_data = runs_data[:limit]
+    if output == "markdown":
+        typer.echo(
+            runs_inventory_markdown(
+                runs_data,
+                log_dir=log_dir,
+                sqlite=sqlite,
+                limit=limit,
+                generated_at_iso=now.isoformat(),
+                style=style,
+            )
+        )
+        if not runs_data:
+            echo_empty_runs_hints(
+                store_empty=not store_had_any_run_id,
+                filters_active=filters_active,
+                cli_log_dir=log_dir,
+                log_subdir=log_subdir,
+                sqlite=sqlite,
+            )
+        return
     if output == "json":
         payload_runs = []
         for rid, summary, attention, age_seconds in runs_data:
@@ -966,6 +1053,14 @@ def cmd_runs(
         typer.echo(line)
     if not runs_data:
         typer.echo(f"No runs found in {log_dir}")
+        if output == "text":
+            echo_empty_runs_hints(
+                store_empty=not store_had_any_run_id,
+                filters_active=filters_active,
+                cli_log_dir=log_dir,
+                log_subdir=log_subdir,
+                sqlite=sqlite,
+            )
 
 
 def cmd_stats(

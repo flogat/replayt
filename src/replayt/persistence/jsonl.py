@@ -143,6 +143,15 @@ class JSONLStore:
             _apply_posix_new_file_mode(path, self._posix_new_file_mode)
         return path
 
+    @staticmethod
+    def _coerce_event_seq(event: dict[str, Any]) -> int | None:
+        """Return ``seq`` as int for ordering, or ``None`` if the object is not a valid sequence anchor."""
+
+        try:
+            return int(event.get("seq", 0))
+        except (TypeError, ValueError):
+            return None
+
     def _max_seq_full_scan(self, f) -> int:
         """Scan from BOF for the maximum ``seq`` (used when tail parsing cannot read a valid last line)."""
 
@@ -156,7 +165,10 @@ class JSONLStore:
                 event = json.loads(line)
                 if not isinstance(event, dict):
                     continue
-                max_seq = max(max_seq, int(event.get("seq", 0)))
+                seq = self._coerce_event_seq(event)
+                if seq is None:
+                    continue
+                max_seq = max(max_seq, seq)
             except (json.JSONDecodeError, TypeError, ValueError):
                 continue
         return max_seq
@@ -180,7 +192,9 @@ class JSONLStore:
                     event = None
                 else:
                     if isinstance(event, dict):
-                        return int(event.get("seq", 0))
+                        seq = self._coerce_event_seq(event)
+                        if seq is not None:
+                            return seq
             if start == 0:
                 for line in reversed(lines[:-1] if len(lines) > 1 else []):
                     try:
@@ -188,7 +202,9 @@ class JSONLStore:
                     except (json.JSONDecodeError, TypeError, ValueError):
                         continue
                     if isinstance(event, dict):
-                        return int(event.get("seq", 0))
+                        seq = self._coerce_event_seq(event)
+                        if seq is not None:
+                            return seq
                 return self._max_seq_full_scan(f) if end > 0 else 0
             read_size = min(read_size * 2, end)
             start = end - read_size

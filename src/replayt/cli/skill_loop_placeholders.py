@@ -29,8 +29,8 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
         _row(
             name="invocation_rel",
             description=(
-                "Sidecar path relative to REPO_ROOT when under the repo, else absolute. "
-                "Same as env SKILL_INVOCATION_REL."
+                "Sidecar path relative to REPO_ROOT when under the repo, else absolute; "
+                "POSIX separators (forward slashes) on all platforms. Same as env SKILL_INVOCATION_REL."
             ),
         ),
         _row(
@@ -46,7 +46,8 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
         _row(
             name="log_rel",
             description=(
-                "Log path relative to REPO_ROOT when under the repo, else absolute. Same as env SKILL_LOG_REL."
+                "Log path relative to REPO_ROOT when under the repo, else absolute; "
+                "POSIX separators (forward slashes) on all platforms. Same as env SKILL_LOG_REL."
             ),
         ),
         _row(
@@ -67,7 +68,8 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
         _row(
             name="prompt_rel",
             description=(
-                "Prompt path relative to REPO_ROOT when under the repo, else absolute. Same as env SKILL_PROMPT_REL."
+                "Prompt path relative to REPO_ROOT when under the repo, else absolute; "
+                "POSIX separators (forward slashes) on all platforms. Same as env SKILL_PROMPT_REL."
             ),
         ),
         _row(
@@ -85,7 +87,8 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
         _row(
             name="run_dir_rel",
             description=(
-                "Run directory relative to REPO_ROOT when under the repo, else absolute. Same as env SKILL_RUN_DIR_REL."
+                "Run directory relative to REPO_ROOT when under the repo, else absolute; "
+                "POSIX separators (forward slashes) on all platforms. Same as env SKILL_RUN_DIR_REL."
             ),
         ),
         _row(

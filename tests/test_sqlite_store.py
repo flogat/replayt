@@ -1,11 +1,50 @@
 from __future__ import annotations
 
+import os
 import sqlite3
+import stat
 from pathlib import Path
 
 import pytest
 
 from replayt.persistence import JSONLStore, MultiStore, SQLiteStore
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_sqlite_store_new_file_default_posix_owner_only(tmp_path: Path) -> None:
+    db = tmp_path / "new.sqlite3"
+    SQLiteStore(db)
+    assert stat.S_IMODE(db.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_sqlite_store_posix_new_db_file_mode_override(tmp_path: Path) -> None:
+    db = tmp_path / "mode.sqlite3"
+    SQLiteStore(db, posix_new_db_file_mode=0o660)
+    assert stat.S_IMODE(db.stat().st_mode) == 0o660
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_sqlite_store_skips_chmod_when_db_already_existed(tmp_path: Path) -> None:
+    db = tmp_path / "existing.sqlite3"
+    SQLiteStore(db).close()
+    os.chmod(db, 0o644)
+    before = stat.S_IMODE(db.stat().st_mode)
+    SQLiteStore(db).close()
+    assert stat.S_IMODE(db.stat().st_mode) == before
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX file modes")
+def test_make_store_applies_posix_mode_to_new_sqlite_mirror(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("REPLAYT_JSONL_POSIX_MODE", raising=False)
+    from replayt.cli.stores import make_store
+
+    db = tmp_path / "mirror" / "m.sqlite3"
+    store = make_store(tmp_path / "jlogs", db)
+    try:
+        assert stat.S_IMODE(db.stat().st_mode) == 0o600
+    finally:
+        store.close()
 
 
 def test_sqlite_roundtrip(tmp_path: Path) -> None:

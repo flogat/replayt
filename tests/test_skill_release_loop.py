@@ -171,6 +171,16 @@ def test_bump_patch_and_alias() -> None:
     assert mod.bump_patch("1.2.3") == "1.2.4"
 
 
+def test_path_under_repo_or_absolute_uses_posix_separators(tmp_path: Path) -> None:
+    mod = _load_script()
+    repo = tmp_path / "repo"
+    nested = repo / "a" / "b"
+    nested.mkdir(parents=True)
+    rel = mod.path_under_repo_or_absolute(str(repo), str(nested))
+    assert rel == "a/b"
+    assert "\\" not in rel
+
+
 def test_unreleased_changelog_item_count(tmp_path: Path) -> None:
     mod = _load_script()
     repo = tmp_path / "r"
