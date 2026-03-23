@@ -20,6 +20,13 @@ from replayt.workflow import Workflow
 
 RUN_RESULT_SCHEMA = "replayt.run_result.v1"
 
+# Injected into every trusted policy-hook subprocess; values match ``policy_hook_env_catalog`` hook keys.
+POLICY_HOOK_NAME_ENV_VAR = "REPLAYT_POLICY_HOOK_NAME"
+
+
+def _policy_hook_name_env(hook_key: str) -> dict[str, str]:
+    return {POLICY_HOOK_NAME_ENV_VAR: hook_key}
+
 
 def _privacy_contract_hook_env(
     *,
@@ -139,6 +146,42 @@ def run_started_hook_json_blobs_from_jsonl_path(path: Path) -> tuple[str | None,
     if not isinstance(payload, dict):
         return (None, None, None, None)
     return _run_started_payload_json_blobs(payload)
+
+
+def run_started_inputs_json_from_payload(payload: dict[str, Any]) -> str | None:
+    """Canonical sorted JSON for ``run_started.inputs`` (object only); ``None`` means unreadable."""
+
+    raw = payload.get("inputs")
+    if raw is None:
+        return json.dumps({}, sort_keys=True)
+    if isinstance(raw, dict):
+        return json.dumps(raw, sort_keys=True)
+    return None
+
+
+def run_started_inputs_json_from_events(events: list[dict[str, Any]]) -> str | None:
+    """Sorted JSON env string for ``run_started.inputs`` from an in-memory timeline."""
+
+    for event in events:
+        if event.get("type") != "run_started":
+            continue
+        payload = event.get("payload") or {}
+        if not isinstance(payload, dict):
+            return None
+        return run_started_inputs_json_from_payload(payload)
+    return None
+
+
+def run_started_inputs_json_from_jsonl_path(path: Path) -> str | None:
+    """Same as :func:`run_started_inputs_json_from_events` but scans the JSONL file on disk."""
+
+    event = first_jsonl_event_with_type(path, event_type="run_started")
+    if event is None:
+        return None
+    payload = event.get("payload") or {}
+    if not isinstance(payload, dict):
+        return None
+    return run_started_inputs_json_from_payload(payload)
 
 
 def _merge_optional_hook_json_env(
@@ -426,6 +469,7 @@ def invoke_run_hook(
     run_id = validate_run_id(run_id)
     root = log_dir.resolve()
     extra_env = {
+        **_policy_hook_name_env("run_hook"),
         "REPLAYT_TARGET": target,
         "REPLAYT_RUN_ID": run_id,
         "REPLAYT_RUN_MODE": "resume" if resume else "run",
@@ -473,6 +517,7 @@ def invoke_resume_hook(
     tags_json: str | None = None,
     experiment_json: str | None = None,
     workflow_meta_json: str | None = None,
+    inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
 ) -> None:
     """Run *argv* with extra ``REPLAYT_*`` env vars; *argv* must come from trusted config."""
@@ -480,6 +525,7 @@ def invoke_resume_hook(
     run_id = validate_run_id(run_id)
     root = log_dir.resolve()
     extra = {
+        **_policy_hook_name_env("resume_hook"),
         "REPLAYT_TARGET": target,
         "REPLAYT_RUN_ID": run_id,
         "REPLAYT_LOG_DIR": str(root),
@@ -500,6 +546,8 @@ def invoke_resume_hook(
         experiment_json=experiment_json,
         workflow_meta_json=workflow_meta_json,
     )
+    if inputs_json is not None:
+        extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     extra.update(_workflow_entry_path_hook_env(target))
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
@@ -527,11 +575,13 @@ def invoke_export_hook(
     tags_json: str | None = None,
     experiment_json: str | None = None,
     workflow_meta_json: str | None = None,
+    inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
 ) -> None:
     """Run *argv* before ``export-run`` / ``bundle-export`` writes the archive; *argv* is trusted config only."""
 
     extra: dict[str, str] = {
+        **_policy_hook_name_env("export_hook"),
         "REPLAYT_RUN_ID": run_id,
         "REPLAYT_EXPORT_KIND": export_kind,
         "REPLAYT_LOG_DIR": str(log_dir.resolve()),
@@ -560,6 +610,8 @@ def invoke_export_hook(
         experiment_json=experiment_json,
         workflow_meta_json=workflow_meta_json,
     )
+    if inputs_json is not None:
+        extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
@@ -581,11 +633,13 @@ def invoke_seal_hook(
     tags_json: str | None = None,
     experiment_json: str | None = None,
     workflow_meta_json: str | None = None,
+    inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
 ) -> None:
     """Run *argv* before ``replayt seal`` writes the manifest; *argv* is trusted config only."""
 
     extra = {
+        **_policy_hook_name_env("seal_hook"),
         "REPLAYT_RUN_ID": run_id,
         "REPLAYT_LOG_DIR": str(log_dir.resolve()),
         "REPLAYT_SEAL_JSONL": str(jsonl_path.resolve()),
@@ -605,6 +659,8 @@ def invoke_seal_hook(
         experiment_json=experiment_json,
         workflow_meta_json=workflow_meta_json,
     )
+    if inputs_json is not None:
+        extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
@@ -628,11 +684,13 @@ def invoke_verify_seal_hook(
     tags_json: str | None = None,
     experiment_json: str | None = None,
     workflow_meta_json: str | None = None,
+    inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
 ) -> None:
     """Run *argv* after ``replayt verify-seal`` digests match; *argv* is trusted config only."""
 
     extra = {
+        **_policy_hook_name_env("verify_seal_hook"),
         "REPLAYT_RUN_ID": run_id,
         "REPLAYT_LOG_DIR": str(log_dir.resolve()),
         "REPLAYT_VERIFY_SEAL_MANIFEST": str(manifest_path.resolve()),
@@ -654,6 +712,8 @@ def invoke_verify_seal_hook(
         experiment_json=experiment_json,
         workflow_meta_json=workflow_meta_json,
     )
+    if inputs_json is not None:
+        extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
@@ -672,6 +732,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
                     "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
+                    "REPLAYT_POLICY_HOOK_NAME",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
@@ -701,11 +762,13 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
                     "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
+                    "REPLAYT_POLICY_HOOK_NAME",
                     "REPLAYT_REJECT",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
+                    "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_JSONL",
                     "REPLAYT_RUN_METADATA_JSON",
                     "REPLAYT_RUN_TAGS_JSON",
@@ -733,10 +796,12 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
                     "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
+                    "REPLAYT_POLICY_HOOK_NAME",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
+                    "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_SQLITE",
@@ -758,10 +823,12 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
                     "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
+                    "REPLAYT_POLICY_HOOK_NAME",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
+                    "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_SEAL_JSONL",
@@ -783,10 +850,12 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_LOG_DIR",
                     "REPLAYT_LOG_MODE",
                     "REPLAYT_POLICY_HOOK_CONTEXT_JSON",
+                    "REPLAYT_POLICY_HOOK_NAME",
                     "REPLAYT_REDACT_KEYS_JSON",
                     "REPLAYT_REPLAYT_VERSION",
                     "REPLAYT_RUN_EXPERIMENT_JSON",
                     "REPLAYT_RUN_ID",
+                    "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_VERIFY_SEAL_FILE_SHA256",
@@ -1038,11 +1107,33 @@ def _stdout_json_route(
     return row
 
 
+# Full payload schema ids for each cli_json_stdout_contract route (must match cli_machine_readable_schemas).
+_CLI_JSON_STDOUT_ROUTE_SCHEMA_BY_KEY: dict[str, str] = {
+    "config_report": "replayt.config_report.v1",
+    "diff_report": "replayt.diff_report.v1",
+    "doctor_report": "replayt.doctor_report.v1",
+    "init_templates": "replayt.init_templates.v1",
+    "inspect_report": "replayt.inspect_report.v1",
+    "runs_report": "replayt.runs_report.v1",
+    "run_result": RUN_RESULT_SCHEMA,
+    "seal": "replayt.seal.v1",
+    "stats_report": "replayt.stats_report.v1",
+    "try_copy": "replayt.try_copy.v1",
+    "try_examples": "replayt.try_examples.v1",
+    "validate_report": "replayt.validate_report.v1",
+    "verify_seal_report": "replayt.verify_seal_report.v1",
+    "version_report": "replayt.version_report.v1",
+    "workflow_contract": "replayt.workflow_contract.v1",
+    "workflow_contract_check": "replayt.workflow_contract_check.v1",
+}
+
+
 def build_cli_json_stdout_contract() -> dict[str, Any]:
     """Machine-readable map of JSON-on-stdout routes (``replayt version --format json``).
 
     ``schema_key`` names an entry in the sibling ``cli_machine_readable_schemas`` object on the same
-    version report. Omitted: commands whose stdout is HTML/Markdown/text only, tarball writers, and
+    version report; each route row also sets ``schema`` to the same ``replayt.*.v1`` string for
+    subprocess hosts. Omitted: commands whose stdout is HTML/Markdown/text only, tarball writers, and
     file sinks such as ``--summary-json``.
     """
 
@@ -1050,10 +1141,12 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
     dry = "graph_validate_short_circuit"
     runx = "workflow_run_execute"
 
-    return {
+    contract: dict[str, Any] = {
         "note": (
             "Maps subcommands to flags that select JSON on stdout. Each schema_key matches a key under "
-            "cli_machine_readable_schemas on this report. Each route includes trust_profile, an index into "
+            "cli_machine_readable_schemas on this report; each route row also duplicates the resolved "
+            "replayt.*.v1 id as schema so subprocess and MCP wrappers can map argv to the expected stdout "
+            "payload type without a second lookup. Each route includes trust_profile, an index into "
             "trust_profiles for subprocess/MCP allowlists. replayt log-schema always prints the bundled "
             "Draft JSON Schema for one JSONL line (stdout) and is not tied to cli_machine_readable_schemas. "
             "replayt ci still prints a one-line stderr reminder when --output json is used. See "
@@ -1274,6 +1367,13 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             ],
         },
     }
+    sm = _CLI_JSON_STDOUT_ROUTE_SCHEMA_BY_KEY
+    subcommands = contract["subcommands"]
+    for routes in subcommands.values():
+        for row in routes:
+            sk = row["schema_key"]
+            row["schema"] = sm[str(sk)]
+    return contract
 
 
 def build_cli_exit_codes_report() -> dict[str, Any]:

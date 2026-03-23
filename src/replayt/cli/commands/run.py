@@ -55,6 +55,7 @@ from replayt.cli.run_support import (
     run_hook_audit,
     run_result_payload,
     run_started_hook_json_blobs_from_events,
+    run_started_inputs_json_from_events,
     subprocess_env_child,
     workflow_meta_json_for_run_hook,
 )
@@ -1189,6 +1190,7 @@ def cmd_resume(
         metadata_json, tags_json, experiment_json, workflow_meta_json = run_started_hook_json_blobs_from_events(
             pre_events
         )
+        inputs_json = run_started_inputs_json_from_events(pre_events)
         hook_timeout = resume_hook_timeout_seconds(cfg)
         try:
             invoke_resume_hook(
@@ -1207,6 +1209,7 @@ def cmd_resume(
                 tags_json=tags_json,
                 experiment_json=experiment_json,
                 workflow_meta_json=workflow_meta_json,
+                inputs_json=inputs_json,
                 policy_hook_context_json=policy_hook_canonical,
             )
         except subprocess.TimeoutExpired as exc:

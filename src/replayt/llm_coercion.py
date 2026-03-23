@@ -131,6 +131,8 @@ def coerce_top_p(value: Any) -> float | None:
         out = float(s)
     else:
         out = float(value)
+    if not math.isfinite(out):
+        raise ValueError("top_p must be a finite number")
     if out < 0 or out > 1:
         raise ValueError(f"top_p must be between 0 and 1 inclusive, got {out}")
     return out
@@ -153,6 +155,8 @@ def coerce_openai_penalty(value: Any) -> float | None:
         out = float(s)
     else:
         out = float(value)
+    if not math.isfinite(out):
+        raise ValueError("penalty must be a finite number")
     if out < -2.0 or out > 2.0:
         raise ValueError(f"penalty must be between -2 and 2 inclusive, got {out}")
     return out
@@ -205,6 +209,37 @@ def coerce_max_tokens_for_api(value: Any) -> int | None:
             raise ValueError("max_tokens must be a finite number")
         return max(0, int(round(x)))
     raise TypeError(f"max_tokens must be numeric or numeric string, got {type(value).__name__}")
+
+
+# Cap additional POST attempts so a typo cannot stall a run unbounded.
+_MAX_HTTP_RETRIES = 25
+
+
+def coerce_http_retries(value: Any) -> int:
+    """Normalize ``http_retries`` (extra POST attempts after the first; same as ``LLMSettings.http_retries``)."""
+
+    if isinstance(value, bool):
+        raise TypeError("http_retries cannot be a boolean")
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            raise ValueError("http_retries cannot be empty")
+        n = int(s, 10)
+    elif isinstance(value, float):
+        if not math.isfinite(value):
+            raise ValueError("http_retries must be a finite number")
+        if not value.is_integer():
+            raise ValueError(f"http_retries must be a whole number, got {value}")
+        n = int(value)
+    elif isinstance(value, int):
+        n = value
+    else:
+        raise TypeError(f"http_retries must be int-like, got {type(value).__name__}")
+    if n < 0:
+        raise ValueError("http_retries must be >= 0")
+    if n > _MAX_HTTP_RETRIES:
+        raise ValueError(f"http_retries must be <= {_MAX_HTTP_RETRIES}, got {n}")
+    return n
 
 
 def coerce_llm_response_format(value: Any, *, max_json_chars: int = 250_000) -> dict[str, Any] | None:

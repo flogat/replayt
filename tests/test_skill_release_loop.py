@@ -544,6 +544,7 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert isinstance(env, dict)
     assert env["SKILL_ROOT"] == str(skill_root.resolve())
     assert env["SKILL_RUN_DIR"] == str(run_dir.resolve())
+    assert env["SKILL_RUN_STAMP"] == run_dir.name
     assert env["SKILL_STEP_INDEX"] == "1"
     assert env["SKILL_STEP_TOTAL"] == "1"
     expected_pipeline = mod.skill_pipeline_sha256(["demo"])
@@ -574,6 +575,7 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert inv["step_total"] == 1
     assert inv["repo_root"] == str(repo.resolve())
     assert inv["run_dir"] == str(run_dir.resolve())
+    assert inv["run_stamp"] == run_dir.name
     assert inv["injected_env_keys"] == sorted(mod.SKILL_LOOP_MAIN_INJECTED_ENV_KEYS)
     assert inv["prompt_file"] == str((run_dir / "iter-01-demo.prompt.md").resolve())
     assert inv["log_file"] == str((run_dir / "iter-01-demo.log").resolve())
@@ -586,6 +588,7 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert pipe["pipeline_sha256"] == expected_pipeline
     assert pipe["skill_command_sha256"] == expected_cmd_sha
     assert pipe["task_sha256"] == expected_task_sha
+    assert pipe["run_stamp"] == run_dir.name
 
 
 def test_skill_pipeline_file_rejects_reordered_skills_on_resume(tmp_path: Path) -> None:

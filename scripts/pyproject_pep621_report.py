@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -44,6 +45,92 @@ def _sorted_str_list(label: str, raw: Any) -> list[str]:
             raise ValueError(f"{label}[{i}] must be a string")
         out.append(item)
     return sorted(out)
+
+
+def _optional_str(label: str, raw: Any) -> str | None:
+    if raw is None:
+        return None
+    if not isinstance(raw, str):
+        raise ValueError(f"{label} must be a string")
+    return raw
+
+
+def _normalize_readme(raw: Any) -> tuple[str | None, str | None, str | None]:
+    """Return (readme_file, readme_content_type, readme_text_sha256 for inline text only)."""
+    if raw is None:
+        return None, None, None
+    if isinstance(raw, str):
+        return raw, None, None
+    if not isinstance(raw, dict):
+        raise ValueError("project.readme must be a string or an inline table")
+    ct_raw = raw.get("content-type", raw.get("content_type"))
+    content_type = ct_raw if isinstance(ct_raw, str) else None
+    if "file" in raw:
+        f = raw.get("file")
+        if not isinstance(f, str):
+            raise ValueError("project.readme.file must be a string")
+        return f, content_type, None
+    if "text" in raw:
+        t = raw.get("text")
+        if not isinstance(t, str):
+            raise ValueError("project.readme.text must be a string")
+        digest = hashlib.sha256(t.encode("utf-8")).hexdigest()
+        return None, content_type, digest
+    raise ValueError("project.readme table must set file or text")
+
+
+def _normalize_license(raw: Any) -> tuple[str | None, str | None, str | None]:
+    """Return (SPDX expression, license file path, sha256 of inline license text)."""
+    if raw is None:
+        return None, None, None
+    if isinstance(raw, str):
+        return raw, None, None
+    if not isinstance(raw, dict):
+        raise ValueError("project.license must be a string or an inline table")
+    if "file" in raw:
+        f = raw.get("file")
+        if not isinstance(f, str):
+            raise ValueError("project.license.file must be a string")
+        return None, f, None
+    if "text" in raw:
+        t = raw.get("text")
+        if not isinstance(t, str):
+            raise ValueError("project.license.text must be a string")
+        return None, None, hashlib.sha256(t.encode("utf-8")).hexdigest()
+    raise ValueError("project.license table must set file or text")
+
+
+def _person_tables(label: str, raw: Any) -> list[dict[str, str | None]]:
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValueError(f"{label} must be a TOML array of inline tables")
+    rows: list[dict[str, str | None]] = []
+    for i, item in enumerate(raw):
+        if not isinstance(item, dict):
+            raise ValueError(f"{label}[{i}] must be an inline table")
+        name = item.get("name")
+        email = item.get("email")
+        if name is not None and not isinstance(name, str):
+            raise ValueError(f"{label}[{i}].name must be a string")
+        if email is not None and not isinstance(email, str):
+            raise ValueError(f"{label}[{i}].email must be a string")
+        rows.append({"name": name, "email": email})
+    rows.sort(key=lambda r: ((r["name"] or ""), (r["email"] or "")))
+    return rows
+
+
+def _sorted_url_table(label: str, raw: Any) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError(f"{label} must be a table")
+    out: dict[str, str] = {}
+    for k, v in raw.items():
+        if not isinstance(k, str) or not isinstance(v, str):
+            raise ValueError(f"{label} keys and values must be strings")
+        out[k] = v
+    return dict(sorted(out.items()))
 
 
 def _optional_dependency_groups(raw: Any) -> dict[str, list[str]]:
@@ -94,6 +181,14 @@ def pyproject_pep621_report(pyproject_path: Path) -> dict[str, Any]:
         name = project.get("name")
         version = project.get("version")
         requires_python = project.get("requires-python")
+        description = _optional_str("project.description", project.get("description"))
+        readme_file, readme_content_type, readme_text_sha256 = _normalize_readme(project.get("readme"))
+        license_expression, license_file, license_text_sha256 = _normalize_license(project.get("license"))
+        keywords = _sorted_str_list("project.keywords", project.get("keywords"))
+        classifiers = _sorted_str_list("project.classifiers", project.get("classifiers"))
+        urls = _sorted_url_table("project.urls", project.get("urls"))
+        authors = _person_tables("project.authors", project.get("authors"))
+        maintainers = _person_tables("project.maintainers", project.get("maintainers"))
         dependencies = _sorted_str_list("project.dependencies", project.get("dependencies"))
         optional_groups = _optional_dependency_groups(project.get("optional-dependencies"))
     except ValueError as exc:
@@ -108,7 +203,19 @@ def pyproject_pep621_report(pyproject_path: Path) -> dict[str, Any]:
     proj_out: dict[str, Any] = {
         "name": name if isinstance(name, str) else None,
         "version": version if isinstance(version, str) else None,
+        "description": description,
+        "readme_file": readme_file,
+        "readme_content_type": readme_content_type,
+        "readme_text_sha256": readme_text_sha256,
+        "license_expression": license_expression,
+        "license_file": license_file,
+        "license_text_sha256": license_text_sha256,
         "requires_python": requires_python if isinstance(requires_python, str) else None,
+        "keywords": keywords,
+        "classifiers": classifiers,
+        "urls": urls,
+        "authors": authors,
+        "maintainers": maintainers,
         "dependencies": dependencies,
         "optional_dependencies": optional_groups,
         "optional_dependency_extras": sorted(optional_groups.keys()),

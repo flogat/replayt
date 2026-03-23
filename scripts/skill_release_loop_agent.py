@@ -143,6 +143,12 @@ def path_under_repo_or_absolute(repo_root: str, target: str) -> str:
         return str(resolved)
 
 
+def skill_release_run_stamp(run_dir: Path | str) -> str:
+    """Basename of the skill-release run directory (``YYYYMMDD-HHMMSS`` for default new runs)."""
+
+    return Path(run_dir).resolve().name
+
+
 def ensure_skill_release_pipeline_file(
     run_dir: Path, skill_names: list[str], task: str, skill_command: str
 ) -> str:
@@ -159,6 +165,7 @@ def ensure_skill_release_pipeline_file(
         "skill_command_sha256": cmd_sha,
         "task": task,
         "task_sha256": task_sha,
+        "run_stamp": skill_release_run_stamp(run_dir),
         "written_at": _utc_iso(),
     }
     if path.is_file():
@@ -278,6 +285,7 @@ def write_skill_invocation_json(
         "log_file_rel": path_under_repo_or_absolute(repo_root, log_abs),
         "run_dir": run_dir_abs,
         "run_dir_rel": path_under_repo_or_absolute(repo_root, run_dir_abs),
+        "run_stamp": skill_release_run_stamp(run_dir_abs),
         "injected_env_keys": sorted(injected_env_keys),
         "iteration": iteration,
         "max_iterations": max_iterations,
@@ -392,7 +400,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Codex usage-limit auto-wait is off by default here; pass --wait-on-codex-usage-limit when your "
             "--skill-command runs OpenAI Codex.\n"
             "--skill-command runs once per skill and can use placeholders:\n"
-            "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {run_dir}\n"
+            "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {run_dir} {run_stamp}\n"
             "  {repo} {iteration} {max_iterations} {task} {step_index} {step_total} {pipeline_sha256} "
             "{skill_command_sha256} {task_sha256}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
@@ -836,6 +844,7 @@ def describe_skill_env_snippet(env: dict[str, str], *, task_max: int = 160) -> s
         "SKILL_LOG_REL",
         "SKILL_RUN_DIR",
         "SKILL_RUN_DIR_REL",
+        "SKILL_RUN_STAMP",
         "SKILL_TASK_SHA256",
     )
     lines = [f"{k}={env.get(k, '')}" for k in keys]
@@ -1185,6 +1194,7 @@ def run_skill_iteration(
         repo_resolved = str(repo.resolve())
         skill_root_resolved = str((repo / args.skill_root).resolve())
         run_dir_resolved = str(run_dir.resolve())
+        run_stamp = skill_release_run_stamp(run_dir)
         write_skill_invocation_json(
             prompt_path=prompt_path,
             repo_root=repo_resolved,
@@ -1222,6 +1232,7 @@ def run_skill_iteration(
                 "SKILL_MAX_ITERATIONS": str(args.max_iterations),
                 "SKILL_TASK": args.task,
                 "SKILL_RUN_DIR": run_dir_resolved,
+                "SKILL_RUN_STAMP": run_stamp,
                 "SKILL_STEP_INDEX": str(step_index),
                 "SKILL_STEP_TOTAL": str(step_total),
                 "SKILL_PIPELINE_SHA256": pipeline_sha256,
@@ -1242,6 +1253,7 @@ def run_skill_iteration(
                 "prompt_file": str(prompt_path),
                 "log_file": str(log_path),
                 "run_dir": run_dir_resolved,
+                "run_stamp": run_stamp,
                 "repo": str(repo),
                 "iteration": str(iteration),
                 "max_iterations": str(args.max_iterations),
@@ -1467,6 +1479,7 @@ def run_checks(
             )
             fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
             run_dir_resolved = str(run_dir.resolve())
+            run_stamp = skill_release_run_stamp(run_dir)
             write_skill_invocation_json(
                 prompt_path=fix_prompt_path,
                 repo_root=str(repo.resolve()),
@@ -1495,6 +1508,7 @@ def run_checks(
                     "prompt_file": str(fix_prompt_path),
                     "log_file": str(fix_log_path),
                     "run_dir": run_dir_resolved,
+                    "run_stamp": run_stamp,
                     "repo": str(repo),
                     "iteration": str(iteration),
                     "max_iterations": str(args.max_iterations),
@@ -1521,6 +1535,7 @@ def run_checks(
                     "SKILL_MAX_ITERATIONS": str(args.max_iterations),
                     "SKILL_TASK": FIX_CHECK_TASK,
                     "SKILL_RUN_DIR": run_dir_resolved,
+                    "SKILL_RUN_STAMP": run_stamp,
                     "SKILL_STEP_INDEX": "0",
                     "SKILL_STEP_TOTAL": "0",
                     "SKILL_PIPELINE_SHA256": pipeline_sha256,
@@ -1880,6 +1895,7 @@ def run_pre_tag_github_ci_with_fixes(
         )
         fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
         run_dir_resolved = str(run_dir.resolve())
+        run_stamp = skill_release_run_stamp(run_dir)
         write_skill_invocation_json(
             prompt_path=fix_prompt_path,
             repo_root=str(repo.resolve()),
@@ -1908,6 +1924,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "prompt_file": str(fix_prompt_path),
                 "log_file": str(fix_log_path),
                 "run_dir": run_dir_resolved,
+                "run_stamp": run_stamp,
                 "repo": str(repo),
                 "iteration": str(passed_iteration),
                 "max_iterations": str(args.max_iterations),
@@ -1934,6 +1951,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "SKILL_MAX_ITERATIONS": str(args.max_iterations),
                 "SKILL_TASK": FIX_PRE_TAG_CI_TASK,
                 "SKILL_RUN_DIR": run_dir_resolved,
+                "SKILL_RUN_STAMP": run_stamp,
                 "SKILL_STEP_INDEX": "0",
                 "SKILL_STEP_TOTAL": "0",
                 "SKILL_PIPELINE_SHA256": pipeline_sha256,

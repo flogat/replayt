@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import json
 import sys
+import types
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, Union, get_args, get_origin
 
 import typer
 
@@ -234,6 +235,63 @@ def validation_report(
         "warnings": list(warnings),
         "errors": list(errors) + extra_errors,
     }
+
+
+def _json_placeholder_for_expected_type(tp: Any) -> Any:
+    """Pick a JSON-serializable placeholder for a single ``expects`` type annotation."""
+
+    if tp is object:
+        return None
+    origin = get_origin(tp)
+    args = get_args(tp)
+    if origin is not None:
+        if origin in (list,):
+            return []
+        if origin in (dict,):
+            return {}
+        if origin in (tuple,):
+            return []
+        if origin is types.UnionType or origin is Union:
+            non_none = [a for a in args if a is not type(None)]
+            if len(non_none) == 1:
+                return _json_placeholder_for_expected_type(non_none[0])
+            return None
+        return None
+    if tp is str:
+        return ""
+    if tp is int:
+        return 0
+    if tp is bool:
+        return False
+    if tp is float:
+        return 0.0
+    if tp in (list, tuple):
+        return []
+    if tp is dict:
+        return {}
+    return None
+
+
+def workflow_inputs_template(wf: Workflow) -> dict[str, Any]:
+    """Union of all ``@wf.step(..., expects=...)`` keys with type-shaped JSON placeholders.
+
+    When the same key is annotated with different types on different steps, the value is
+    ``null`` so callers fill it explicitly.
+    """
+
+    key_types: dict[str, set[type]] = {}
+    for name in wf.step_names():
+        for key, tp in wf.expects_for(name).items():
+            key_types.setdefault(key, set()).add(tp)
+    out: dict[str, Any] = {}
+    for key in sorted(key_types):
+        types_set = key_types[key]
+        if len(types_set) > 1:
+            out[key] = None
+        else:
+            (only,) = tuple(types_set)
+            out[key] = _json_placeholder_for_expected_type(only)
+    return out
 
 
 def validate_workflow_graph(wf: Workflow, *, strict_graph: bool = False) -> tuple[list[str], list[str]]:

@@ -132,7 +132,12 @@ def resolve_cli_target(explicit: str | None, *, cfg: dict[str, Any]) -> str:
     raise typer.BadParameter(
         "Missing workflow target: pass TARGET (MODULE:VAR or workflow file), "
         f"set {REPLAYT_TARGET_ENV}, or set `target = \"...\"` in [tool.replayt] / .replaytrc.toml "
-        "(see docs/CONFIG.md)."
+        "(see docs/CONFIG.md).\n"
+        "Examples:\n"
+        "  replayt run replayt_examples.e01_hello_world:wf --input customer_name=Sam\n"
+        "  replayt try --list\n"
+        "  replayt init\n"
+        "Docs: docs/QUICKSTART.md and src/replayt_examples/README.md."
     )
 
 
@@ -344,6 +349,401 @@ def build_cli_run_defaults_contract() -> dict[str, object]:
                 },
             ],
         },
+    }
+
+
+PROJECT_SETTING_PRECEDENCE_CONTRACT_SCHEMA = "replayt.project_setting_precedence_contract.v1"
+
+
+def build_project_setting_precedence_contract() -> dict[str, object]:
+    """Cwd-independent precedence for CLI / env / project merges beyond TARGET and default inputs.
+
+    Pairs with :func:`build_cli_run_defaults_contract` for a full platform picture without duplicating
+    workflow target or ``resolve_run_inputs_json`` ordering.
+    """
+
+    policy_hooks = [
+        {
+            "config_key": "export_hook",
+            "env_argv": "REPLAYT_EXPORT_HOOK",
+            "config_key_timeout": "export_hook_timeout",
+            "env_timeout": "REPLAYT_EXPORT_HOOK_TIMEOUT",
+        },
+        {
+            "config_key": "resume_hook",
+            "env_argv": "REPLAYT_RESUME_HOOK",
+            "config_key_timeout": "resume_hook_timeout",
+            "env_timeout": "REPLAYT_RESUME_HOOK_TIMEOUT",
+        },
+        {
+            "config_key": "run_hook",
+            "env_argv": "REPLAYT_RUN_HOOK",
+            "config_key_timeout": "run_hook_timeout",
+            "env_timeout": "REPLAYT_RUN_HOOK_TIMEOUT",
+        },
+        {
+            "config_key": "seal_hook",
+            "env_argv": "REPLAYT_SEAL_HOOK",
+            "config_key_timeout": "seal_hook_timeout",
+            "env_timeout": "REPLAYT_SEAL_HOOK_TIMEOUT",
+        },
+        {
+            "config_key": "verify_seal_hook",
+            "env_argv": "REPLAYT_VERIFY_SEAL_HOOK",
+            "config_key_timeout": "verify_seal_hook_timeout",
+            "env_timeout": "REPLAYT_VERIFY_SEAL_HOOK_TIMEOUT",
+        },
+    ]
+
+    return {
+        "schema": PROJECT_SETTING_PRECEDENCE_CONTRACT_SCHEMA,
+        "extends_cli_run_defaults_contract": CLI_RUN_DEFAULTS_CONTRACT_SCHEMA,
+        "extends_note": (
+            "Optional TARGET on replayt run / replayt ci and resolve_run_inputs_json ordering (including "
+            "doctor --target) are specified only in cli_run_defaults_contract; this object covers other "
+            "merged settings."
+        ),
+        "settings": [
+            {
+                "id": "approval_actor_required_keys",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "cli_require_actor_key",
+                        "description": (
+                            "When --require-actor-key is passed one or more times, those names win; project "
+                            "approval_actor_required_keys is ignored."
+                        ),
+                    },
+                    {
+                        "order": 2,
+                        "id": "project_config_approval_actor_required_keys",
+                        "config_key": "approval_actor_required_keys",
+                        "description": "Otherwise normalized list from project config when present.",
+                    },
+                    {
+                        "order": 3,
+                        "id": "unset_empty_tuple",
+                        "description": "Otherwise empty (no required actor keys).",
+                    },
+                ],
+            },
+            {
+                "id": "approval_reason_required",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "cli_require_reason",
+                        "description": "When --require-reason is passed, policy is on regardless of project config.",
+                    },
+                    {
+                        "order": 2,
+                        "id": "project_config_approval_reason_required",
+                        "config_key": "approval_reason_required",
+                        "description": "Otherwise boolean from project config when the key is present.",
+                    },
+                    {
+                        "order": 3,
+                        "id": "unset_false",
+                        "description": "Otherwise false.",
+                    },
+                ],
+            },
+            {
+                "id": "forbid_log_mode_full",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "env_REPLAYT_FORBID_LOG_MODE_FULL",
+                        "env": REPLAYT_FORBID_LOG_MODE_FULL_ENV,
+                        "description": (
+                            "When set in the environment, any non-empty value except 0/false/no/off forces the "
+                            "policy on; those falsy strings force it off even when project config sets "
+                            "forbid_log_mode_full."
+                        ),
+                    },
+                    {
+                        "order": 2,
+                        "id": "project_config_forbid_log_mode_full",
+                        "config_key": "forbid_log_mode_full",
+                        "description": "Otherwise true when forbid_log_mode_full is truthy in project config.",
+                    },
+                    {
+                        "order": 3,
+                        "id": "unset_false",
+                        "description": "Otherwise false.",
+                    },
+                ],
+            },
+            {
+                "id": "llm_client_defaults",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "env_REPLAYT_PROVIDER",
+                        "env": "REPLAYT_PROVIDER",
+                        "description": "Provider preset name when non-empty; else project provider; else ollama.",
+                    },
+                    {
+                        "order": 2,
+                        "id": "env_REPLAYT_MODEL",
+                        "env": "REPLAYT_MODEL",
+                        "description": "Model id when non-empty; else project model; else provider default.",
+                    },
+                    {
+                        "order": 3,
+                        "id": "env_OPENAI_BASE_URL",
+                        "env": "OPENAI_BASE_URL",
+                        "description": "Base URL when non-empty; else built-in preset for the resolved provider.",
+                    },
+                    {
+                        "order": 4,
+                        "id": "env_OPENAI_API_KEY",
+                        "env": "OPENAI_API_KEY",
+                        "description": "API key for the default OpenAI-compat client (env only; not read from TOML).",
+                    },
+                ],
+            },
+            {
+                "id": "log_directory",
+                "applies_when": (
+                    "CLI --log-dir equals the built-in default (.replayt/runs). A non-default --log-dir is used "
+                    "as-is with no project or env fallback."
+                ),
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "project_config_log_dir",
+                        "config_key": "log_dir",
+                        "description": (
+                            "When log_dir is set in resolved project config, that path (relative to the config file) "
+                            "replaces the default root."
+                        ),
+                    },
+                    {
+                        "order": 2,
+                        "id": "env_REPLAYT_LOG_DIR",
+                        "env": "REPLAYT_LOG_DIR",
+                        "description": "When project log_dir is unset, non-empty REPLAYT_LOG_DIR replaces the default.",
+                    },
+                    {
+                        "order": 3,
+                        "id": "builtin_default",
+                        "description": "Otherwise .replayt/runs under cwd (DEFAULT_LOG_DIR).",
+                    },
+                ],
+            },
+            {
+                "id": "log_mode",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "project_config_when_cli_redacted_string",
+                        "config_key": "log_mode",
+                        "description": (
+                            "When the effective --log-mode value is the string redacted and project log_mode is set, "
+                            "project log_mode wins (Typer cannot distinguish omitted --log-mode from an explicit "
+                            "redacted pass)."
+                        ),
+                    },
+                    {
+                        "order": 2,
+                        "id": "cli_log_mode_other_values",
+                        "description": "When the effective --log-mode value is not redacted, that CLI value wins.",
+                    },
+                    {
+                        "order": 3,
+                        "id": "default_redacted",
+                        "description": "Otherwise redacted with source default:redacted.",
+                    },
+                ],
+            },
+            {
+                "id": "min_replayt_version",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "project_config_only",
+                        "config_key": "min_replayt_version",
+                        "description": (
+                            "Only [tool.replayt] / .replaytrc.toml; no CLI or env override. Enforced on mutating "
+                            "CLI entrypoints via enforce_min_replayt_version_cli."
+                        ),
+                    }
+                ],
+            },
+            {
+                "id": "policy_hook_context_json",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "cli_policy_hook_context_json",
+                        "description": (
+                            "Non-empty --policy-hook-context-json on run / ci / resume / export-run / "
+                            "bundle-export / seal / verify-seal (object or @path); canonical sorted JSON."
+                        ),
+                    },
+                    {
+                        "order": 2,
+                        "id": "env_REPLAYT_POLICY_HOOK_CONTEXT_JSON",
+                        "env": REPLAYT_POLICY_HOOK_CONTEXT_JSON_ENV,
+                        "description": "When CLI omits the flag, non-empty env string is parsed as JSON object.",
+                    },
+                    {
+                        "order": 3,
+                        "id": "project_config_policy_hook_context_json",
+                        "config_key": "policy_hook_context_json",
+                        "description": "When env is unset, non-empty project policy_hook_context_json string.",
+                    },
+                    {
+                        "order": 4,
+                        "id": "unset_none",
+                        "description": "Otherwise not forwarded to hooks.",
+                    },
+                ],
+            },
+            {
+                "id": "redact_keys",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "cli_redact_key",
+                        "description": "When --redact-key is passed one or more times, those names win.",
+                    },
+                    {
+                        "order": 2,
+                        "id": "project_config_redact_keys",
+                        "config_key": "redact_keys",
+                        "description": "Otherwise normalized list from project config when present.",
+                    },
+                    {
+                        "order": 3,
+                        "id": "unset_empty_tuple",
+                        "description": "Otherwise empty.",
+                    },
+                ],
+            },
+            {
+                "id": "sqlite_mirror_path",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "cli_sqlite",
+                        "description": "When --sqlite is passed, that path wins.",
+                    },
+                    {
+                        "order": 2,
+                        "id": "project_config_sqlite",
+                        "config_key": "sqlite",
+                        "description": "Otherwise sqlite path from project config when set (relative to config file).",
+                    },
+                    {
+                        "order": 3,
+                        "id": "unset_none",
+                        "description": "Otherwise no SQLite mirror.",
+                    },
+                ],
+            },
+            {
+                "id": "strict_mirror_policy",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "project_config_strict_mirror",
+                        "config_key": "strict_mirror",
+                        "description": "When strict_mirror is present in project config, its boolean value wins.",
+                    },
+                    {
+                        "order": 2,
+                        "id": "implicit_strict_when_sqlite",
+                        "description": (
+                            "When strict_mirror is omitted, strict mirroring is true if a SQLite path resolved "
+                            "from CLI or project config; false when no mirror path."
+                        ),
+                    },
+                ],
+            },
+            {
+                "id": "subprocess_timeout_seconds",
+                "commands": ["ci", "run"],
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "child_process_disabled",
+                        "description": (
+                            "When replayt run --timeout isolates the workflow in a child, timeout is unset in the "
+                            "parent path."
+                        ),
+                    },
+                    {
+                        "order": 2,
+                        "id": "cli_timeout",
+                        "description": "When --timeout is set on the parent CLI, that integer wins.",
+                    },
+                    {
+                        "order": 3,
+                        "id": "project_config_timeout",
+                        "config_key": "timeout",
+                        "description": "Otherwise project timeout when set.",
+                    },
+                    {
+                        "order": 4,
+                        "id": "unset_none",
+                        "description": "Otherwise unset (provider default HTTP behavior).",
+                    },
+                ],
+            },
+            {
+                "id": "trusted_policy_hook_argv",
+                "merge_policy": "replace_not_concatenate",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "env_hook_string",
+                        "description": (
+                            "Non-empty env hook string wins; argv is shlex.split with posix=True on Unix and "
+                            "posix=False on Windows. There is no argv merge with TOML."
+                        ),
+                    },
+                    {
+                        "order": 2,
+                        "id": "project_config_hook",
+                        "description": (
+                            "Otherwise list of strings or one shell string from project config for that hook key."
+                        ),
+                    },
+                    {
+                        "order": 3,
+                        "id": "unset_none",
+                        "description": "Otherwise hook is disabled.",
+                    },
+                ],
+                "hooks": policy_hooks,
+            },
+            {
+                "id": "trusted_policy_hook_timeouts",
+                "precedence": [
+                    {
+                        "order": 1,
+                        "id": "env_hook_timeout",
+                        "description": (
+                            "Non-empty env timeout overrides project; parsed as float; value <= 0 means unlimited."
+                        ),
+                    },
+                    {
+                        "order": 2,
+                        "id": "project_config_hook_timeout",
+                        "description": "Otherwise project *_hook_timeout when set (same <= 0 unlimited rule).",
+                    },
+                    {
+                        "order": 3,
+                        "id": "default_120_seconds",
+                        "description": "Otherwise 120 seconds.",
+                    },
+                ],
+                "hooks": policy_hooks,
+            },
+        ],
     }
 
 

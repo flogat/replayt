@@ -20,8 +20,6 @@ replayt is a **small FSM runner, a local JSONL audit log, and a CLI**. This page
 
 **If you need another framework:** keep it **inside one `@wf.step`**. Validate one Pydantic outcome, then `return "next_state"`; see **Pattern: framework in a sandbox step** in [`EXAMPLES_PATTERNS.md`](EXAMPLES_PATTERNS.md).
 
-**Use the other tool when:** You want the framework to own exploration, dynamic graph mutation, or long-lived autonomous sessions.
-
 ## Temporal / Cadence / distributed workflow engines
 
 **Temporal and similar engines** ship durable timers, cluster-scale orchestration, and activity retries across process boundaries.

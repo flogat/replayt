@@ -150,3 +150,19 @@ def test_replay_html_stakeholder_attention_and_no_tool_call_in_body() -> None:
     assert "boom" in doc
     assert "0002  tool_call" not in doc
     assert "Run timeline" in doc
+    assert "Stakeholder CLI handoff" in doc
+    assert "replayt bundle-export run-z --out run-z-stakeholder-bundle.tar.gz" in doc
+
+
+def test_replay_html_support_includes_stakeholder_handoff() -> None:
+    events = [
+        {
+            "seq": 1,
+            "type": "run_started",
+            "payload": {"workflow_name": "w", "workflow_version": "1"},
+        },
+        {"seq": 2, "type": "run_completed", "payload": {"status": "completed"}},
+    ]
+    doc = replay_html("rid-support", events, style="support")
+    assert "Stakeholder CLI handoff" in doc
+    assert "--report-style support" in doc

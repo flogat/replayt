@@ -22,6 +22,26 @@ def _sha256_json(value: object) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def test_workflow_llm_defaults_http_retries_merge_into_effective(tmp_path: Path) -> None:
+    wf = Workflow("ld", llm_defaults={"http_retries": 2})
+    wf.set_initial("s")
+
+    @wf.step("s")
+    def s(ctx):
+        ctx.llm.complete_text(messages=[{"role": "user", "content": "x"}], temperature=0.0)
+        return None
+
+    store = JSONLStore(tmp_path)
+    client = MockLLMClient()
+    client.enqueue("ok")
+    r = Runner(wf, store, log_mode=LogMode.redacted, llm_client=client)
+    res = r.run()
+    assert res.status == "completed"
+    ev = store.load_events(res.run_id)
+    req = next(e for e in ev if e["type"] == "llm_request")
+    assert req["payload"]["effective"]["http_retries"] == 2
+
+
 def test_workflow_llm_defaults_merge_into_effective(tmp_path: Path) -> None:
     wf = Workflow("ld", llm_defaults={"experiment": {"cohort": "unit"}})
     wf.set_initial("s")

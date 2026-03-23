@@ -42,6 +42,8 @@ from replayt.cli.run_support import (
     invoke_verify_seal_hook,
     run_started_hook_json_blobs_from_events,
     run_started_hook_json_blobs_from_jsonl_path,
+    run_started_inputs_json_from_events,
+    run_started_inputs_json_from_jsonl_path,
     seal_hook_argv,
     seal_hook_audit,
     verify_seal_hook_argv,
@@ -93,6 +95,7 @@ def _maybe_invoke_export_hook(
         return None
     hook_timeout = export_hook_timeout_seconds(cfg)
     meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_events(events)
+    inputs_j = run_started_inputs_json_from_events(events)
     try:
         invoke_export_hook(
             hook,
@@ -112,6 +115,7 @@ def _maybe_invoke_export_hook(
             tags_json=tags_j,
             experiment_json=exp_j,
             workflow_meta_json=wf_meta_j,
+            inputs_json=inputs_j,
             policy_hook_context_json=policy_hook_context_json,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
@@ -145,6 +149,7 @@ def _maybe_invoke_seal_hook(
     hook_timeout = seal_hook_timeout_seconds(cfg)
     workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
     meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
+    inputs_j = run_started_inputs_json_from_jsonl_path(jsonl_path)
     try:
         invoke_seal_hook(
             hook,
@@ -159,6 +164,7 @@ def _maybe_invoke_seal_hook(
             tags_json=tags_j,
             experiment_json=exp_j,
             workflow_meta_json=wf_meta_j,
+            inputs_json=inputs_j,
             policy_hook_context_json=policy_hook_context_json,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
@@ -194,6 +200,7 @@ def _maybe_invoke_verify_seal_hook(
     hook_timeout = verify_seal_hook_timeout_seconds(cfg)
     workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
     meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
+    inputs_j = run_started_inputs_json_from_jsonl_path(jsonl_path)
     try:
         invoke_verify_seal_hook(
             hook,
@@ -210,6 +217,7 @@ def _maybe_invoke_verify_seal_hook(
             tags_json=tags_j,
             experiment_json=exp_j,
             workflow_meta_json=wf_meta_j,
+            inputs_json=inputs_j,
             policy_hook_context_json=policy_hook_context_json,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )

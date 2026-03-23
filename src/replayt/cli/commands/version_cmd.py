@@ -12,10 +12,12 @@ import typer
 import replayt
 from replayt.cli.config import (
     CLI_RUN_DEFAULTS_CONTRACT_SCHEMA,
+    PROJECT_SETTING_PRECEDENCE_CONTRACT_SCHEMA,
     SUPPORTED_CONFIG_KEYS,
     build_cli_run_defaults_contract,
     build_project_config_discovery_report,
     build_project_config_resolution_report,
+    build_project_setting_precedence_contract,
 )
 from replayt.cli.distribution_metadata import DISTRIBUTION_METADATA_SCHEMA, build_distribution_metadata_report
 from replayt.cli.path_readiness import build_operational_paths_report
@@ -99,6 +101,7 @@ def build_version_report() -> dict[str, object]:
         "project_config_discovery": build_project_config_discovery_report(),
         "project_config_resolution": build_project_config_resolution_report(),
         "cli_run_defaults_contract": build_cli_run_defaults_contract(),
+        "project_setting_precedence_contract": build_project_setting_precedence_contract(),
         "operational_paths": build_operational_paths_report(),
         "distribution_metadata": build_distribution_metadata_report(),
         "skill_loop_env_contract": build_skill_loop_env_contract(),
@@ -108,6 +111,7 @@ def build_version_report() -> dict[str, object]:
             "project_config_discovery": "replayt.project_config_discovery.v1",
             "project_config_resolution": "replayt.project_config_resolution.v1",
             "cli_run_defaults_contract": CLI_RUN_DEFAULTS_CONTRACT_SCHEMA,
+            "project_setting_precedence_contract": PROJECT_SETTING_PRECEDENCE_CONTRACT_SCHEMA,
             "workflow_contract": "replayt.workflow_contract.v1",
             "workflow_contract_check": "replayt.workflow_contract_check.v1",
             "validate_report": "replayt.validate_report.v1",

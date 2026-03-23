@@ -15,6 +15,20 @@ from replayt.runner import RunResult
 from replayt.workflow import Workflow
 
 
+def _ulimit_nofile_pair() -> tuple[int | None, int | None]:
+    """Best-effort RLIMIT_NOFILE soft/hard caps (POSIX only)."""
+
+    if os.name != "posix":
+        return None, None
+    try:
+        import resource
+
+        soft, hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (AttributeError, OSError, ValueError):
+        return None, None
+    return int(soft), int(hard)
+
+
 @dataclass(frozen=True)
 class ResolvedCIArtifacts:
     junit_xml: Path | None
@@ -27,7 +41,7 @@ class ResolvedCIArtifacts:
     github_step_summary_source: str
 
 
-def ci_run_summary_runtime_fields() -> dict[str, str]:
+def ci_run_summary_runtime_fields() -> dict[str, Any]:
     """Stable host/interpreter stamps for machine-readable CI summaries."""
 
     try:
@@ -37,6 +51,8 @@ def ci_run_summary_runtime_fields() -> dict[str, str]:
     except ImportError:
         replayt_version = "unknown"
     vi = sys.version_info
+    fs_enc = sys.getfilesystemencoding()
+    soft, hard = _ulimit_nofile_pair()
     return {
         "replayt_version": replayt_version,
         "python_version": f"{vi.major}.{vi.minor}.{vi.micro}",
@@ -44,6 +60,10 @@ def ci_run_summary_runtime_fields() -> dict[str, str]:
         "python_executable": sys.executable,
         "platform": sys.platform,
         "machine": platform.machine(),
+        "filesystem_encoding": fs_enc if fs_enc is not None else "",
+        "stdout_encoding": getattr(sys.stdout, "encoding", None),
+        "ulimit_nofile_soft": soft,
+        "ulimit_nofile_hard": hard,
     }
 
 

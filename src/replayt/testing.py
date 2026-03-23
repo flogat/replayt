@@ -183,6 +183,7 @@ class DryRunLLMClient(OpenAICompatClient):
         extra_body: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | None = None,
+        http_retries: int | None = None,
     ) -> dict[str, Any]:
         _ = (
             model,
@@ -197,6 +198,7 @@ class DryRunLLMClient(OpenAICompatClient):
             extra_headers,
             extra_body,
             stop,
+            http_retries,
         )
         content = "{}"
         if response_format and isinstance(response_format, dict):
@@ -253,6 +255,7 @@ class MockLLMClient(OpenAICompatClient):
         extra_body: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | None = None,
+        http_retries: int | None = None,
     ) -> dict[str, Any]:
         _ = (
             messages,
@@ -269,6 +272,7 @@ class MockLLMClient(OpenAICompatClient):
             extra_body,
             response_format,
             stop,
+            http_retries,
         )
         if not self._responses:
             raise RuntimeError("MockLLMClient: no queued response; call .enqueue(...) before running the workflow")

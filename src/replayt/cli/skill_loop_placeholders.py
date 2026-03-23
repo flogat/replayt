@@ -57,6 +57,12 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
             description="Absolute path to the skill-release run directory. Same as env SKILL_RUN_DIR.",
         ),
         _row(
+            name="run_stamp",
+            description=(
+                "Basename of the run directory (for example YYYYMMDD-HHMMSS). Same as env SKILL_RUN_STAMP."
+            ),
+        ),
+        _row(
             name="skill",
             description=(
                 "Resolved skill folder name for normal steps; fix_check or fix_pre_tag_ci for automated fix rounds. "

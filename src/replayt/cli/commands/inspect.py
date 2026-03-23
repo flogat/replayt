@@ -45,7 +45,11 @@ from replayt.cli.display import (
 from replayt.cli.run_id_hints import echo_missing_run_hints
 from replayt.cli.stores import read_store
 from replayt.cli.targets import load_target
-from replayt.cli.validation import validate_workflow_graph, validation_report
+from replayt.cli.validation import (
+    validate_workflow_graph,
+    validation_report,
+    workflow_inputs_template,
+)
 from replayt.graph_export import workflow_to_mermaid
 from replayt.persistence import JSONLStore, SQLiteStore
 
@@ -661,6 +665,15 @@ def cmd_validate(
         "--experiment-json",
         help="Optional experiment JSON object (parse check).",
     ),
+    print_inputs_template: bool = typer.Option(
+        False,
+        "--print-inputs-template",
+        help=(
+            "After a successful graph check, print a compact JSON object on stdout: union of every "
+            "@wf.step(expects=...) key with type-shaped placeholders (conflicting types use null). "
+            "Mutually exclusive with --format json."
+        ),
+    ),
     output: Literal["text", "json"] = typer.Option(
         "text",
         "--format",
@@ -669,6 +682,9 @@ def cmd_validate(
     ),
 ) -> None:
     """Validate a workflow graph without calling any LLM (useful in CI)."""
+
+    if print_inputs_template and output == "json":
+        raise typer.BadParameter("Cannot combine --print-inputs-template with --format json (stdout conflict).")
 
     wf = load_target(target)
     errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
@@ -696,6 +712,14 @@ def cmd_validate(
         raise typer.Exit(code=1)
     for w in warnings:
         typer.echo(f"Warning: {w}", err=True)
+    if print_inputs_template:
+        tpl = workflow_inputs_template(wf)
+        typer.echo(json.dumps(tpl, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
+        typer.echo(
+            "Tip: stdout is the template only; redirect to a file or pass via --inputs-json @path.",
+            err=True,
+        )
+        raise typer.Exit(code=0)
     typer.echo(
         f"OK: {wf.name}@{wf.version} ({len(wf.step_names())} states, {len(wf.edges())} edges)"
     )

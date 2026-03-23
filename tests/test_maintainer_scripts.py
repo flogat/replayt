@@ -771,6 +771,14 @@ def test_pyproject_pep621_report_real_repo() -> None:
     assert proj["name"] == "replayt"
     assert isinstance(proj["version"], str) and len(proj["version"]) > 0
     assert "httpx" in " ".join(proj["dependencies"])
+    assert isinstance(proj["description"], str) and len(proj["description"]) > 0
+    assert proj["readme_file"] == "README.md"
+    assert proj["license_expression"] == "Apache-2.0"
+    assert "deterministic" in proj["keywords"]
+    assert "Typing :: Typed" in proj["classifiers"]
+    assert proj["authors"] == [{"name": "replayt contributors", "email": None}]
+    assert proj["maintainers"] == []
+    assert proj["urls"] == {}
 
 
 def test_example_catalog_contract_real_repo_snapshot_matches() -> None:
@@ -815,6 +823,81 @@ def test_pyproject_pep621_report_ok_minimal(tmp_path: Path) -> None:
     assert proj["dependencies"] == ["httpx>=1", "pydantic>=2"]
     assert proj["optional_dependencies"] == {"dev": ["pytest>=8"]}
     assert proj["optional_dependency_extras"] == ["dev"]
+    assert proj["description"] is None
+    assert proj["readme_file"] is None
+    assert proj["readme_content_type"] is None
+    assert proj["readme_text_sha256"] is None
+    assert proj["license_expression"] is None
+    assert proj["license_file"] is None
+    assert proj["license_text_sha256"] is None
+    assert proj["keywords"] == []
+    assert proj["classifiers"] == []
+    assert proj["urls"] == {}
+    assert proj["authors"] == []
+    assert proj["maintainers"] == []
+
+
+def test_pyproject_pep621_report_urls_readme_license_authors(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project]
+        name = "demo"
+        version = "1.0.0"
+        readme = { file = "README.md", content-type = "text/markdown" }
+        license = { file = "LICENSE" }
+        keywords = ["zebra", "apple"]
+        dependencies = []
+        [[project.authors]]
+        name = "Zoe"
+        email = "z@example.com"
+        [[project.authors]]
+        name = "Amy"
+        [project.urls]
+        Homepage = "https://example.com"
+        Documentation = "https://docs.example.com"
+        """,
+    )
+    mod = _load_script("pyproject_pep621_urls", "pyproject_pep621_report.py")
+    report = mod.pyproject_pep621_report(tmp_path / "pyproject.toml")
+
+    assert report["ok"] is True
+    proj = report["project"]
+    assert proj["readme_file"] == "README.md"
+    assert proj["readme_content_type"] == "text/markdown"
+    assert proj["readme_text_sha256"] is None
+    assert proj["license_file"] == "LICENSE"
+    assert proj["license_expression"] is None
+    assert proj["keywords"] == ["apple", "zebra"]
+    assert proj["urls"] == {
+        "Documentation": "https://docs.example.com",
+        "Homepage": "https://example.com",
+    }
+    assert proj["authors"] == [
+        {"name": "Amy", "email": None},
+        {"name": "Zoe", "email": "z@example.com"},
+    ]
+
+
+def test_pyproject_pep621_report_inline_readme_text_sha256(tmp_path: Path) -> None:
+    _write(
+        tmp_path / "pyproject.toml",
+        """
+        [project]
+        name = "demo"
+        version = "1.0.0"
+        readme = { text = "Hello", content-type = "text/markdown" }
+        dependencies = []
+        """,
+    )
+    mod = _load_script("pyproject_pep621_readme_inline", "pyproject_pep621_report.py")
+    report = mod.pyproject_pep621_report(tmp_path / "pyproject.toml")
+
+    assert report["ok"] is True
+    proj = report["project"]
+    assert proj["readme_file"] is None
+    assert proj["readme_content_type"] == "text/markdown"
+    assert proj["readme_text_sha256"] == hashlib.sha256(b"Hello").hexdigest()
 
 
 def test_pyproject_pep621_report_sorted_lists(tmp_path: Path) -> None:

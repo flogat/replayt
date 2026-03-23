@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import time
 from collections.abc import Callable
@@ -12,6 +13,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from replayt.llm_coercion import (
+    coerce_http_retries,
     coerce_llm_extra_body,
     coerce_llm_seed,
     coerce_llm_stop_sequences,
@@ -320,6 +322,28 @@ class LLMSettings:
 _RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
 _RETRY_BASE_DELAY = 1.0
 _RETRY_MAX_DELAY = 30.0
+
+
+def _retry_after_delay_seconds(raw: str | None) -> float:
+    """Parse ``Retry-After`` as a non-negative delay in seconds (numeric form only).
+
+    HTTP-date values are ignored (``float`` parse fails). Non-finite or negative
+    values fall back to :data:`_RETRY_BASE_DELAY` so :func:`time.sleep` never
+    sees invalid durations.
+    """
+
+    if raw is None:
+        return _RETRY_BASE_DELAY
+    s = str(raw).strip()
+    if not s:
+        return _RETRY_BASE_DELAY
+    try:
+        delay = float(s)
+    except (ValueError, TypeError):
+        return _RETRY_BASE_DELAY
+    if not math.isfinite(delay) or delay < 0:
+        return _RETRY_BASE_DELAY
+    return delay
 _CHAT_COMPLETIONS_RESERVED_FIELDS = frozenset(
     {
         "model",
@@ -414,6 +438,7 @@ class OpenAICompatClient:
         extra_body: dict[str, Any] | None = None,
         response_format: dict[str, Any] | None = None,
         stop: list[str] | None = None,
+        http_retries: int | None = None,
     ) -> dict[str, Any]:
         url = (base_url or self.settings.base_url).rstrip("/") + "/chat/completions"
         eff_max = max_tokens if max_tokens is not None else self.settings.max_tokens
@@ -458,7 +483,8 @@ class OpenAICompatClient:
         if self.settings.api_key:
             headers["Authorization"] = f"Bearer {self.settings.api_key}"
         timeout = timeout_seconds if timeout_seconds is not None else self.settings.timeout_seconds
-        max_attempts = max(self.settings.http_retries + 1, 1)
+        retry_budget = self.settings.http_retries if http_retries is None else http_retries
+        max_attempts = max(retry_budget + 1, 1)
         cap = self.settings.max_response_bytes
         drain_cap = min(cap, 65_536)
 
@@ -469,11 +495,10 @@ class OpenAICompatClient:
                     if r.status_code in _RETRYABLE_STATUS_CODES and attempt < max_attempts - 1:
                         _drain_stream_with_limit(r, drain_cap)
                         retry_after = r.headers.get("retry-after")
-                        try:
-                            delay = float(retry_after) if retry_after else _RETRY_BASE_DELAY
-                        except (ValueError, TypeError):
-                            delay = _RETRY_BASE_DELAY
-                        delay = min(delay * (2**attempt), _RETRY_MAX_DELAY)
+                        delay = min(
+                            _retry_after_delay_seconds(retry_after) * (2**attempt),
+                            _RETRY_MAX_DELAY,
+                        )
                         time.sleep(delay)
                         continue
                     if r.status_code == 401:
@@ -542,6 +567,7 @@ class LLMBridge:
         response_format: dict[str, Any] | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
         call_label: str | None = None,
+        http_retries: int | None = None,
     ) -> LLMBridge:
         """Return a new bridge with merged per-call defaults (logged on each request as ``effective``)."""
 
@@ -601,6 +627,8 @@ class LLMBridge:
                 merged["call_label"] = coerced_label
             else:
                 merged.pop("call_label", None)
+        if http_retries is not None:
+            merged["http_retries"] = coerce_http_retries(http_retries)
         if response_format is not None:
             if response_format == {}:
                 merged.pop("response_format", None)
@@ -630,6 +658,7 @@ class LLMBridge:
         extra_headers: dict[str, str] | None,
         extra_body: dict[str, Any] | None,
         stop: list[str] | tuple[str, ...] | str | None,
+        http_retries: int | None = None,
     ) -> tuple[dict[str, Any], dict[str, str], str, dict[str, Any] | None]:
         d = self._defaults
         base = self._client.settings
@@ -688,6 +717,12 @@ class LLMBridge:
         if eff_timeout is None:
             eff_timeout = base.timeout_seconds
         eff_timeout = coerce_timeout_seconds(eff_timeout)
+        if http_retries is not None:
+            eff_http_retries = coerce_http_retries(http_retries)
+        elif "http_retries" in d:
+            eff_http_retries = coerce_http_retries(d["http_retries"])
+        else:
+            eff_http_retries = coerce_http_retries(base.http_retries)
         hdrs: dict[str, str] = {}
         hdrs.update(dict(base.extra_headers or {}))
         hdrs.update(dict(d.get("extra_headers") or {}))
@@ -728,6 +763,7 @@ class LLMBridge:
             "seed": eff_seed,
             "max_tokens": eff_max,
             "timeout_seconds": eff_timeout,
+            "http_retries": eff_http_retries,
             "extra_header_names": sorted(hdrs.keys()),
         }
         if eff_provider is not None:
@@ -773,6 +809,7 @@ class LLMBridge:
         schema_json: dict[str, Any] | None = None,
         schema_name: str | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
+        http_retries: int | None = None,
     ) -> tuple[str, dict[str, Any], dict[str, str], dict[str, Any]]:
         state = self._state_getter()
         effective, hdrs, eff_base_url, eff_extra_body = self._merge_call(
@@ -789,6 +826,7 @@ class LLMBridge:
             extra_headers=extra_headers,
             extra_body=extra_body,
             stop=stop,
+            http_retries=http_retries,
         )
         if effective_extras:
             effective = {**effective, **effective_extras}
@@ -806,6 +844,7 @@ class LLMBridge:
         eff_max = effective["max_tokens"]
         eff_timeout = float(effective["timeout_seconds"])
         eff_stop_list = list(effective["stop"]) if effective.get("stop") else None
+        eff_http_retries = int(effective["http_retries"])
 
         req_payload: dict[str, Any] = {"state": state, "effective": effective}
         req_payload.update(fingerprints)
@@ -840,6 +879,7 @@ class LLMBridge:
             extra_body=eff_extra_body,
             response_format=response_format,
             stop=eff_stop_list,
+            http_retries=eff_http_retries,
         )
         dt_ms = int((time.perf_counter() - t0) * 1000)
         choice = (data.get("choices") or [{}])[0]
@@ -953,6 +993,7 @@ class LLMBridge:
         stop: list[str] | tuple[str, ...] | str | None = None,
         schema_name: str | None = None,
         response_format: Any = _RF_UNSET,
+        http_retries: int | None = None,
     ) -> str:
         sn = str(schema_name).strip() if schema_name is not None else None
         if response_format is _RF_UNSET:
@@ -979,6 +1020,7 @@ class LLMBridge:
             response_format=rf_call,
             stop=stop,
             schema_name=sn or None,
+            http_retries=http_retries,
         )
         return text
 
@@ -1001,6 +1043,7 @@ class LLMBridge:
         extra_body: dict[str, Any] | None = None,
         native_response_format: bool | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
+        http_retries: int | None = None,
     ) -> T:
         use_native_response_format = (
             bool(self._defaults.get("native_response_format"))
@@ -1027,6 +1070,7 @@ class LLMBridge:
                 extra_headers=extra_headers,
                 extra_body=extra_body,
                 stop=stop,
+                http_retries=http_retries,
             )
             effective_schema_limit = {**eff_pre, "structured_output_mode": structured_output_mode}
             exc = ValueError(
@@ -1068,6 +1112,7 @@ class LLMBridge:
             schema_json=schema_json,
             schema_name=model_type.__name__,
             stop=stop,
+            http_retries=http_retries,
         )
         cap = self._client.settings.max_parse_response_chars
         if len(text) > cap:

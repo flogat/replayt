@@ -52,6 +52,50 @@ def _stream_cm(resp: _FakeStreamResp):
     yield resp
 
 
+def test_llm_bridge_with_settings_http_retries_in_effective_and_client() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="test-key", model="base-model", http_retries=0)
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s").with_settings(
+        http_retries=2
+    )
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["http_retries"] == 2
+    assert mock_cc.call_args.kwargs["http_retries"] == 2
+
+
+def test_llm_bridge_complete_text_http_retries_kw_overrides_defaults() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="k", model="m")
+    client = OpenAICompatClient(settings)
+    bridge = (
+        LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s").with_settings(
+            http_retries=1
+        )
+    )
+    canned = {"choices": [{"message": {"content": "x"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned) as mock_cc:
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], http_retries=4)
+
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["http_retries"] == 4
+    assert mock_cc.call_args.kwargs["http_retries"] == 4
+
+
 def test_llm_bridge_with_settings_merges_experiment_into_effective() -> None:
     events: list[tuple[str, dict]] = []
 
@@ -889,6 +933,85 @@ def test_openai_compat_401_with_api_key_hints_key_or_url() -> None:
         client.chat_completions(messages=[{"role": "user", "content": "x"}])
     assert "OPENAI_API_KEY" in str(excinfo.value)
     assert "unset" not in str(excinfo.value).lower()
+
+
+def test_retry_after_delay_seconds_numeric_only() -> None:
+    from replayt.llm import _RETRY_BASE_DELAY, _retry_after_delay_seconds
+
+    assert _retry_after_delay_seconds(None) == _RETRY_BASE_DELAY
+    assert _retry_after_delay_seconds("") == _RETRY_BASE_DELAY
+    assert _retry_after_delay_seconds("  ") == _RETRY_BASE_DELAY
+    assert _retry_after_delay_seconds("-3") == _RETRY_BASE_DELAY
+    assert _retry_after_delay_seconds("nan") == _RETRY_BASE_DELAY
+    assert _retry_after_delay_seconds("inf") == _RETRY_BASE_DELAY
+    assert _retry_after_delay_seconds("Wed, 21 Oct 2015 07:28:00 GMT") == _RETRY_BASE_DELAY
+    assert _retry_after_delay_seconds("5") == 5.0
+
+
+def test_openai_compat_retries_429_negative_retry_after_still_sleeps_base_delay() -> None:
+    body_ok = b'{"choices":[{"message":{"content":"{}"}}]}'
+    statuses = iter([429, 200])
+    sleeps: list[float] = []
+
+    def responder(*_a, **_k):
+        st = next(statuses)
+        body = body_ok if st == 200 else b"{}"
+        h = {"retry-after": "-9"} if st == 429 else {}
+        return _stream_cm(_FakeStreamResp(body, status=st, headers=h))
+
+    fake_http = _FakeHTTPClient(responder)
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", http_retries=1),
+        http_client=fake_http,
+    )
+
+    def capture(d: float) -> None:
+        sleeps.append(d)
+
+    with patch("replayt.llm.time.sleep", side_effect=capture):
+        client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    assert len(fake_http.calls) == 2
+    assert len(sleeps) == 1
+    assert sleeps[0] == pytest.approx(1.0)
+
+
+def test_openai_compat_retries_503_then_succeeds() -> None:
+    body_ok = b'{"choices":[{"message":{"content":"{}"}}]}'
+    statuses = iter([503, 200])
+
+    def responder(*_a, **_k):
+        st = next(statuses)
+        body = body_ok if st == 200 else b"{}"
+        return _stream_cm(_FakeStreamResp(body, status=st))
+
+    fake_http = _FakeHTTPClient(responder)
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", http_retries=1),
+        http_client=fake_http,
+    )
+    with patch("replayt.llm.time.sleep", return_value=None):
+        data = client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    assert data["choices"][0]["message"]["content"] == "{}"
+    assert len(fake_http.calls) == 2
+
+
+def test_openai_compat_http_retries_kw_overrides_settings() -> None:
+    body_ok = b'{"choices":[{"message":{"content":"{}"}}]}'
+    statuses = iter([503, 503, 200])
+
+    def responder(*_a, **_k):
+        st = next(statuses)
+        body = body_ok if st == 200 else b"{}"
+        return _stream_cm(_FakeStreamResp(body, status=st))
+
+    fake_http = _FakeHTTPClient(responder)
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1", http_retries=0),
+        http_client=fake_http,
+    )
+    with patch("replayt.llm.time.sleep", return_value=None):
+        client.chat_completions(messages=[{"role": "user", "content": "x"}], http_retries=2)
+    assert len(fake_http.calls) == 3
 
 
 def test_openai_compat_supports_base_url_and_top_p_overrides() -> None:

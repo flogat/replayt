@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from replayt.llm_coercion import (
+    coerce_http_retries,
     coerce_llm_extra_body,
     coerce_llm_seed,
     coerce_llm_stop_sequences,
@@ -10,6 +11,7 @@ from replayt.llm_coercion import (
     coerce_openai_penalty,
     coerce_temperature,
     coerce_timeout_seconds,
+    coerce_top_p,
 )
 
 
@@ -42,6 +44,27 @@ def test_coerce_max_tokens_rejects_non_finite() -> None:
 def test_coerce_max_tokens_rejects_bad_string() -> None:
     with pytest.raises(ValueError, match="numeric"):
         coerce_max_tokens_for_api("not-a-number")
+
+
+def test_coerce_http_retries_basic() -> None:
+    assert coerce_http_retries(0) == 0
+    assert coerce_http_retries("3") == 3
+    assert coerce_http_retries(3.0) == 3
+
+
+def test_coerce_http_retries_rejects_bool() -> None:
+    with pytest.raises(TypeError, match="boolean"):
+        coerce_http_retries(True)
+
+
+def test_coerce_http_retries_rejects_negative() -> None:
+    with pytest.raises(ValueError, match=">="):
+        coerce_http_retries(-1)
+
+
+def test_coerce_http_retries_rejects_above_cap() -> None:
+    with pytest.raises(ValueError, match="<="):
+        coerce_http_retries(26)
 
 
 def test_coerce_temperature_rejects_bool() -> None:
@@ -97,6 +120,31 @@ def test_coerce_openai_penalty_none_and_bounds() -> None:
         coerce_openai_penalty(3.0)
     with pytest.raises(TypeError, match="penalty cannot be a boolean"):
         coerce_openai_penalty(True)
+
+
+def test_coerce_openai_penalty_rejects_non_finite() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        coerce_openai_penalty(float("nan"))
+    with pytest.raises(ValueError, match="finite"):
+        coerce_openai_penalty(float("inf"))
+
+
+def test_coerce_top_p_none_empty_and_bounds() -> None:
+    assert coerce_top_p(None) is None
+    assert coerce_top_p("") is None
+    assert coerce_top_p("0.5") == 0.5
+    assert coerce_top_p(1.0) == 1.0
+    with pytest.raises(ValueError, match="between 0 and 1"):
+        coerce_top_p(1.01)
+    with pytest.raises(TypeError, match="top_p cannot be a boolean"):
+        coerce_top_p(True)
+
+
+def test_coerce_top_p_rejects_non_finite() -> None:
+    with pytest.raises(ValueError, match="finite"):
+        coerce_top_p(float("nan"))
+    with pytest.raises(ValueError, match="finite"):
+        coerce_top_p(float("inf"))
 
 
 def test_coerce_llm_stop_sequences() -> None:

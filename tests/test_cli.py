@@ -661,6 +661,8 @@ def test_cli_run_missing_target_errors(tmp_path: Path, monkeypatch: pytest.Monke
     assert result.exit_code == 2
     out = (result.stdout or "") + (result.stderr or "")
     assert "REPLAYT_TARGET" in out
+    assert "replayt try --list" in out
+    assert "replayt_examples.e01_hello_world:wf" in out
 
 
 def test_cli_config_json_reports_default_target_from_env_and_config(
@@ -1457,7 +1459,8 @@ def test_cli_verify_seal_hook_receives_policy_context(tmp_path: Path, monkeypatc
         "'experiment': (json.loads(os.environ['REPLAYT_RUN_EXPERIMENT_JSON']) "
         "if os.environ.get('REPLAYT_RUN_EXPERIMENT_JSON') else None), "
         "'workflow_meta': (json.loads(os.environ['REPLAYT_WORKFLOW_META_JSON']) "
-        "if os.environ.get('REPLAYT_WORKFLOW_META_JSON') else None)"
+        "if os.environ.get('REPLAYT_WORKFLOW_META_JSON') else None), "
+        "'policy_hook_name': os.environ.get('REPLAYT_POLICY_HOOK_NAME')"
         "}), encoding='utf-8')"
     )
     (tmp_path / "pyproject.toml").write_text(
@@ -1511,6 +1514,7 @@ def test_cli_verify_seal_hook_receives_policy_context(tmp_path: Path, monkeypatc
     assert data["tags"] == {"verify": "post"}
     assert data["experiment"] == {"audit": "seal_ok"}
     assert data["workflow_meta"] is None
+    assert data["policy_hook_name"] == "verify_seal_hook"
 
 
 def test_cli_verify_seal_export_manifest_with_jsonl_override(tmp_path: Path) -> None:
@@ -2399,6 +2403,7 @@ def start(ctx):
     assert html_out.exit_code == 0
     assert "Run timeline" in html_out.stdout
     assert "--style default" in html_out.stdout
+    assert "Stakeholder CLI handoff" in html_out.stdout
 
 
 def test_cli_runs_and_doctor(tmp_path: Path) -> None:
@@ -3876,7 +3881,9 @@ def test_cli_export_hook_receives_policy_context(tmp_path: Path, monkeypatch: py
         "if os.environ.get('REPLAYT_RUN_EXPERIMENT_JSON') else None), "
         "'workflow_meta': (json.loads(os.environ['REPLAYT_WORKFLOW_META_JSON']) "
         "if os.environ.get('REPLAYT_WORKFLOW_META_JSON') else None), "
-        "'workflow_entry_path': os.environ.get('REPLAYT_WORKFLOW_ENTRY_PATH')"
+        "'inputs': json.loads(os.environ['REPLAYT_RUN_INPUTS_JSON']), "
+        "'workflow_entry_path': os.environ.get('REPLAYT_WORKFLOW_ENTRY_PATH'), "
+        "'policy_hook_name': os.environ.get('REPLAYT_POLICY_HOOK_NAME')"
         "}), encoding='utf-8')"
     )
     (tmp_path / "pyproject.toml").write_text(
@@ -3945,6 +3952,8 @@ def test_cli_export_hook_receives_policy_context(tmp_path: Path, monkeypatch: py
     assert data["tags"] == {"team": "audit"}
     assert data["experiment"] == {"runbook": "export-gate"}
     assert data["workflow_meta"] is None
+    assert data["inputs"] == {"customer_name": "Sam"}
+    assert data["policy_hook_name"] == "export_hook"
     import replayt_examples.e01_hello_world as e01_mod
 
     assert Path(data["workflow_entry_path"]).resolve() == Path(e01_mod.__file__).resolve()
@@ -4012,7 +4021,8 @@ def test_cli_seal_hook_receives_policy_context(tmp_path: Path, monkeypatch: pyte
         "'experiment': (json.loads(os.environ['REPLAYT_RUN_EXPERIMENT_JSON']) "
         "if os.environ.get('REPLAYT_RUN_EXPERIMENT_JSON') else None), "
         "'workflow_meta': (json.loads(os.environ['REPLAYT_WORKFLOW_META_JSON']) "
-        "if os.environ.get('REPLAYT_WORKFLOW_META_JSON') else None)"
+        "if os.environ.get('REPLAYT_WORKFLOW_META_JSON') else None), "
+        "'policy_hook_name': os.environ.get('REPLAYT_POLICY_HOOK_NAME')"
         "}), encoding='utf-8')"
     )
     (tmp_path / "pyproject.toml").write_text(
@@ -4063,6 +4073,7 @@ def test_cli_seal_hook_receives_policy_context(tmp_path: Path, monkeypatch: pyte
     assert data["tags"] == {"seal": "required"}
     assert data["experiment"] == {"lane": "compliance"}
     assert data["workflow_meta"] is None
+    assert data["policy_hook_name"] == "seal_hook"
     manifest = json.loads(seal_path.read_text(encoding="utf-8"))
     assert manifest["policy_hook"] == {
         "source": "project_config:seal_hook",
@@ -5944,6 +5955,17 @@ def test_cli_ci_writes_summary_json(tmp_path: Path) -> None:
     assert data["python_executable"] == sys.executable
     assert data["platform"] == sys.platform
     assert data["machine"] == platform.machine()
+    assert data["filesystem_encoding"] == (sys.getfilesystemencoding() or "")
+    assert data["stdout_encoding"] == getattr(sys.stdout, "encoding", None)
+    if sys.platform == "win32":
+        assert data["ulimit_nofile_soft"] is None
+        assert data["ulimit_nofile_hard"] is None
+    else:
+        import resource
+
+        exp_soft, exp_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        assert data["ulimit_nofile_soft"] == exp_soft
+        assert data["ulimit_nofile_hard"] == exp_hard
 
 
 def test_cli_resume_hook_failure_aborts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -6039,7 +6061,9 @@ def done(ctx):
         "if os.environ.get('REPLAYT_RUN_EXPERIMENT_JSON') else None), "
         "'workflow_meta': (json.loads(os.environ['REPLAYT_WORKFLOW_META_JSON']) "
         "if os.environ.get('REPLAYT_WORKFLOW_META_JSON') else None), "
-        "'workflow_entry_path': os.environ.get('REPLAYT_WORKFLOW_ENTRY_PATH')"
+        "'inputs': json.loads(os.environ['REPLAYT_RUN_INPUTS_JSON']), "
+        "'workflow_entry_path': os.environ.get('REPLAYT_WORKFLOW_ENTRY_PATH'), "
+        "'policy_hook_name': os.environ.get('REPLAYT_POLICY_HOOK_NAME')"
         "}), encoding='utf-8')"
     )
     exe = json.dumps(sys.executable)
@@ -6071,6 +6095,8 @@ def done(ctx):
             "gate=hr",
             "--experiment-json",
             '{"lane":"policy"}',
+            "--inputs-json",
+            '{"case_ref":"INC-77"}',
         ],
     )
     assert run.exit_code == 2
@@ -6092,6 +6118,7 @@ def done(ctx):
     assert data["tags"] == {"gate": "hr"}
     assert data["experiment"] == {"lane": "policy"}
     assert data["workflow_meta"] == {"catalog_entry": "ce-42"}
+    assert data["inputs"] == {"case_ref": "INC-77"}
     assert data["log_mode"] == "redacted"
     assert data["forbid_full"] == "1"
     assert data["redact_keys"] == ["patient_id"]
@@ -6100,6 +6127,7 @@ def done(ctx):
     import resume_hook_policy_wf as resume_hook_policy_wf_mod
 
     assert Path(data["workflow_entry_path"]).resolve() == Path(resume_hook_policy_wf_mod.__file__).resolve()
+    assert data["policy_hook_name"] == "resume_hook"
 
 
 def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -6126,6 +6154,7 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
         "'workflow_name': os.environ.get('REPLAYT_WORKFLOW_NAME'), "
         "'workflow_version': os.environ.get('REPLAYT_WORKFLOW_VERSION'), "
         "'workflow_entry_path': os.environ.get('REPLAYT_WORKFLOW_ENTRY_PATH'), "
+        "'policy_hook_name': os.environ.get('REPLAYT_POLICY_HOOK_NAME'), "
         "'replayt_version': os.environ.get('REPLAYT_REPLAYT_VERSION')"
         "}), encoding='utf-8')"
     )
@@ -6191,6 +6220,7 @@ def test_cli_run_hook_receives_policy_context(tmp_path: Path, monkeypatch: pytes
     import replayt_examples.e01_hello_world as e01_mod
 
     assert Path(data["workflow_entry_path"]).resolve() == Path(e01_mod.__file__).resolve()
+    assert data["policy_hook_name"] == "run_hook"
     assert data["mode"] == "run"
     assert data["target"] == "replayt_examples.e01_hello_world:wf"
     assert data["dry_run"] == "1"
@@ -6425,6 +6455,112 @@ def b(ctx):
     assert "Next: replayt run" in r.stdout
     assert "--dry-check" in r.stdout
     assert r.stdout.count("--strict-graph") >= 2
+
+
+def test_cli_validate_print_inputs_template_ok(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "expects_wf.py"
+    wf_path.write_text(
+        """
+from typing import Optional
+from replayt.workflow import Workflow
+wf = Workflow("expects_wf")
+wf.set_initial("a")
+@wf.step("a", expects={"title": str, "count": int, "flag": bool, "ratio": float, "tags": list, "meta": dict})
+def a(ctx):
+    return None
+@wf.step("b", expects={"extra": str, "maybe": Optional[str]})
+def b(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(app, ["validate", str(wf_path), "--print-inputs-template"])
+    assert r.exit_code == 0
+    data = json.loads(r.stdout.strip())
+    assert data == {
+        "count": 0,
+        "extra": "",
+        "flag": False,
+        "maybe": "",
+        "meta": {},
+        "ratio": 0.0,
+        "tags": [],
+        "title": "",
+    }
+    assert "Tip:" in r.stderr
+
+
+def test_cli_validate_print_inputs_template_conflict_null(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    wf_path = tmp_path / "conflict.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("c")
+wf.set_initial("a")
+wf.note_transition("a", "b")
+@wf.step("a", expects={"x": str})
+def a(ctx):
+    return "b"
+@wf.step("b", expects={"x": int})
+def b(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(app, ["validate", str(wf_path), "--print-inputs-template"])
+    assert r.exit_code == 0
+    assert json.loads(r.stdout.strip()) == {"x": None}
+
+
+def test_cli_validate_inputs_template_rejects_json_format_combo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wf_path = tmp_path / "v.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("v")
+wf.set_initial("a")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(
+        app,
+        ["validate", str(wf_path), "--print-inputs-template", "--format", "json"],
+    )
+    assert r.exit_code == 2
+    assert "Cannot combine" in r.stderr
+
+
+def test_cli_validate_inputs_template_skipped_when_invalid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    wf_path = tmp_path / "bad.py"
+    wf_path.write_text(
+        """
+from replayt.workflow import Workflow
+wf = Workflow("bad")
+wf.set_initial("missing")
+@wf.step("a")
+def a(ctx):
+    return None
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(tmp_path)
+    runner = CliRunner()
+    r = runner.invoke(app, ["validate", str(wf_path), "--print-inputs-template"])
+    assert r.exit_code == 1
+    assert r.stdout.strip() == ""
 
 
 def test_cli_run_dry_check_json_invalid_inputs(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -7325,6 +7461,17 @@ def test_cli_run_summary_json_via_replayt_env(tmp_path: Path, monkeypatch: pytes
     assert data["python_executable"] == sys.executable
     assert data["platform"] == sys.platform
     assert data["machine"] == platform.machine()
+    assert data["filesystem_encoding"] == (sys.getfilesystemencoding() or "")
+    assert data["stdout_encoding"] == getattr(sys.stdout, "encoding", None)
+    if sys.platform == "win32":
+        assert data["ulimit_nofile_soft"] is None
+        assert data["ulimit_nofile_hard"] is None
+    else:
+        import resource
+
+        exp_soft, exp_hard = resource.getrlimit(resource.RLIMIT_NOFILE)
+        assert data["ulimit_nofile_soft"] == exp_soft
+        assert data["ulimit_nofile_hard"] == exp_hard
 
 
 def test_cli_summary_json_merges_ci_metadata_from_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -7531,6 +7678,9 @@ def test_cli_version_format_json() -> None:
     assert data["cli_stdio_contract"] == build_cli_stdio_contract()
     cjson = data["cli_json_stdout_contract"]
     assert cjson == build_cli_json_stdout_contract()
+    for routes in cjson["subcommands"].values():
+        for row in routes:
+            assert row["schema"] == schemas[row["schema_key"]]
     from replayt.cli.run_support import CLI_JSON_STDOUT_TRUST_PROFILES, TRUST_PROFILE_MACHINE_FLAGS
 
     assert set(TRUST_PROFILE_MACHINE_FLAGS) == set(CLI_JSON_STDOUT_TRUST_PROFILES)
@@ -7567,9 +7717,10 @@ def test_cli_version_format_json() -> None:
     assert ph["subprocess_stdin"] == "devnull"
     hooks = ph["hooks"]
     assert set(hooks) == {"export_hook", "resume_hook", "run_hook", "seal_hook", "verify_seal_hook"}
-    for _hook_name in hooks:
-        assert "REPLAYT_WORKFLOW_META_JSON" in hooks[_hook_name]["injected_env_vars"]
-        assert "REPLAYT_POLICY_HOOK_CONTEXT_JSON" in hooks[_hook_name]["injected_env_vars"]
+    for hook_key, hook_data in hooks.items():
+        assert "REPLAYT_WORKFLOW_META_JSON" in hook_data["injected_env_vars"]
+        assert "REPLAYT_POLICY_HOOK_CONTEXT_JSON" in hook_data["injected_env_vars"]
+        assert "REPLAYT_POLICY_HOOK_NAME" in hook_data["injected_env_vars"]
     rh = hooks["run_hook"]
     assert rh["argv_env"] == "REPLAYT_RUN_HOOK"
     assert rh["argv_config_key"] == "run_hook"
@@ -7591,11 +7742,13 @@ def test_cli_version_format_json() -> None:
     assert "REPLAYT_RUN_METADATA_JSON" in eh["injected_env_vars"]
     assert "REPLAYT_RUN_TAGS_JSON" in eh["injected_env_vars"]
     assert "REPLAYT_RUN_EXPERIMENT_JSON" in eh["injected_env_vars"]
+    assert "REPLAYT_RUN_INPUTS_JSON" in eh["injected_env_vars"]
     sh = hooks["seal_hook"]
     assert "REPLAYT_WORKFLOW_VERSION" in sh["injected_env_vars"]
     assert "REPLAYT_RUN_METADATA_JSON" in sh["injected_env_vars"]
     assert "REPLAYT_RUN_TAGS_JSON" in sh["injected_env_vars"]
     assert "REPLAYT_RUN_EXPERIMENT_JSON" in sh["injected_env_vars"]
+    assert "REPLAYT_RUN_INPUTS_JSON" in sh["injected_env_vars"]
     res_h = hooks["resume_hook"]
     assert "REPLAYT_LOG_DIR" in res_h["injected_env_vars"]
     assert "REPLAYT_RUN_JSONL" in res_h["injected_env_vars"]
@@ -7606,13 +7759,16 @@ def test_cli_version_format_json() -> None:
     assert "REPLAYT_RUN_METADATA_JSON" in res_h["injected_env_vars"]
     assert "REPLAYT_RUN_TAGS_JSON" in res_h["injected_env_vars"]
     assert "REPLAYT_RUN_EXPERIMENT_JSON" in res_h["injected_env_vars"]
+    assert "REPLAYT_RUN_INPUTS_JSON" in res_h["injected_env_vars"]
     assert "REPLAYT_RUN_METADATA_JSON" in vh["injected_env_vars"]
     assert "REPLAYT_RUN_TAGS_JSON" in vh["injected_env_vars"]
     assert "REPLAYT_RUN_EXPERIMENT_JSON" in vh["injected_env_vars"]
+    assert "REPLAYT_RUN_INPUTS_JSON" in vh["injected_env_vars"]
     from replayt.cli.config import (
         build_cli_run_defaults_contract,
         build_project_config_discovery_report,
         build_project_config_resolution_report,
+        build_project_setting_precedence_contract,
     )
 
     assert data["project_config_discovery"] == build_project_config_discovery_report()
@@ -7621,6 +7777,11 @@ def test_cli_version_format_json() -> None:
     assert data["cli_machine_readable_schemas"]["project_config_resolution"] == "replayt.project_config_resolution.v1"
     assert data["cli_run_defaults_contract"] == build_cli_run_defaults_contract()
     assert data["cli_machine_readable_schemas"]["cli_run_defaults_contract"] == "replayt.cli_run_defaults_contract.v1"
+    assert data["project_setting_precedence_contract"] == build_project_setting_precedence_contract()
+    assert (
+        data["cli_machine_readable_schemas"]["project_setting_precedence_contract"]
+        == "replayt.project_setting_precedence_contract.v1"
+    )
 
 
 def test_project_config_resolution_pyproject_winner(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -7698,6 +7859,32 @@ def test_cli_run_defaults_contract_stable_precedence() -> None:
     ip = ri["precedence"]
     assert ip[1]["env"] == REPLAYT_INPUTS_FILE_ENV
     assert ip[2]["config_key"] == "inputs_file"
+
+
+def test_project_setting_precedence_contract_stable_shape() -> None:
+    from replayt.cli.config import (
+        CLI_RUN_DEFAULTS_CONTRACT_SCHEMA,
+        build_project_setting_precedence_contract,
+    )
+
+    doc = build_project_setting_precedence_contract()
+    assert doc["schema"] == "replayt.project_setting_precedence_contract.v1"
+    assert doc["extends_cli_run_defaults_contract"] == CLI_RUN_DEFAULTS_CONTRACT_SCHEMA
+    ids = [s["id"] for s in doc["settings"]]
+    assert ids == sorted(ids)
+    hook_setting = next(s for s in doc["settings"] if s["id"] == "trusted_policy_hook_argv")
+    assert hook_setting["merge_policy"] == "replace_not_concatenate"
+    hook_keys = [h["config_key"] for h in hook_setting["hooks"]]
+    assert hook_keys == sorted(hook_keys)
+    assert hook_keys == [
+        "export_hook",
+        "resume_hook",
+        "run_hook",
+        "seal_hook",
+        "verify_seal_hook",
+    ]
+    timeout_setting = next(s for s in doc["settings"] if s["id"] == "trusted_policy_hook_timeouts")
+    assert [h["config_key"] for h in timeout_setting["hooks"]] == hook_keys
 
 
 def test_run_started_hook_json_blobs_from_jsonl_path_finds_first_after_prefix(tmp_path: Path) -> None:

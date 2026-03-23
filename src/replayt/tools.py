@@ -15,6 +15,8 @@ _log = logging.getLogger("replayt.tools")
 
 # OpenAI Chat Completions ``tools[].function.name`` (and most gateways): ASCII identifier-like, max 64.
 _OPENAI_TOOL_FUNCTION_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+# Anthropic Messages API ``tools[].name`` allows a longer upper bound than OpenAI's 64.
+_ANTHROPIC_TOOL_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,128}$")
 
 _UNSUPPORTED_PARAM_KINDS = frozenset(
     {
@@ -111,6 +113,88 @@ class ToolRegistry:
                 func["description"] = desc
             out.append({"type": "function", "function": func})
         return out
+
+    def anthropic_messages_tools(self) -> list[dict[str, Any]]:
+        """Anthropic Messages API ``tools`` payloads for registered handlers (composition helper).
+
+        Each entry matches ``{"name", "input_schema", ...}`` with ``input_schema`` as the JSON object
+        schema derived from the handler's type hints (the same shapes as OpenAI
+        ``function.parameters`` from :meth:`openai_chat_tools`).
+        Docstrings supply ``description`` (first paragraph only) when present.
+
+        Pair with :meth:`apply_anthropic_tool_use_blocks` inside a vendor SDK ``@wf.step`` so
+        ``tool_use`` blocks still execute through :meth:`call` and emit replayt ``tool_call`` /
+        ``tool_result`` lines.
+        """
+
+        out: list[dict[str, Any]] = []
+        for name in sorted(self._tools):
+            if not _ANTHROPIC_TOOL_NAME_RE.fullmatch(name):
+                msg = (
+                    f"Tool name {name!r} is not valid for Anthropic Messages tools "
+                    "(use 1-128 characters: ASCII letters, digits, underscore, or hyphen only)."
+                )
+                raise ValueError(msg)
+            fn = self._tools[name]
+            row: dict[str, Any] = {"name": name, "input_schema": _openai_parameters_schema(fn)}
+            desc = _first_paragraph_doc(fn)
+            if desc:
+                row["description"] = desc
+            out.append(row)
+        return out
+
+    def apply_anthropic_tool_use_blocks(
+        self,
+        content: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+    ) -> list[Any]:
+        """Run Anthropic Messages ``tool_use`` blocks through :meth:`call` in content list order.
+
+        Each element should be a mapping with ``type == "tool_use"``, a non-empty ``name``, and an
+        ``input`` object (dict). Other block types (for example ``text``) are skipped; results are
+        returned **only** for ``tool_use`` blocks, in the order they appear.
+
+        This is a thin composition helper for ``anthropic`` SDK steps: pass
+        ``message.content`` (or a filtered list of blocks) after ``messages.create``, then feed
+        tool results back to the API with ``role: user`` tool_result blocks as usual.
+        """
+
+        if not content:
+            return []
+        results: list[Any] = []
+        for i, block in enumerate(content):
+            if not isinstance(block, dict):
+                msg = f"content[{i}]: expected dict, got {type(block).__name__}"
+                raise TypeError(msg)
+            if block.get("type") != "tool_use":
+                continue
+            name = block.get("name")
+            if not isinstance(name, str) or not name.strip():
+                msg = f"content[{i}]: tool_use missing or invalid name"
+                raise ValueError(msg)
+            raw_input = block.get("input", {})
+            if isinstance(raw_input, str):
+                stripped = raw_input.strip()
+                if not stripped:
+                    args: dict[str, Any] = {}
+                else:
+                    try:
+                        args = json.loads(stripped)
+                    except json.JSONDecodeError as exc:
+                        msg = f"content[{i}]: invalid JSON in tool_use.input: {exc.msg}"
+                        raise ValueError(msg) from exc
+            elif isinstance(raw_input, dict):
+                args = raw_input
+            else:
+                msg = (
+                    f"content[{i}]: tool_use.input must be str or dict, "
+                    f"got {type(raw_input).__name__}"
+                )
+                raise TypeError(msg)
+            if not isinstance(args, dict):
+                msg = f"content[{i}]: decoded tool_use.input must be a JSON object"
+                raise TypeError(msg)
+            results.append(self.call(name, args))
+        return results
 
     def apply_openai_chat_tool_calls(
         self,

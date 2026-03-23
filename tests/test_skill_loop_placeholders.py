@@ -25,6 +25,7 @@ def test_build_skill_loop_placeholder_contract_shape() -> None:
         "prompt_file",
         "repo",
         "run_dir",
+        "run_stamp",
         "skill",
         "skill_command_sha256",
         "skill_path",
