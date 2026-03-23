@@ -10,6 +10,10 @@ from typing import Any
 _MAX_LLM_STOP_SLOTS = 4
 _MAX_LLM_STOP_STR_CHARS = 512
 
+# Audit-only tags on ``effective`` (not sent in HTTP); keep lists small for JSONL and jq.
+_MAX_LLM_TAG_COUNT = 16
+_MAX_LLM_TAG_CHARS = 64
+
 
 def coerce_llm_extra_body(
     value: Any,
@@ -75,6 +79,58 @@ def coerce_llm_stop_sequences(value: Any) -> list[str] | None:
                 f"stop sequence [{i}] length {len(s)} exceeds max {_MAX_LLM_STOP_STR_CHARS} characters"
             )
     return seqs
+
+
+def coerce_llm_tags(value: Any) -> tuple[str, ...] | None:
+    """Normalize ``llm_tags`` for :class:`~replayt.llm.LLMBridge` defaults and per-call overrides.
+
+    Tags are logged on ``effective`` (and mirrored on LLM JSONL lines) for analytics; they are **not**
+    forwarded to ``/chat/completions`` unless you duplicate them in ``extra_body`` yourself.
+    """
+
+    if value is None:
+        return None
+    if isinstance(value, str):
+        s = value.strip()
+        if not s:
+            return None
+        if len(s) > _MAX_LLM_TAG_CHARS:
+            raise ValueError(f"llm_tags entry length {len(s)} exceeds max {_MAX_LLM_TAG_CHARS} characters")
+        return (s,)
+    if isinstance(value, (list, tuple)):
+        acc: list[str] = []
+        for item in value:
+            if not isinstance(item, str):
+                raise TypeError(f"llm_tags entries must be strings, got {type(item).__name__}")
+            t = item.strip()
+            if not t:
+                continue
+            if len(t) > _MAX_LLM_TAG_CHARS:
+                raise ValueError(
+                    f"llm_tags entry length {len(t)} exceeds max {_MAX_LLM_TAG_CHARS} characters"
+                )
+            acc.append(t)
+        if not acc:
+            return None
+        unique_sorted = tuple(sorted(set(acc)))
+        if len(unique_sorted) > _MAX_LLM_TAG_COUNT:
+            raise ValueError(f"at most {_MAX_LLM_TAG_COUNT} llm_tags allowed, got {len(unique_sorted)}")
+        return unique_sorted
+    raise TypeError(f"llm_tags must be str, list, or tuple, got {type(value).__name__}")
+
+
+def merge_llm_tag_tuples(
+    base: tuple[str, ...] | None,
+    extra: tuple[str, ...] | None,
+) -> tuple[str, ...] | None:
+    """Union two normalized tag tuples (sorted unique) and enforce the tag count cap."""
+
+    merged = tuple(sorted(set(base or ()) | set(extra or ())))
+    if not merged:
+        return None
+    if len(merged) > _MAX_LLM_TAG_COUNT:
+        raise ValueError(f"at most {_MAX_LLM_TAG_COUNT} llm_tags allowed after merge, got {len(merged)}")
+    return merged
 
 
 def coerce_temperature(value: Any, *, default: float = 0.0) -> float:

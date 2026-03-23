@@ -61,8 +61,9 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 ### `llm_request`
 
 - `state` (string)
-- `effective` (object): resolved settings for this call, including `model`, `temperature`, `top_p`, optional `frequency_penalty` / `presence_penalty` / `seed` (omitted from the HTTP payload when null), optional `stop` (array of up to four strings; omitted from the HTTP payload when unset), optional `extra_body` (small provider-specific JSON fields merged into the request body), `max_tokens`, `timeout_seconds`, `http_retries` (non-negative integer: extra POST attempts after the first on retryable HTTP statuses, same semantics as `LLMSettings.http_retries`), `base_url`, `extra_header_names`, optional `provider`, optional `structured_output_mode`, optional `call_label` (short caller-chosen tag from `ctx.llm.with_settings(call_label=...)` when one handler issues multiple LLM calls), optional `experiment`, and optional compact `response_format` (OpenAI-style `type` plus optional `json_schema_name` / `json_schema_strict` when the gateway request includes `response_format`; omits the full embedded JSON Schema tree)
+- `effective` (object): resolved settings for this call, including `model`, `temperature`, `top_p`, optional `frequency_penalty` / `presence_penalty` / `seed` (omitted from the HTTP payload when null), optional `stop` (array of up to four strings; omitted from the HTTP payload when unset), optional `extra_body` (small provider-specific JSON fields merged into the request body), `max_tokens`, `timeout_seconds`, `http_retries` (non-negative integer: extra POST attempts after the first on retryable HTTP statuses, same semantics as `LLMSettings.http_retries`), `base_url`, `extra_header_names`, optional `provider`, optional `structured_output_mode`, optional `call_label` (short caller-chosen tag from `ctx.llm.with_settings(call_label=...)` when one handler issues multiple LLM calls), optional `llm_tags` (sorted unique short strings for analytics: from workflow `llm_defaults`, `with_settings(llm_tags=...)`, or per-call `complete_text` / `parse`; **not** sent on the HTTP request unless you duplicate them in `extra_body`), optional `experiment`, and optional compact `response_format` (OpenAI-style `type` plus optional `json_schema_name` / `json_schema_strict` when the gateway request includes `response_format`; omits the full embedded JSON Schema tree)
 - `call_label` (string, optional): duplicate of `effective.call_label` when set, for quick `jq` filters alongside `schema_name`
+- `llm_tags` (array of strings, optional): duplicate of `effective.llm_tags` when set, for quick `jq` filters alongside `call_label`
 - `schema_name` (string, optional): Pydantic model class name for `ctx.llm.parse(...)` calls (same string as on `structured_output` / `structured_output_failed`); also set when `ctx.llm.complete_text(..., schema_name=...)` tags a freeform completion; otherwise omitted
 - `messages_sha256` (string): stable SHA-256 fingerprint of the exact message list sent to the provider
 - `effective_sha256` (string): stable SHA-256 fingerprint of the logged `effective` settings object
@@ -77,6 +78,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `usage` (object, optional)
 - `effective` (object): same shape as on `llm_request`
 - `call_label` (string, optional): same as on `llm_request` when present
+- `llm_tags` (array of strings, optional): same as on `llm_request` when present
 - `schema_name` (string, optional): same as on `llm_request` when present (parse traffic or tagged `complete_text`)
 - `messages_sha256` (string): same fingerprint as on `llm_request`
 - `effective_sha256` (string): same fingerprint as on `llm_request`
@@ -92,6 +94,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `state` (string)
 - `schema_name` (string)
 - `call_label` (string, optional): same as on `llm_request` / `llm_response` when `effective.call_label` is set
+- `llm_tags` (array of strings, optional): same as on `llm_request` / `llm_response` when `effective.llm_tags` is set
 - `data` (object): validated model dump
 - `effective` (object): same shape as on `llm_request` / `llm_response` for this completion (model, sampling, timeouts, optional `experiment`, `structured_output_mode`, and so on) so analytics can filter on one event type without joining prior LLM lines
 - `messages_sha256` (string): same fingerprint as the triggering `llm_request`
@@ -108,6 +111,7 @@ Use `replayt log-schema` for the bundled JSON Schema and this page for the main 
 - `state` (string)
 - `schema_name` (string)
 - `call_label` (string, optional): same as on `llm_request` when `effective.call_label` is set
+- `llm_tags` (array of strings, optional): same as on `llm_request` when `effective.llm_tags` is set
 - `stage` (string): for example `schema_limit`, `response_limit`, `json_extract`, `json_decode`, or `schema_validate`
 - `structured_output_mode` (string): `prompt_only` or `native_json_schema`
 - `error` (object): serialized exception with `type`, `module`, and `message`

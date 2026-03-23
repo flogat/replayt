@@ -565,6 +565,10 @@ def test_run_skill_iteration_exports_skill_root_and_placeholder(tmp_path: Path, 
     assert inv["skill_command_sha256"] == expected_cmd_sha
     assert inv["task_sha256"] == expected_task_sha
     assert inv["prompt_file_rel"] == env["SKILL_PROMPT_REL"]
+    assert env["SKILL_INVOCATION_FILE"] == str(inv_path.resolve())
+    assert env["SKILL_INVOCATION_REL"] == mod.path_under_repo_or_absolute(
+        str(repo.resolve()), str(inv_path.resolve())
+    )
     assert inv["log_file_rel"] == env["SKILL_LOG_REL"]
     assert inv["run_dir_rel"] == env["SKILL_RUN_DIR_REL"]
     assert inv["skill_name"] == "demo"

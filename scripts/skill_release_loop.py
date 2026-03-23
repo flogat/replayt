@@ -394,7 +394,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "The script is backend-agnostic. --skill-command runs once per skill and can use placeholders:\n"
-            "  {skill} {skill_path} {skill_root} {prompt_file} {log_file} {run_dir} {run_stamp}\n"
+            "  {skill} {skill_path} {skill_root} {prompt_file} {invocation_file} {log_file} {run_dir} {run_stamp}\n"
             "  {repo} {iteration} {max_iterations} {task} {step_index} {step_total} {pipeline_sha256} "
             "{skill_command_sha256} {task_sha256}\n"
             "Quoted variants are also available via *_q (for example {prompt_file_q}).\n"
@@ -771,6 +771,8 @@ def describe_skill_env_snippet(env: dict[str, str], *, task_max: int = 160) -> s
         "SKILL_COMMAND_SHA256",
         "SKILL_PROMPT_FILE",
         "SKILL_PROMPT_REL",
+        "SKILL_INVOCATION_FILE",
+        "SKILL_INVOCATION_REL",
         "SKILL_LOG_FILE",
         "SKILL_LOG_REL",
         "SKILL_RUN_DIR",
@@ -1126,7 +1128,7 @@ def run_skill_iteration(
         skill_root_resolved = str((repo / args.skill_root).resolve())
         run_dir_resolved = str(run_dir.resolve())
         run_stamp = skill_release_run_stamp(run_dir)
-        write_skill_invocation_json(
+        invocation_path = write_skill_invocation_json(
             prompt_path=prompt_path,
             repo_root=repo_resolved,
             skill_root=skill_root_resolved,
@@ -1145,6 +1147,7 @@ def run_skill_iteration(
             task_sha256=loop_task_sha,
             skill_requested_name=skill.requested_name,
         )
+        invocation_abs = str(invocation_path.resolve())
         # Inject safe.directory so child processes (e.g. Codex sandbox running as a
         # different OS user) can run git commands against the repo without
         # "dubious ownership" errors.  GIT_CONFIG_COUNT + KEY/VALUE is the
@@ -1158,6 +1161,8 @@ def run_skill_iteration(
                 "SKILL_REQUESTED_NAME": skill.requested_name,
                 "SKILL_PATH": str(skill.path),
                 "SKILL_PROMPT_FILE": str(prompt_path),
+                "SKILL_INVOCATION_FILE": invocation_abs,
+                "SKILL_INVOCATION_REL": path_under_repo_or_absolute(repo_resolved, invocation_abs),
                 "SKILL_LOG_FILE": str(log_path),
                 "SKILL_ITERATION": str(iteration),
                 "SKILL_MAX_ITERATIONS": str(args.max_iterations),
@@ -1181,6 +1186,7 @@ def run_skill_iteration(
                 "skill_path": str(skill.path),
                 "skill_root": skill_root_resolved,
                 "prompt_file": str(prompt_path),
+                "invocation_file": invocation_abs,
                 "log_file": str(log_path),
                 "run_dir": run_dir_resolved,
                 "run_stamp": run_stamp,
@@ -1410,7 +1416,7 @@ def run_checks(
             fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
             run_dir_resolved = str(run_dir.resolve())
             run_stamp = skill_release_run_stamp(run_dir)
-            write_skill_invocation_json(
+            fix_invocation_path = write_skill_invocation_json(
                 prompt_path=fix_prompt_path,
                 repo_root=str(repo.resolve()),
                 skill_root=str((repo / args.skill_root).resolve()),
@@ -1428,6 +1434,7 @@ def run_checks(
                 skill_command_sha256=skill_cmd_sha,
                 task_sha256=loop_task_sha,
             )
+            fix_invocation_abs = str(fix_invocation_path.resolve())
 
             fix_command = render_command(
                 args.skill_command,
@@ -1436,6 +1443,7 @@ def run_checks(
                     "skill_path": "fix_check",
                     "skill_root": str((repo / args.skill_root).resolve()),
                     "prompt_file": str(fix_prompt_path),
+                    "invocation_file": fix_invocation_abs,
                     "log_file": str(fix_log_path),
                     "run_dir": run_dir_resolved,
                     "run_stamp": run_stamp,
@@ -1460,6 +1468,8 @@ def run_checks(
                     "SKILL_ROOT": str((repo / args.skill_root).resolve()),
                     "SKILL_NAME": "fix_check",
                     "SKILL_PROMPT_FILE": str(fix_prompt_path),
+                    "SKILL_INVOCATION_FILE": fix_invocation_abs,
+                    "SKILL_INVOCATION_REL": path_under_repo_or_absolute(repo_s, fix_invocation_abs),
                     "SKILL_LOG_FILE": str(fix_log_path),
                     "SKILL_ITERATION": str(iteration),
                     "SKILL_MAX_ITERATIONS": str(args.max_iterations),
@@ -1825,7 +1835,7 @@ def run_pre_tag_github_ci_with_fixes(
         fix_prompt_path.write_text(fix_prompt_text, encoding="utf-8")
         run_dir_resolved = str(run_dir.resolve())
         run_stamp = skill_release_run_stamp(run_dir)
-        write_skill_invocation_json(
+        pre_tag_invocation_path = write_skill_invocation_json(
             prompt_path=fix_prompt_path,
             repo_root=str(repo.resolve()),
             skill_root=str((repo / args.skill_root).resolve()),
@@ -1843,6 +1853,7 @@ def run_pre_tag_github_ci_with_fixes(
             skill_command_sha256=skill_cmd_sha,
             task_sha256=loop_task_sha,
         )
+        pre_tag_invocation_abs = str(pre_tag_invocation_path.resolve())
 
         fix_command = render_command(
             args.skill_command,
@@ -1851,6 +1862,7 @@ def run_pre_tag_github_ci_with_fixes(
                 "skill_path": "fix_pre_tag_ci",
                 "skill_root": str((repo / args.skill_root).resolve()),
                 "prompt_file": str(fix_prompt_path),
+                "invocation_file": pre_tag_invocation_abs,
                 "log_file": str(fix_log_path),
                 "run_dir": run_dir_resolved,
                 "run_stamp": run_stamp,
@@ -1875,6 +1887,8 @@ def run_pre_tag_github_ci_with_fixes(
                 "SKILL_ROOT": str((repo / args.skill_root).resolve()),
                 "SKILL_NAME": "fix_pre_tag_ci",
                 "SKILL_PROMPT_FILE": str(fix_prompt_path),
+                "SKILL_INVOCATION_FILE": pre_tag_invocation_abs,
+                "SKILL_INVOCATION_REL": path_under_repo_or_absolute(repo_s, pre_tag_invocation_abs),
                 "SKILL_LOG_FILE": str(fix_log_path),
                 "SKILL_ITERATION": str(passed_iteration),
                 "SKILL_MAX_ITERATIONS": str(args.max_iterations),

@@ -40,6 +40,8 @@ from replayt.cli.run_support import (
     invoke_export_hook,
     invoke_seal_hook,
     invoke_verify_seal_hook,
+    run_started_envelope_ts_from_events,
+    run_started_envelope_ts_from_jsonl_path,
     run_started_hook_json_blobs_from_events,
     run_started_hook_json_blobs_from_jsonl_path,
     run_started_inputs_json_from_events,
@@ -96,6 +98,7 @@ def _maybe_invoke_export_hook(
     hook_timeout = export_hook_timeout_seconds(cfg)
     meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_events(events)
     inputs_j = run_started_inputs_json_from_events(events)
+    started_ts = run_started_envelope_ts_from_events(events)
     try:
         invoke_export_hook(
             hook,
@@ -117,6 +120,7 @@ def _maybe_invoke_export_hook(
             workflow_meta_json=wf_meta_j,
             inputs_json=inputs_j,
             policy_hook_context_json=policy_hook_context_json,
+            run_started_ts=started_ts,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -150,6 +154,7 @@ def _maybe_invoke_seal_hook(
     workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
     meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
     inputs_j = run_started_inputs_json_from_jsonl_path(jsonl_path)
+    started_ts = run_started_envelope_ts_from_jsonl_path(jsonl_path)
     try:
         invoke_seal_hook(
             hook,
@@ -166,6 +171,7 @@ def _maybe_invoke_seal_hook(
             workflow_meta_json=wf_meta_j,
             inputs_json=inputs_j,
             policy_hook_context_json=policy_hook_context_json,
+            run_started_ts=started_ts,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -201,6 +207,7 @@ def _maybe_invoke_verify_seal_hook(
     workflow_contract = _policy_workflow_contract_from_jsonl_path(jsonl_path)
     meta_j, tags_j, exp_j, wf_meta_j = run_started_hook_json_blobs_from_jsonl_path(jsonl_path)
     inputs_j = run_started_inputs_json_from_jsonl_path(jsonl_path)
+    started_ts = run_started_envelope_ts_from_jsonl_path(jsonl_path)
     try:
         invoke_verify_seal_hook(
             hook,
@@ -219,6 +226,7 @@ def _maybe_invoke_verify_seal_hook(
             workflow_meta_json=wf_meta_j,
             inputs_json=inputs_j,
             policy_hook_context_json=policy_hook_context_json,
+            run_started_ts=started_ts,
             **_privacy_hook_kwargs_from_cfg(cfg),
         )
     except subprocess.TimeoutExpired as exc:
@@ -918,7 +926,7 @@ def cmd_bundle_export(
     bundle = b"".join(lines)
     digest = hashlib.sha256(bundle).hexdigest()
     run_summary = _export_run_summary(events)
-    contract_bytes, mermaid_txt, contract_snapshot = _workflow_contract_snapshot(
+    contract_bytes, mermaid_bytes, contract_snapshot = _workflow_contract_snapshot(
         events=events,
         target=target,
         include_mermaid=True,
@@ -928,7 +936,7 @@ def cmd_bundle_export(
         files.append("events.seal.json")
     if contract_bytes is not None:
         files.append("workflow.contract.json")
-    if mermaid_txt is not None:
+    if mermaid_bytes is not None:
         files.append("workflow.mmd.txt")
 
     manifest: dict[str, Any] = {
@@ -985,10 +993,10 @@ def cmd_bundle_export(
             ti = tarfile.TarInfo(name=f"{prefix}/events.seal.json")
             ti.size = len(seal_bytes)
             tf.addfile(ti, io.BytesIO(seal_bytes))
-        if mermaid_txt is not None:
+        if mermaid_bytes is not None:
             ti = tarfile.TarInfo(name=f"{prefix}/workflow.mmd.txt")
-            ti.size = len(mermaid_txt)
-            tf.addfile(ti, io.BytesIO(mermaid_txt))
+            ti.size = len(mermaid_bytes)
+            tf.addfile(ti, io.BytesIO(mermaid_bytes))
     typer.echo(f"wrote {out.resolve()} ({len(lines)} events, sha256={digest[:16]}...)")
 
 

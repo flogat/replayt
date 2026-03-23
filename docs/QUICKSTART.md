@@ -125,7 +125,7 @@ replayt inspect <run_id>
 replayt replay <run_id>
 ```
 
-You should see `status=failed` and structured error payload on the failing state. See [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md) for `run_failed` / `run_completed`.
+Inspect shows `status=failed` and a structured error payload for the failing state. See [`RUN_LOG_SCHEMA.md`](RUN_LOG_SCHEMA.md) for `run_failed` / `run_completed`.
 
 ## 8. Smallest structured LLM step (API key required)
 

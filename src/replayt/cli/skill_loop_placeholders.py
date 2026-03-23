@@ -20,6 +20,13 @@ def build_skill_loop_placeholder_contract() -> dict[str, Any]:
 
     skill_command = [
         _row(
+            name="invocation_file",
+            description=(
+                "Absolute path to this step's replayt.skill_invocation.v1 sidecar (*.invocation.json). "
+                "Same as env SKILL_INVOCATION_FILE."
+            ),
+        ),
+        _row(
             name="iteration",
             description=(
                 "1-based outer loop iteration index (string). Same as env SKILL_ITERATION."

@@ -19,6 +19,7 @@ from replayt.runner import RunResult
 from replayt.workflow import Workflow
 
 RUN_RESULT_SCHEMA = "replayt.run_result.v1"
+RUN_RESULT_STATUS_CONTRACT_SCHEMA = "replayt.run_result_status_contract.v1"
 
 # Injected into every trusted policy-hook subprocess; values match ``policy_hook_env_catalog`` hook keys.
 POLICY_HOOK_NAME_ENV_VAR = "REPLAYT_POLICY_HOOK_NAME"
@@ -182,6 +183,43 @@ def run_started_inputs_json_from_jsonl_path(path: Path) -> str | None:
     if not isinstance(payload, dict):
         return None
     return run_started_inputs_json_from_payload(payload)
+
+
+def run_started_envelope_ts_from_event(event: dict[str, Any]) -> str | None:
+    """ISO 8601 ``ts`` from the JSONL envelope for a ``run_started`` line, when present."""
+
+    if event.get("type") != "run_started":
+        return None
+    ts = event.get("ts")
+    if isinstance(ts, str) and ts.strip():
+        return ts.strip()
+    return None
+
+
+def run_started_envelope_ts_from_events(events: list[dict[str, Any]]) -> str | None:
+    """``ts`` string from the first ``run_started`` event in *events*."""
+
+    for event in events:
+        if event.get("type") != "run_started":
+            continue
+        out = run_started_envelope_ts_from_event(event)
+        if out is not None:
+            return out
+    return None
+
+
+def run_started_envelope_ts_from_jsonl_path(path: Path) -> str | None:
+    """Same as :func:`run_started_envelope_ts_from_events` but scans the JSONL file on disk."""
+
+    event = first_jsonl_event_with_type(path, event_type="run_started")
+    if event is None:
+        return None
+    return run_started_envelope_ts_from_event(event)
+
+
+def _merge_run_started_ts_env(extra: dict[str, str], run_started_ts: str | None) -> None:
+    if run_started_ts:
+        extra["REPLAYT_RUN_STARTED_TS"] = run_started_ts
 
 
 def _merge_optional_hook_json_env(
@@ -462,6 +500,7 @@ def invoke_run_hook(
     experiment_json: str | None,
     workflow_meta_json: str | None = None,
     policy_hook_context_json: str | None = None,
+    run_started_ts: str | None = None,
     timeout_seconds: float | None,
 ) -> None:
     """Run a pre-run policy hook before the workflow starts writing events."""
@@ -497,6 +536,7 @@ def invoke_run_hook(
         extra_env["REPLAYT_WORKFLOW_META_JSON"] = workflow_meta_json
     extra_env.update(_workflow_entry_path_hook_env(target))
     _merge_policy_hook_context_env(extra_env, policy_hook_context_json)
+    _merge_run_started_ts_env(extra_env, run_started_ts)
     invoke_hook(argv, extra_env=extra_env, timeout_seconds=timeout_seconds)
 
 
@@ -519,6 +559,7 @@ def invoke_resume_hook(
     workflow_meta_json: str | None = None,
     inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
+    run_started_ts: str | None = None,
 ) -> None:
     """Run *argv* with extra ``REPLAYT_*`` env vars; *argv* must come from trusted config."""
 
@@ -550,6 +591,7 @@ def invoke_resume_hook(
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     extra.update(_workflow_entry_path_hook_env(target))
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
+    _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -577,6 +619,7 @@ def invoke_export_hook(
     workflow_meta_json: str | None = None,
     inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
+    run_started_ts: str | None = None,
 ) -> None:
     """Run *argv* before ``export-run`` / ``bundle-export`` writes the archive; *argv* is trusted config only."""
 
@@ -613,6 +656,7 @@ def invoke_export_hook(
     if inputs_json is not None:
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
+    _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -635,6 +679,7 @@ def invoke_seal_hook(
     workflow_meta_json: str | None = None,
     inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
+    run_started_ts: str | None = None,
 ) -> None:
     """Run *argv* before ``replayt seal`` writes the manifest; *argv* is trusted config only."""
 
@@ -662,6 +707,7 @@ def invoke_seal_hook(
     if inputs_json is not None:
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
+    _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -686,6 +732,7 @@ def invoke_verify_seal_hook(
     workflow_meta_json: str | None = None,
     inputs_json: str | None = None,
     policy_hook_context_json: str | None = None,
+    run_started_ts: str | None = None,
 ) -> None:
     """Run *argv* after ``replayt verify-seal`` digests match; *argv* is trusted config only."""
 
@@ -715,6 +762,7 @@ def invoke_verify_seal_hook(
     if inputs_json is not None:
         extra["REPLAYT_RUN_INPUTS_JSON"] = inputs_json
     _merge_policy_hook_context_env(extra, policy_hook_context_json)
+    _merge_run_started_ts_env(extra, run_started_ts)
     invoke_hook(argv, extra_env=extra, timeout_seconds=timeout_seconds)
 
 
@@ -741,6 +789,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_JSONL",
                     "REPLAYT_RUN_METADATA_JSON",
                     "REPLAYT_RUN_MODE",
+                    "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_SQLITE",
                     "REPLAYT_TARGET",
@@ -771,6 +820,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_JSONL",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_TARGET",
                     "REPLAYT_WORKFLOW_CONTRACT_SHA256",
@@ -803,6 +853,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_SQLITE",
                     "REPLAYT_TARGET",
@@ -830,6 +881,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_SEAL_JSONL",
                     "REPLAYT_SEAL_LINE_COUNT",
@@ -857,6 +909,7 @@ def build_policy_hook_env_catalog() -> dict[str, Any]:
                     "REPLAYT_RUN_ID",
                     "REPLAYT_RUN_INPUTS_JSON",
                     "REPLAYT_RUN_METADATA_JSON",
+                    "REPLAYT_RUN_STARTED_TS",
                     "REPLAYT_RUN_TAGS_JSON",
                     "REPLAYT_VERIFY_SEAL_FILE_SHA256",
                     "REPLAYT_VERIFY_SEAL_JSONL",
@@ -1094,6 +1147,7 @@ def _stdout_json_route(
     equals: str | None = None,
     when: str | None = None,
     boolean_flag: bool | None = None,
+    exit_codes_with_json_on_stdout: tuple[int, ...] | None = None,
 ) -> dict[str, Any]:
     row: dict[str, Any] = {"option": option, "schema_key": schema_key, "trust_profile": trust_profile}
     if short is not None:
@@ -1104,6 +1158,8 @@ def _stdout_json_route(
         row["when"] = when
     if boolean_flag is not None:
         row["boolean_flag"] = boolean_flag
+    codes = (0,) if exit_codes_with_json_on_stdout is None else tuple(sorted(set(exit_codes_with_json_on_stdout)))
+    row["exit_codes_with_json_on_stdout"] = list(codes)
     return row
 
 
@@ -1120,6 +1176,7 @@ _CLI_JSON_STDOUT_ROUTE_SCHEMA_BY_KEY: dict[str, str] = {
     "stats_report": "replayt.stats_report.v1",
     "try_copy": "replayt.try_copy.v1",
     "try_examples": "replayt.try_examples.v1",
+    "try_print_snippet": "replayt.try_print_snippet.v1",
     "validate_report": "replayt.validate_report.v1",
     "verify_seal_report": "replayt.verify_seal_report.v1",
     "version_report": "replayt.version_report.v1",
@@ -1146,7 +1203,10 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             "Maps subcommands to flags that select JSON on stdout. Each schema_key matches a key under "
             "cli_machine_readable_schemas on this report; each route row also duplicates the resolved "
             "replayt.*.v1 id as schema so subprocess and MCP wrappers can map argv to the expected stdout "
-            "payload type without a second lookup. Each route includes trust_profile, an index into "
+            "payload type without a second lookup. Each route lists exit_codes_with_json_on_stdout: sorted "
+            "exit codes that can occur after replayt wrote that schema's JSON object to stdout (Typer "
+            "pre-dispatch failures and many pre-callback validation errors typically exit without JSON on "
+            "stdout; see typer_pre_dispatch_phase). Each route includes trust_profile, an index into "
             "trust_profiles for subprocess/MCP allowlists. replayt log-schema always prints the bundled "
             "Draft JSON Schema for one JSONL line (stdout) and is not tied to cli_machine_readable_schemas. "
             "replayt ci still prints a one-line stderr reminder when --output json is used. See "
@@ -1222,6 +1282,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="validate_report",
                     when="with --dry-check (graph/input validation only)",
+                    exit_codes_with_json_on_stdout=(0, 1),
                 ),
                 _stdout_json_route(
                     runx,
@@ -1230,6 +1291,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="run_result",
                     when="without --dry-check (normal run or --dry-run trace)",
+                    exit_codes_with_json_on_stdout=(0, 1, 2),
                 ),
             ],
             "config": [
@@ -1243,6 +1305,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="workflow_contract_check",
                     when="with --check SNAPSHOT (drift report; exit 1 when not ok)",
+                    exit_codes_with_json_on_stdout=(0, 1),
                 ),
                 _stdout_json_route(
                     inv,
@@ -1258,7 +1321,12 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             ],
             "doctor": [
                 _stdout_json_route(
-                    "doctor_preflight", option="--format", short="-f", equals="json", schema_key="doctor_report"
+                    "doctor_preflight",
+                    option="--format",
+                    short="-f",
+                    equals="json",
+                    schema_key="doctor_report",
+                    exit_codes_with_json_on_stdout=(0, 1),
                 )
             ],
             "init": [
@@ -1294,6 +1362,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="validate_report",
                     when="with --dry-check (graph/input validation only)",
+                    exit_codes_with_json_on_stdout=(0, 1),
                 ),
                 _stdout_json_route(
                     runx,
@@ -1302,6 +1371,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="run_result",
                     when="without --dry-check (normal run or --dry-run trace)",
+                    exit_codes_with_json_on_stdout=(0, 1, 2),
                 ),
             ],
             "seal": [
@@ -1322,6 +1392,14 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     when="with --list",
                 ),
                 _stdout_json_route(
+                    inv,
+                    option="--output",
+                    short="-o",
+                    equals="json",
+                    schema_key="try_print_snippet",
+                    when="with --print-snippet KEY (no run; text stdout prints command only when --output text)",
+                ),
+                _stdout_json_route(
                     "try_copy_scaffold",
                     option="--output",
                     short="-o",
@@ -1336,6 +1414,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="validate_report",
                     when="with --dry-check (invokes replayt run --dry-check)",
+                    exit_codes_with_json_on_stdout=(0, 1),
                 ),
                 _stdout_json_route(
                     runx,
@@ -1344,11 +1423,17 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     equals="json",
                     schema_key="run_result",
                     when="example run path without --dry-check (invokes replayt run for the packaged target)",
+                    exit_codes_with_json_on_stdout=(0, 1, 2),
                 ),
             ],
             "validate": [
                 _stdout_json_route(
-                    inv, option="--format", short="-f", equals="json", schema_key="validate_report"
+                    inv,
+                    option="--format",
+                    short="-f",
+                    equals="json",
+                    schema_key="validate_report",
+                    exit_codes_with_json_on_stdout=(0, 1),
                 )
             ],
             "verify-seal": [
@@ -1358,6 +1443,7 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
                     short="-o",
                     equals="json",
                     schema_key="verify_seal_report",
+                    exit_codes_with_json_on_stdout=(0, 1),
                 )
             ],
             "version": [
@@ -1374,6 +1460,55 @@ def build_cli_json_stdout_contract() -> dict[str, Any]:
             sk = row["schema_key"]
             row["schema"] = sm[str(sk)]
     return contract
+
+
+def build_run_result_status_contract() -> dict[str, Any]:
+    """Canonical ``RunResult.status`` / ``replayt.run_result.v1`` status strings (version JSON)."""
+
+    wf_cmds = ["ci", "resume", "run", "try"]
+    return {
+        "schema": RUN_RESULT_STATUS_CONTRACT_SCHEMA,
+        "payload": {
+            "schema_key": "run_result",
+            "schema_id": RUN_RESULT_SCHEMA,
+            "status_field": "status",
+        },
+        "statuses": [
+            {
+                "value": "completed",
+                "typical_exit_code": 0,
+                "workflow_subcommands": list(wf_cmds),
+                "summary": "Workflow finished successfully without pause or unhandled failure.",
+                "final_state": "Set to the last handler state when the run completes normally.",
+                "error": "Usually null.",
+            },
+            {
+                "value": "failed",
+                "typical_exit_code": 1,
+                "workflow_subcommands": list(wf_cmds),
+                "summary": "Workflow failed, was interrupted, or a precondition or policy hook aborted the run.",
+                "final_state": "Often the state where failure occurred; may be null when the run aborts early.",
+                "error": "Human-oriented message when available.",
+            },
+            {
+                "value": "paused",
+                "typical_exit_code": 2,
+                "workflow_subcommands": list(wf_cmds),
+                "summary": "Paused for approval or similar; continue with replayt resume on the same run_id.",
+                "final_state": "The state that requested pause.",
+                "error": "Usually null.",
+            },
+        ],
+        "notes": [
+            "Only these three strings are produced for RunResult.status and replayt.run_result.v1 status.",
+            "typical_exit_code matches cli_exit_codes.workflow_run.exit_codes for the listed subcommands.",
+            (
+                "List/filter helpers may surface an \"unknown\" terminal status when JSONL is incomplete; "
+                "that label is not a RunResult.status value."
+            ),
+        ],
+        "cli_exit_codes_cross_reference": "workflow_run",
+    }
 
 
 def build_cli_exit_codes_report() -> dict[str, Any]:

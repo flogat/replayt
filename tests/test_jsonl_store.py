@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import os
+import stat
 from pathlib import Path
 
 import pytest
 
 from replayt.persistence import JSONLStore, validate_run_id
+from replayt.persistence.jsonl import resolve_jsonl_posix_new_file_mode_from_env
 
 
 def test_jsonl_roundtrip(tmp_path: Path) -> None:
@@ -64,6 +67,18 @@ def test_jsonl_store_raises_for_corruption(tmp_path: Path) -> None:
     store = JSONLStore(tmp_path)
     with pytest.raises(RuntimeError, match="Corrupted JSONL"):
         store.load_events("bad")
+
+
+def test_jsonl_store_raises_for_non_object_line(tmp_path: Path) -> None:
+    path = tmp_path / "arr.jsonl"
+    path.write_text(
+        '{"ts":"t","run_id":"arr","seq":1,"type":"run_started","payload":{}}\n'
+        '[1,2,3]\n',
+        encoding="utf-8",
+    )
+    store = JSONLStore(tmp_path)
+    with pytest.raises(RuntimeError, match="JSON object"):
+        store.load_events("arr")
 
 
 def test_jsonl_store_raises_for_truncated_line(tmp_path: Path) -> None:
@@ -135,3 +150,40 @@ def test_validate_run_id_rejects_unsafe_ids() -> None:
         validate_run_id("../x")
     with pytest.raises(ValueError, match="run_id"):
         validate_run_id("x/y")
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX chmod modes")
+def test_jsonl_store_applies_posix_owner_only_mode_on_new_run_file(tmp_path: Path) -> None:
+    store = JSONLStore(tmp_path, posix_new_file_mode=0o600)
+    store.append_event("r1", ts="t1", typ="run_started", payload={})
+    mode = stat.S_IMODE((tmp_path / "r1.jsonl").stat().st_mode)
+    assert mode == 0o600
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX chmod modes")
+def test_jsonl_store_posix_mode_none_skips_chmod(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[object, int]] = []
+    real_chmod = os.chmod
+
+    def spy_chmod(path: os.PathLike[str] | str, mode: int, /) -> None:
+        calls.append((path, mode))
+        return real_chmod(path, mode)
+
+    monkeypatch.setattr(os, "chmod", spy_chmod)
+    store = JSONLStore(tmp_path, posix_new_file_mode=None)
+    store.append_event("r1", ts="t1", typ="run_started", payload={})
+    assert calls == []
+
+
+def test_resolve_jsonl_posix_new_file_mode_from_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("REPLAYT_JSONL_POSIX_MODE", raising=False)
+    if os.name == "nt":
+        assert resolve_jsonl_posix_new_file_mode_from_env() is None
+        return
+    assert resolve_jsonl_posix_new_file_mode_from_env() == 0o600
+    monkeypatch.setenv("REPLAYT_JSONL_POSIX_MODE", "inherit")
+    assert resolve_jsonl_posix_new_file_mode_from_env() is None
+    monkeypatch.setenv("REPLAYT_JSONL_POSIX_MODE", "660")
+    assert resolve_jsonl_posix_new_file_mode_from_env() == 0o660
+    monkeypatch.setenv("REPLAYT_JSONL_POSIX_MODE", "0o640")
+    assert resolve_jsonl_posix_new_file_mode_from_env() == 0o640

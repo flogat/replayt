@@ -100,6 +100,25 @@ def test_multi_store_close_calls_primary_close_when_present(tmp_path: Path) -> N
         mirror._cx.execute("SELECT 1")
 
 
+def test_sqlite_load_events_non_object_payload_includes_seq(tmp_path: Path) -> None:
+    db = tmp_path / "db.sqlite3"
+    store = SQLiteStore(db)
+    store.close()
+    cx = sqlite3.connect(db)
+    cx.execute(
+        "INSERT INTO events (run_id, seq, type, ts, payload_json) VALUES (?,?,?,?,?)",
+        ("r1", 1, "x", "t", "[1, 2, 3]"),
+    )
+    cx.commit()
+    cx.close()
+    reader = SQLiteStore(db)
+    with pytest.raises(RuntimeError) as exc_info:
+        reader.load_events("r1")
+    assert "Corrupted SQLite event payload" in str(exc_info.value)
+    assert "seq=1" in str(exc_info.value)
+    assert "JSON object" in str(exc_info.value)
+
+
 def test_sqlite_load_events_corrupt_payload_includes_seq(tmp_path: Path) -> None:
     db = tmp_path / "db.sqlite3"
     store = SQLiteStore(db)

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import shlex
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -103,6 +104,37 @@ def packaged_example_cli_snippets(key: str) -> dict[str, str]:
         "try_dry_check": f"replayt try --example {key} --dry-check",
         "copy_to_dot": f"replayt try --example {key} --copy-to .",
     }
+
+
+_TRY_SNIPPET_BASE_KEYS = frozenset(packaged_example_cli_snippets("hello-world"))
+
+TRY_PRINT_SNIPPET_KEYS: frozenset[str] = _TRY_SNIPPET_BASE_KEYS | frozenset({"target", "run", "run_dry_check"})
+
+
+def format_try_print_snippet_command(
+    spec: ExampleSpec,
+    snippet_key: str,
+    *,
+    resolved_inputs_json: str,
+) -> str:
+    """Build a single shell-oriented line for ``replayt try --print-snippet`` (stdout)."""
+
+    snippets = packaged_example_cli_snippets(spec.key)
+    if snippet_key in snippets:
+        return snippets[snippet_key]
+    if snippet_key == "target":
+        return spec.target
+    if snippet_key in ("run", "run_dry_check"):
+        compact = json.dumps(
+            json.loads(resolved_inputs_json),
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        cmd = f"replayt run {spec.target} --inputs-json {shlex.quote(compact)}"
+        if snippet_key == "run_dry_check":
+            cmd += " --dry-check"
+        return cmd
+    raise KeyError(snippet_key)
 
 
 def list_packaged_examples() -> list[ExampleSpec]:

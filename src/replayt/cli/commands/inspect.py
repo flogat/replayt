@@ -13,7 +13,13 @@ from typing import Any, Literal
 
 import typer
 
-from replayt.cli.config import DEFAULT_LOG_DIR, get_project_config, resolve_log_dir, resolve_run_inputs_json
+from replayt.cli.config import (
+    DEFAULT_LOG_DIR,
+    get_project_config,
+    resolve_cli_target,
+    resolve_log_dir,
+    resolve_run_inputs_json,
+)
 from replayt.cli.display import (
     event_summary,
     experiment_filters_match,
@@ -40,6 +46,7 @@ from replayt.cli.display import (
     run_matches_structured_schema_name_filter,
     run_matches_tool_name_filter,
     run_meta_filters_match,
+    stakeholder_report_diff_handoff_markdown,
     tags_match,
 )
 from replayt.cli.run_id_hints import echo_missing_run_hints
@@ -531,25 +538,29 @@ def cmd_replay(
 
 
 def cmd_graph(
-    target: str = typer.Argument(
-        ...,
-        metavar="TARGET",
+    target: str | None = typer.Argument(
+        None,
+        metavar="[TARGET]",
         help=(
             "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Optional when REPLAYT_TARGET is set or [tool.replayt] / .replaytrc.toml defines target. "
             "Loading a .py file executes that file as code. Use only trusted paths."
         ),
     ),
 ) -> None:
+    cfg, _, _, _ = get_project_config()
+    target = resolve_cli_target(target, cfg=cfg)
     wf = load_target(target)
     typer.echo(workflow_to_mermaid(wf).rstrip())
 
 
 def cmd_contract(
-    target: str = typer.Argument(
-        ...,
-        metavar="TARGET",
+    target: str | None = typer.Argument(
+        None,
+        metavar="[TARGET]",
         help=(
             "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Optional when REPLAYT_TARGET is set or [tool.replayt] / .replaytrc.toml defines target. "
             "Loading a .py file executes that file as code. Use only trusted paths."
         ),
     ),
@@ -576,6 +587,8 @@ def cmd_contract(
         typer.echo("Use only one of --snapshot-out or --check", err=True)
         raise typer.Exit(code=1)
 
+    cfg, _, _, _ = get_project_config()
+    target = resolve_cli_target(target, cfg=cfg)
     wf = load_target(target)
     contract = wf.contract()
     if snapshot_out is not None:
@@ -624,11 +637,12 @@ def cmd_contract(
 
 
 def cmd_validate(
-    target: str = typer.Argument(
-        ...,
-        metavar="TARGET",
+    target: str | None = typer.Argument(
+        None,
+        metavar="[TARGET]",
         help=(
             "MODULE:VAR, workflow.py, or workflow.yaml. "
+            "Optional when REPLAYT_TARGET is set or [tool.replayt] / .replaytrc.toml defines target. "
             "Loading a .py file executes that file as code. Use only trusted paths."
         ),
     ),
@@ -686,9 +700,10 @@ def cmd_validate(
     if print_inputs_template and output == "json":
         raise typer.BadParameter("Cannot combine --print-inputs-template with --format json (stdout conflict).")
 
+    cfg, cfg_path, _unknown, _shadowed = get_project_config()
+    target = resolve_cli_target(target, cfg=cfg)
     wf = load_target(target)
     errors, warnings = validate_workflow_graph(wf, strict_graph=strict_graph)
-    cfg, cfg_path, _unknown, _shadowed = get_project_config()
     inputs_resolved, _inputs_src = resolve_run_inputs_json(
         inputs_json, inputs_file, cfg=cfg, config_path=cfg_path, input_value=input_value
     )
@@ -1112,6 +1127,14 @@ def cmd_diff(
     log_subdir: str | None = typer.Option(None, "--log-subdir"),
     sqlite: Path | None = typer.Option(None, help="Optional SQLite file to read from instead of JSONL."),
     output: Literal["text", "json"] = typer.Option("text", "--output", "-o"),
+    style: Literal["default", "stakeholder", "support"] = typer.Option(
+        "default",
+        "--style",
+        help=(
+            "Text output only: default (diff lines only) or stakeholder/support to append the same "
+            "Stakeholder CLI handoff section as replayt report-diff (ignored with --output json)."
+        ),
+    ),
     llm_model: list[str] | None = typer.Option(
         None,
         "--llm-model",
@@ -1222,6 +1245,18 @@ def cmd_diff(
     delta = db["total_latency_ms"] - da["total_latency_ms"]
     sign = "+" if delta >= 0 else ""
     typer.echo(f"latency: a={da['total_latency_ms']}ms b={db['total_latency_ms']}ms ({sign}{delta}ms)")
+    if style in {"stakeholder", "support"}:
+        typer.echo()
+        typer.echo(
+            stakeholder_report_diff_handoff_markdown(
+                run_a,
+                run_b,
+                events_a,
+                events_b,
+                style=style,
+                llm_model_filter=llm_model_filters,
+            ).rstrip("\n")
+        )
 
 
 def cmd_gc(

@@ -119,7 +119,11 @@ def resolve_policy_hook_context_json(cli_raw: str | None, *, cfg: dict[str, Any]
 
 
 def resolve_cli_target(explicit: str | None, *, cfg: dict[str, Any]) -> str:
-    """Resolve ``replayt run`` / ``replayt ci`` target: CLI arg, then env, then project config."""
+    """Resolve workflow target: CLI arg, then env, then project config.
+
+    Used by ``replayt run`` / ``replayt ci`` and by ``replayt validate`` / ``graph`` / ``contract``
+    when the positional ``TARGET`` is omitted.
+    """
 
     if explicit is not None and str(explicit).strip():
         return str(explicit).strip()
@@ -266,13 +270,14 @@ def build_cli_run_defaults_contract() -> dict[str, object]:
     return {
         "schema": CLI_RUN_DEFAULTS_CONTRACT_SCHEMA,
         "workflow_target": {
-            "optional_on_commands": ["ci", "run"],
+            "optional_on_commands": ["ci", "contract", "graph", "run", "validate"],
             "precedence": [
                 {
                     "order": 1,
                     "id": "cli_positional_target",
                     "description": (
-                        "Non-empty TARGET argument on replayt run / replayt ci "
+                        "Non-empty TARGET argument on replayt run / replayt ci / replayt validate / "
+                        "replayt graph / replayt contract "
                         "(MODULE:VAR or a trusted workflow .py / .yaml / .yml path)."
                     ),
                 },
@@ -280,7 +285,9 @@ def build_cli_run_defaults_contract() -> dict[str, object]:
                     "order": 2,
                     "id": "env_REPLAYT_TARGET",
                     "env": REPLAYT_TARGET_ENV,
-                    "description": "Non-empty REPLAYT_TARGET when TARGET is omitted on run or ci.",
+                    "description": (
+                        "Non-empty REPLAYT_TARGET when TARGET is omitted on run, ci, validate, graph, or contract."
+                    ),
                 },
                 {
                     "order": 3,
@@ -297,9 +304,9 @@ def build_cli_run_defaults_contract() -> dict[str, object]:
                 "(see docs/CONFIG.md)."
             ),
             "required_target_elsewhere_note": (
-                "Subcommands that declare TARGET as a required Typer argument (for example validate, contract, "
-                "graph, resume, export-run) do not fall back to REPLAYT_TARGET or project_config target; pass TARGET "
-                "on argv. replayt doctor --target similarly uses only the flag value."
+                "replayt resume still requires TARGET on argv. replayt doctor --target uses only the flag value. "
+                "Commands that take a run id (inspect, replay, export-run, bundle-export, seal, verify-seal, report, "
+                "…) do not use REPLAYT_TARGET or project_config target."
             ),
         },
         "run_inputs": {
@@ -399,8 +406,8 @@ def build_project_setting_precedence_contract() -> dict[str, object]:
         "schema": PROJECT_SETTING_PRECEDENCE_CONTRACT_SCHEMA,
         "extends_cli_run_defaults_contract": CLI_RUN_DEFAULTS_CONTRACT_SCHEMA,
         "extends_note": (
-            "Optional TARGET on replayt run / replayt ci and resolve_run_inputs_json ordering (including "
-            "doctor --target) are specified only in cli_run_defaults_contract; this object covers other "
+            "Optional TARGET on replayt run / ci / validate / graph / contract and resolve_run_inputs_json ordering "
+            "(including doctor --target) are specified only in cli_run_defaults_contract; this object covers other "
             "merged settings."
         ),
         "settings": [

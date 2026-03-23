@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import hashlib
 import importlib
 import json
 import sys
@@ -13,6 +14,11 @@ from typing import Any
 
 SCHEMA = "replayt.example_catalog_contract.v1"
 CHECK_SCHEMA = "replayt.example_catalog_contract_check.v1"
+
+
+def _example_row_sha256(row: dict[str, Any]) -> str:
+    payload = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
 def _ensure_repo_src_on_path(repo_root: Path | None = None) -> None:
@@ -59,6 +65,7 @@ def example_catalog_contract_report(
         "module": module.__name__,
         "example_count": len(examples),
         "examples": examples,
+        "example_sha256s": [_example_row_sha256(row) for row in examples],
     }
 
 

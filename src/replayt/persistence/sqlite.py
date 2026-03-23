@@ -114,6 +114,11 @@ class SQLiteStore:
                 raise RuntimeError(
                     f"Corrupted SQLite event payload for run_id={run_id!r} seq={seq}"
                 ) from e
+            if not isinstance(payload, dict):
+                raise RuntimeError(
+                    f"Corrupted SQLite event payload for run_id={run_id!r} seq={seq}: "
+                    "payload_json must decode to a JSON object"
+                )
             events.append(
                 {
                     "seq": seq,

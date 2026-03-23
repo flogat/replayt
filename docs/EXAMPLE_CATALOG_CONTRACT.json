@@ -1,5 +1,13 @@
 {
   "example_count": 6,
+  "example_sha256s": [
+    "5ce8982fd9c9580ef222f63e06c04fa0191b9acc6f4a03b8e9322eb58c82866a",
+    "fe974e24f4968971d9aff72d405bacc2a71c0e0943029cde355e6e116a18147c",
+    "e4dcc45534e4eff164a50509e82af39d4adb1290224458c0c7c1da98568a1aa8",
+    "219114131c89dc407b63034643c99f72bbd170637fe5e87934e3a1e8058627ca",
+    "b4d707a47b030dfae8841e1179769d050c4f391899cd18ddd04797aacfdb92f3",
+    "30f76dd6597bd1acfb87d675aca5f8a6a1f89780a77926d2656a10964908318e"
+  ],
   "examples": [
     {
       "description": "Smallest possible replayt workflow; deterministic and offline-friendly.",

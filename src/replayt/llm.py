@@ -17,11 +17,13 @@ from replayt.llm_coercion import (
     coerce_llm_extra_body,
     coerce_llm_seed,
     coerce_llm_stop_sequences,
+    coerce_llm_tags,
     coerce_max_tokens_for_api,
     coerce_openai_penalty,
     coerce_temperature,
     coerce_timeout_seconds,
     coerce_top_p,
+    merge_llm_tag_tuples,
 )
 from replayt.security import sanitize_base_url_for_output
 from replayt.types import LogMode
@@ -102,6 +104,13 @@ def _extract_json_object(text: str, *, max_brace_starts: int = _MAX_JSON_OBJECT_
 def _stable_json_sha256(value: Any) -> str:
     canonical = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+
+
+def _top_level_llm_tags(effective: dict[str, Any]) -> list[str] | None:
+    raw = effective.get("llm_tags")
+    if isinstance(raw, list) and raw:
+        return list(raw)
+    return None
 
 
 def _coerce_call_label(raw: Any) -> str | None:
@@ -344,6 +353,8 @@ def _retry_after_delay_seconds(raw: str | None) -> float:
     if not math.isfinite(delay) or delay < 0:
         return _RETRY_BASE_DELAY
     return delay
+
+
 _CHAT_COMPLETIONS_RESERVED_FIELDS = frozenset(
     {
         "model",
@@ -356,6 +367,7 @@ _CHAT_COMPLETIONS_RESERVED_FIELDS = frozenset(
         "max_tokens",
         "stop",
         "response_format",
+        "llm_tags",
     }
 )
 
@@ -488,7 +500,6 @@ class OpenAICompatClient:
         cap = self.settings.max_response_bytes
         drain_cap = min(cap, 65_536)
 
-        last_exc: Exception | None = None
         for attempt in range(max_attempts):
             try:
                 with self._client.stream("POST", url, json=payload, headers=headers, timeout=timeout) as r:
@@ -515,18 +526,25 @@ class OpenAICompatClient:
                             pass
                     raw = _read_response_body_capped(r, cap)
                 try:
-                    return json.loads(raw.decode("utf-8"))
+                    text = raw.decode("utf-8")
+                except UnicodeDecodeError as exc:
+                    raise RuntimeError(
+                        f"Chat completions response was not valid UTF-8: {exc}; body_bytes={len(raw)}"
+                    ) from exc
+                try:
+                    return json.loads(text)
                 except json.JSONDecodeError as exc:
                     raise RuntimeError(
                         f"Chat completions response was not valid JSON: {exc}; body_bytes={len(raw)}"
                     ) from exc
-            except httpx.TransportError as exc:
-                last_exc = exc
+            except httpx.TransportError:
                 if attempt < max_attempts - 1:
                     time.sleep(min(_RETRY_BASE_DELAY * (2**attempt), _RETRY_MAX_DELAY))
                     continue
                 raise
-        raise last_exc  # type: ignore[misc]
+        raise RuntimeError(
+            "replayt internal error: OpenAICompatClient.chat_completions exited without returning"
+        )
 
 
 class LLMBridge:
@@ -568,6 +586,7 @@ class LLMBridge:
         stop: list[str] | tuple[str, ...] | str | None = None,
         call_label: str | None = None,
         http_retries: int | None = None,
+        llm_tags: list[str] | tuple[str, ...] | str | None = None,
     ) -> LLMBridge:
         """Return a new bridge with merged per-call defaults (logged on each request as ``effective``)."""
 
@@ -629,6 +648,13 @@ class LLMBridge:
                 merged.pop("call_label", None)
         if http_retries is not None:
             merged["http_retries"] = coerce_http_retries(http_retries)
+        if llm_tags is not None:
+            coerced_tags = coerce_llm_tags(llm_tags)
+            if coerced_tags is None:
+                merged.pop("llm_tags", None)
+            else:
+                prev_tags = coerce_llm_tags(merged.get("llm_tags"))
+                merged["llm_tags"] = merge_llm_tag_tuples(prev_tags, coerced_tags)
         if response_format is not None:
             if response_format == {}:
                 merged.pop("response_format", None)
@@ -659,6 +685,7 @@ class LLMBridge:
         extra_body: dict[str, Any] | None,
         stop: list[str] | tuple[str, ...] | str | None,
         http_retries: int | None = None,
+        llm_tags: list[str] | tuple[str, ...] | str | None = None,
     ) -> tuple[dict[str, Any], dict[str, str], str, dict[str, Any] | None]:
         d = self._defaults
         base = self._client.settings
@@ -778,6 +805,11 @@ class LLMBridge:
             effective["stop"] = list(eff_stop)
         if eff_extra_body:
             effective["extra_body"] = eff_extra_body
+        d_tags = coerce_llm_tags(d.get("llm_tags"))
+        call_tags = coerce_llm_tags(llm_tags) if llm_tags is not None else None
+        eff_tag_tuple = merge_llm_tag_tuples(d_tags, call_tags)
+        if eff_tag_tuple:
+            effective["llm_tags"] = list(eff_tag_tuple)
         return effective, hdrs, eff_base_url, eff_extra_body
 
     @staticmethod
@@ -810,6 +842,7 @@ class LLMBridge:
         schema_name: str | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
         http_retries: int | None = None,
+        llm_tags: list[str] | tuple[str, ...] | str | None = None,
     ) -> tuple[str, dict[str, Any], dict[str, str], dict[str, Any]]:
         state = self._state_getter()
         effective, hdrs, eff_base_url, eff_extra_body = self._merge_call(
@@ -827,6 +860,7 @@ class LLMBridge:
             extra_body=extra_body,
             stop=stop,
             http_retries=http_retries,
+            llm_tags=llm_tags,
         )
         if effective_extras:
             effective = {**effective, **effective_extras}
@@ -853,6 +887,9 @@ class LLMBridge:
         cl = effective.get("call_label")
         if isinstance(cl, str) and cl:
             req_payload["call_label"] = cl
+        tl_tags = _top_level_llm_tags(effective)
+        if tl_tags is not None:
+            req_payload["llm_tags"] = tl_tags
         if self._log_mode == LogMode.full:
             req_payload["messages"] = messages
         elif self._log_mode == LogMode.redacted:
@@ -906,6 +943,8 @@ class LLMBridge:
             resp_payload["schema_name"] = schema_name
         if isinstance(cl, str) and cl:
             resp_payload["call_label"] = cl
+        if tl_tags is not None:
+            resp_payload["llm_tags"] = tl_tags
         if self._log_mode == LogMode.full:
             resp_payload["content"] = content
         elif self._log_mode == LogMode.redacted:
@@ -947,6 +986,9 @@ class LLMBridge:
             ecl = effective.get("call_label")
             if isinstance(ecl, str) and ecl:
                 payload["call_label"] = ecl
+            etags = _top_level_llm_tags(effective)
+            if etags is not None:
+                payload["llm_tags"] = etags
         if fingerprints:
             payload.update(fingerprints)
         if response_chars is not None:
@@ -994,6 +1036,7 @@ class LLMBridge:
         schema_name: str | None = None,
         response_format: Any = _RF_UNSET,
         http_retries: int | None = None,
+        llm_tags: list[str] | tuple[str, ...] | str | None = None,
     ) -> str:
         sn = str(schema_name).strip() if schema_name is not None else None
         if response_format is _RF_UNSET:
@@ -1021,6 +1064,7 @@ class LLMBridge:
             stop=stop,
             schema_name=sn or None,
             http_retries=http_retries,
+            llm_tags=llm_tags,
         )
         return text
 
@@ -1044,6 +1088,7 @@ class LLMBridge:
         native_response_format: bool | None = None,
         stop: list[str] | tuple[str, ...] | str | None = None,
         http_retries: int | None = None,
+        llm_tags: list[str] | tuple[str, ...] | str | None = None,
     ) -> T:
         use_native_response_format = (
             bool(self._defaults.get("native_response_format"))
@@ -1071,6 +1116,7 @@ class LLMBridge:
                 extra_body=extra_body,
                 stop=stop,
                 http_retries=http_retries,
+                llm_tags=llm_tags,
             )
             effective_schema_limit = {**eff_pre, "structured_output_mode": structured_output_mode}
             exc = ValueError(
@@ -1113,6 +1159,7 @@ class LLMBridge:
             schema_name=model_type.__name__,
             stop=stop,
             http_retries=http_retries,
+            llm_tags=llm_tags,
         )
         cap = self._client.settings.max_parse_response_chars
         if len(text) > cap:
@@ -1187,5 +1234,8 @@ class LLMBridge:
         socl = effective.get("call_label")
         if isinstance(socl, str) and socl:
             so_payload["call_label"] = socl
+        sotags = _top_level_llm_tags(effective)
+        if sotags is not None:
+            so_payload["llm_tags"] = sotags
         self._emit("structured_output", so_payload)
         return result

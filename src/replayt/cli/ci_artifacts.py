@@ -7,12 +7,47 @@ import os
 import platform
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from replayt.cli.run_support import exit_code_for_run_result
 from replayt.runner import RunResult
 from replayt.workflow import Workflow
+
+# Env vars commonly set by hosted CI vendors. Only *presence* is recorded on
+# ``replayt.ci_run_summary.v1`` (never values), so summaries stay correlation-safe.
+CI_MARKER_ENV_NAMES: tuple[str, ...] = (
+    "BITBUCKET_PIPELINE_UUID",
+    "BUILDKITE",
+    "CI",
+    "CIRCLECI",
+    "CODEBUILD_BUILD_ID",
+    "DRONE",
+    "GITHUB_ACTIONS",
+    "GITLAB_CI",
+    "JENKINS_URL",
+    "TEAMCITY_VERSION",
+    "TF_BUILD",
+    "TRAVIS",
+)
+
+
+def _ci_marker_env_presence() -> dict[str, bool]:
+    return {name: bool(os.environ.get(name, "").strip()) for name in CI_MARKER_ENV_NAMES}
+
+
+def _host_clock_utc_offset_minutes() -> int | None:
+    """Local wall clock's offset from UTC in whole minutes, or ``None`` if unknown."""
+
+    try:
+        off = datetime.now().astimezone().utcoffset()
+    except (OSError, OverflowError, ValueError):
+        return None
+    if off is None:
+        return None
+    secs = int(round(off.total_seconds()))
+    return secs // 60
 
 
 def _ulimit_nofile_pair() -> tuple[int | None, int | None]:
@@ -64,6 +99,8 @@ def ci_run_summary_runtime_fields() -> dict[str, Any]:
         "stdout_encoding": getattr(sys.stdout, "encoding", None),
         "ulimit_nofile_soft": soft,
         "ulimit_nofile_hard": hard,
+        "ci_marker_env": _ci_marker_env_presence(),
+        "host_clock_utc_offset_minutes": _host_clock_utc_offset_minutes(),
     }
 
 

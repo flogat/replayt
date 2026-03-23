@@ -18,6 +18,7 @@ def test_build_skill_loop_placeholder_contract_shape() -> None:
     assert [r["name"] for r in check] == sorted(r["name"] for r in check)
     names = {r["name"] for r in skill}
     assert names == {
+        "invocation_file",
         "iteration",
         "log_file",
         "max_iterations",

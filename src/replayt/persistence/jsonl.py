@@ -82,11 +82,49 @@ def validate_run_id(run_id: str) -> str:
     return _validate_run_id(run_id)
 
 
+def resolve_jsonl_posix_new_file_mode_from_env() -> int | None:
+    """Resolve chmod mode for new run ``*.jsonl`` files when the CLI builds the primary store.
+
+    On Windows, always returns ``None`` (no chmod). When the env var is unset, defaults to
+    ``0o600`` (owner read/write only). Set ``REPLAYT_JSONL_POSIX_MODE=inherit`` to leave
+    permissions to the process umask instead.
+    """
+
+    if os.name == "nt":  # pragma: no cover
+        return None
+    raw = os.environ.get("REPLAYT_JSONL_POSIX_MODE")
+    if raw is None:
+        return 0o600
+    s = str(raw).strip().lower()
+    if s in ("inherit", "umask", "none", "no", ""):
+        return None
+    if s.startswith("0o"):
+        s = s[2:]
+    if not s or any(c not in "01234567" for c in s):
+        _log.warning("Invalid REPLAYT_JSONL_POSIX_MODE %r; using 0600", raw)
+        return 0o600
+    mode = int(s, 8) & 0o777
+    if mode == 0:
+        _log.warning("REPLAYT_JSONL_POSIX_MODE resolved to 0; using 0600")
+        return 0o600
+    return mode
+
+
+def _apply_posix_new_file_mode(path: Path, mode: int | None) -> None:
+    if mode is None or os.name == "nt":  # pragma: no cover
+        return
+    try:
+        os.chmod(path, mode)
+    except OSError:
+        _log.warning("Could not chmod JSONL run file to %03o: %s", mode, path, exc_info=True)
+
+
 class JSONLStore:
     """Append-only JSONL per run under a base directory."""
 
-    def __init__(self, base_dir: Path, *, create: bool = True) -> None:
+    def __init__(self, base_dir: Path, *, create: bool = True, posix_new_file_mode: int | None = 0o600) -> None:
         self.base_dir = base_dir
+        self._posix_new_file_mode = None if os.name == "nt" else posix_new_file_mode
         if create:
             self.base_dir.mkdir(parents=True, exist_ok=True)
 
@@ -99,6 +137,7 @@ class JSONLStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         if not path.exists() or path.stat().st_size == 0:
             path.write_bytes(b"\n")
+            _apply_posix_new_file_mode(path, self._posix_new_file_mode)
         return path
 
     def _max_seq_full_scan(self, f) -> int:
@@ -194,11 +233,17 @@ class JSONLStore:
                         if not line:
                             continue
                         try:
-                            out.append(json.loads(line))
+                            event = json.loads(line)
                         except json.JSONDecodeError as e:
                             raise RuntimeError(
                                 f"Corrupted JSONL event log for run_id={run_id!r} at line {lineno}"
                             ) from e
+                        if not isinstance(event, dict):
+                            raise RuntimeError(
+                                f"Corrupted JSONL event log for run_id={run_id!r} at line {lineno}: "
+                                "each line must be a JSON object"
+                            )
+                        out.append(event)
         except UnicodeDecodeError as e:
             raise RuntimeError(
                 f"Corrupted JSONL event log for run_id={run_id!r}: file is not valid UTF-8"

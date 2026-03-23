@@ -23,10 +23,12 @@ from replayt.cli.distribution_metadata import DISTRIBUTION_METADATA_SCHEMA, buil
 from replayt.cli.path_readiness import build_operational_paths_report
 from replayt.cli.run_support import (
     RUN_RESULT_SCHEMA,
+    RUN_RESULT_STATUS_CONTRACT_SCHEMA,
     build_cli_exit_codes_report,
     build_cli_json_stdout_contract,
     build_cli_stdio_contract,
     build_policy_hook_env_catalog,
+    build_run_result_status_contract,
 )
 from replayt.cli.skill_loop_env import (
     SKILL_LOOP_ENV_CONTRACT_SCHEMA,
@@ -96,6 +98,7 @@ def build_version_report() -> dict[str, object]:
         "maintainer_script_schemas": dict(sorted(MAINTAINER_SCRIPT_SCHEMAS.items())),
         "policy_hook_env_catalog": build_policy_hook_env_catalog(),
         "cli_exit_codes": build_cli_exit_codes_report(),
+        "run_result_status_contract": build_run_result_status_contract(),
         "cli_stdio_contract": build_cli_stdio_contract(),
         "cli_json_stdout_contract": build_cli_json_stdout_contract(),
         "project_config_discovery": build_project_config_discovery_report(),
@@ -121,6 +124,7 @@ def build_version_report() -> dict[str, object]:
             "operational_paths": "replayt.operational_paths.v1",
             "distribution_metadata": DISTRIBUTION_METADATA_SCHEMA,
             "run_result": RUN_RESULT_SCHEMA,
+            "run_result_status_contract": RUN_RESULT_STATUS_CONTRACT_SCHEMA,
             "inspect_report": "replayt.inspect_report.v1",
             "runs_report": "replayt.runs_report.v1",
             "stats_report": "replayt.stats_report.v1",
@@ -132,6 +136,7 @@ def build_version_report() -> dict[str, object]:
             "verify_seal_report": "replayt.verify_seal_report.v1",
             "try_examples": "replayt.try_examples.v1",
             "try_copy": "replayt.try_copy.v1",
+            "try_print_snippet": "replayt.try_print_snippet.v1",
             "init_templates": "replayt.init_templates.v1",
             "skill_loop_env_contract": SKILL_LOOP_ENV_CONTRACT_SCHEMA,
             "skill_loop_placeholder_contract": SKILL_LOOP_PLACEHOLDER_CONTRACT_SCHEMA,

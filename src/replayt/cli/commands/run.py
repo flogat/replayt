@@ -54,6 +54,8 @@ from replayt.cli.run_support import (
     run_hook_argv,
     run_hook_audit,
     run_result_payload,
+    run_started_envelope_ts_from_events,
+    run_started_envelope_ts_from_jsonl_path,
     run_started_hook_json_blobs_from_events,
     run_started_inputs_json_from_events,
     subprocess_env_child,
@@ -72,7 +74,9 @@ from replayt.persistence.jsonl import validate_run_id
 from replayt.runner import Runner, resolve_approval_on_store
 from replayt.security import approval_reason_missing, missing_actor_fields
 from replayt_examples.catalog import (
+    TRY_PRINT_SNIPPET_KEYS,
     copy_packaged_example_to_directory,
+    format_try_print_snippet_command,
     get_packaged_example,
     list_packaged_examples,
     packaged_example_cli_snippets,
@@ -658,6 +662,11 @@ def cmd_run(
         experiment = parse_json_object_option(experiment_json, label="--experiment-json")
     workflow_contract = wf.contract()
     wf_meta_json = workflow_meta_json_for_run_hook(wf)
+    run_started_ts_for_hook: str | None = None
+    if resume:
+        run_started_ts_for_hook = run_started_envelope_ts_from_jsonl_path(
+            log_dir.resolve() / f"{run_id}.jsonl"
+        )
     hook = run_hook_argv(cfg)
     if hook:
         hook_timeout = run_hook_timeout_seconds(cfg)
@@ -680,6 +689,7 @@ def cmd_run(
                 experiment_json=json.dumps(experiment, sort_keys=True) if experiment is not None else None,
                 workflow_meta_json=wf_meta_json,
                 policy_hook_context_json=policy_hook_canonical,
+                run_started_ts=run_started_ts_for_hook,
                 timeout_seconds=hook_timeout,
             )
         except subprocess.TimeoutExpired as exc:
@@ -789,6 +799,15 @@ def cmd_try(
     ),
     example: str = typer.Option("hello-world", "--example", help="Packaged example key to run."),
     list_examples: bool = typer.Option(False, "--list", help="List packaged examples and exit."),
+    print_snippet: str | None = typer.Option(
+        None,
+        "--print-snippet",
+        help=(
+            "Print one copy-paste shell line for this packaged example and exit (no run). "
+            "Keys: try_offline, try_live, try_dry_check, copy_to_dot, target, run, run_dry_check. "
+            "run and run_dry_check honor --inputs-json, --inputs-file, --input, and hello-world --customer-name."
+        ),
+    ),
     copy_to: Path | None = typer.Option(
         None,
         "--copy-to",
@@ -842,6 +861,9 @@ def cmd_try(
     if list_examples and copy_to is not None:
         raise typer.BadParameter("Cannot combine --copy-to with --list")
 
+    if list_examples and print_snippet is not None:
+        raise typer.BadParameter("Cannot combine --print-snippet with --list")
+
     if list_examples:
         examples = list_packaged_examples()
         if output == "json":
@@ -879,6 +901,62 @@ def cmd_try(
         spec = get_packaged_example(example)
     except KeyError as exc:
         raise typer.BadParameter(str(exc), param_hint="--example") from exc
+
+    if print_snippet is not None:
+        if print_snippet not in TRY_PRINT_SNIPPET_KEYS:
+            allowed = ", ".join(sorted(TRY_PRINT_SNIPPET_KEYS))
+            raise typer.BadParameter(
+                f"Unknown --print-snippet {print_snippet!r}; choose from: {allowed}",
+                param_hint="--print-snippet",
+            )
+        if copy_to is not None:
+            raise typer.BadParameter("Cannot combine --print-snippet with --copy-to")
+        if run_id is not None or timeout is not None:
+            raise typer.BadParameter("Cannot combine --print-snippet with --run-id or --timeout")
+        if dry_check:
+            raise typer.BadParameter("Cannot combine --print-snippet with --dry-check")
+        if live:
+            raise typer.BadParameter(
+                "Cannot combine --print-snippet with --live; use --print-snippet try_live instead"
+            )
+        if tag or redact_key:
+            raise typer.BadParameter("Cannot combine --print-snippet with --tag or --redact-key")
+        run_like = print_snippet in ("run", "run_dry_check")
+        if not run_like:
+            if inputs_json is not None or inputs_file is not None or input_value:
+                raise typer.BadParameter(
+                    "Only run or run_dry_check snippets accept --inputs-json, --inputs-file, or --input"
+                )
+            resolved_inputs = "{}"
+        else:
+            inputs_resolved = inputs_json_from_options(
+                inputs_json, inputs_file, inputs_file_origin="cli"
+            )
+            if inputs_resolved is None:
+                default_inputs = dict(spec.inputs_example)
+                if spec.key == "hello-world":
+                    default_inputs["customer_name"] = customer_name
+                inputs_resolved = json.dumps(default_inputs)
+            inputs_resolved = inputs_json_from_options(inputs_resolved, None, input_value)
+            resolved_inputs = inputs_resolved
+        line = format_try_print_snippet_command(
+            spec, print_snippet, resolved_inputs_json=resolved_inputs
+        )
+        if output == "json":
+            typer.echo(
+                json.dumps(
+                    {
+                        "schema": "replayt.try_print_snippet.v1",
+                        "example": spec.key,
+                        "snippet_key": print_snippet,
+                        "command": line,
+                    },
+                    indent=2,
+                )
+            )
+        else:
+            typer.echo(line)
+        raise typer.Exit(code=0)
 
     if copy_to is not None:
         if live or dry_check or inputs_json is not None or inputs_file is not None or input_value:
@@ -1191,6 +1269,7 @@ def cmd_resume(
             pre_events
         )
         inputs_json = run_started_inputs_json_from_events(pre_events)
+        started_ts = run_started_envelope_ts_from_events(pre_events)
         hook_timeout = resume_hook_timeout_seconds(cfg)
         try:
             invoke_resume_hook(
@@ -1211,6 +1290,7 @@ def cmd_resume(
                 workflow_meta_json=workflow_meta_json,
                 inputs_json=inputs_json,
                 policy_hook_context_json=policy_hook_canonical,
+                run_started_ts=started_ts,
             )
         except subprocess.TimeoutExpired as exc:
             lim = f"{hook_timeout}s" if hook_timeout is not None else "unlimited"

@@ -70,7 +70,7 @@ When you are iterating on one workflow, avoid repeating the module path on every
 replayt run --dry-run --inputs-file inputs.example.json
 ```
 
-An explicit **`TARGET` positional argument always overrides** the default. Check what applies in your shell with **`replayt config --format json`** (`run.default_target`, `run.default_target_source`). **`replayt resume`**, **`replayt validate`**, **`replayt graph`**, and **`replayt contract`** still require a target on the command line (or **`doctor --target`** for preflight only).
+An explicit **`TARGET` positional argument always overrides** the default. Check what applies in your shell with **`replayt config --format json`** (`run.default_target`, `run.default_target_source`). **`replayt validate`**, **`replayt graph`**, and **`replayt contract`** use the same **`REPLAYT_TARGET`** / project **`target`** fallback when you omit the positional (like **`replayt run`** / **`replayt ci`**). **`replayt resume`** still requires **`TARGET`** on argv. **`replayt doctor`** only loads a workflow when you pass **`--target …`** (no implicit default from env or project config for that flag).
 
 ### Common `TARGET` mistakes (first hour)
 
@@ -86,7 +86,7 @@ When you always pass the same **`inputs.example.json`**, set **`REPLAYT_INPUTS_F
 
 ```bash
 replayt run --dry-run
-replayt validate my_pkg.workflow:wf
+replayt validate
 ```
 
 CLI **`--inputs-json`** / **`--inputs-file`** still override. Inspect effective paths with **`replayt config --format json`** (`run.default_inputs_file`, `run.default_inputs_file_source`). **`replayt try`** ignores this default so packaged samples keep their built-in payloads unless you pass **`--inputs-json`** or **`--inputs-file`** explicitly.
@@ -151,9 +151,9 @@ replayt ci "$TARGET" --strict-graph \
   --github-summary
 ```
 
-For pipeline branching on **`replayt run` / `ci` / `resume` / `try`** without rereading prose docs, consume **`cli_exit_codes`** from **`replayt version --format json`** (stable alongside **`cli_machine_readable_schemas`**).
+For pipeline branching on **`replayt run` / `ci` / `resume` / `try`** without rereading prose docs, consume **`cli_exit_codes`** from **`replayt version --format json`** (stable alongside **`cli_machine_readable_schemas`**). Subprocess hosts that parse **`replayt.run_result.v1`** on stdout should treat **`status`** as one of **`completed`**, **`failed`**, or **`paused`** only; the same JSON exposes **`run_result_status_contract`** (`replayt.run_result_status_contract.v1`) so **`typical_exit_code`** stays aligned with **`cli_exit_codes.workflow_run`** without reading **`runner.py`**.
 
-**`replayt.ci_run_summary.v1`** carries **`cwd`**, **`replayt_version`**, **`python_version`**, **`python_implementation`**, **`python_executable`**, **`platform`**, **`machine`**, **`filesystem_encoding`**, **`stdout_encoding`**, and (on POSIX) **`ulimit_nofile_soft`** / **`ulimit_nofile_hard`** next to **`run_id`** and **`exit_code`**, so an uploaded **`summary.json`** stays self-describing when you compare flaky jobs across image, interpreter family (CPython vs PyPy), CPU architecture, venv, working-directory mistakes, Unicode path behavior, or **`EMFILE`**-style file-descriptor ceilings.
+**`replayt.ci_run_summary.v1`** carries **`cwd`**, **`replayt_version`**, **`python_version`**, **`python_implementation`**, **`python_executable`**, **`platform`**, **`machine`**, **`filesystem_encoding`**, **`stdout_encoding`**, **`ci_marker_env`** (which common CI env vars are present; **booleans only**), **`host_clock_utc_offset_minutes`**, and (on POSIX) **`ulimit_nofile_soft`** / **`ulimit_nofile_hard`** next to **`run_id`** and **`exit_code`**, so an uploaded **`summary.json`** stays self-describing when you compare flaky jobs across image, interpreter family (CPython vs PyPy), CPU architecture, CI vendor hints, local clock offset, venv, working-directory mistakes, Unicode path behavior, or **`EMFILE`**-style file-descriptor ceilings.
 
 ```bash
 jq '.cwd, .python_executable, .python_implementation, .machine, .replayt_version, .python_version, .platform, .filesystem_encoding, .stdout_encoding, .ulimit_nofile_soft, .ulimit_nofile_hard, .exit_code' "$ART/summary.json"
@@ -181,7 +181,7 @@ replayt version --format json | jq -e '.operational_paths.ci_artifact_readiness_
 
 ### Beyond core: merging `replayt version` and `replayt config` JSON
 
-**`replayt config --format json`** answers what is **effective for the current working directory** (resolved log paths, hooks, default target when env and argv omit it). **`replayt version --format json`** adds cwd-independent contracts such as **`cli_run_defaults_contract`** (`replayt.cli_run_defaults_contract.v1`), which documents the ordered precedence for optional **`TARGET`** on **`replayt run` / `replayt ci`** and for **`resolve_run_inputs_json`** on **`run` / `ci` / `validate` / `doctor --target`**, and **`project_setting_precedence_contract`** (`replayt.project_setting_precedence_contract.v1`), which documents precedence for default **`log_dir`**, **`log_mode`**, policy hooks, LLM defaults, and related merges (it references **`cli_run_defaults_contract`** so TARGET and inputs are not duplicated). Keep those surfaces separate so local shells stay small; when a platform job needs both shapes in one blob, merge in your pipeline:
+**`replayt config --format json`** answers what is **effective for the current working directory** (resolved log paths, hooks, default target when env and argv omit it). **`replayt version --format json`** adds cwd-independent contracts such as **`cli_run_defaults_contract`** (`replayt.cli_run_defaults_contract.v1`), which documents the ordered precedence for optional **`TARGET`** on **`replayt run` / `replayt ci` / `replayt validate` / `replayt graph` / `replayt contract`** and for **`resolve_run_inputs_json`** on **`run` / `ci` / `validate` / `doctor --target`**, and **`project_setting_precedence_contract`** (`replayt.project_setting_precedence_contract.v1`), which documents precedence for default **`log_dir`**, **`log_mode`**, policy hooks, LLM defaults, and related merges (it references **`cli_run_defaults_contract`** so TARGET and inputs are not duplicated). Keep those surfaces separate so local shells stay small; when a platform job needs both shapes in one blob, merge in your pipeline:
 
 ```bash
 replayt version --format json | jq '.cli_run_defaults_contract'
@@ -219,6 +219,20 @@ Container OOM triage sometimes needs **cgroup** memory limits (**`memory.max`**,
 
 ```bash
 test -r /sys/fs/cgroup/memory.max && head -c 200 /sys/fs/cgroup/memory.max || true
+```
+
+### Beyond core: temp directory probes and `umask` snapshots
+
+Some CI flakes come from a full or **noexec** temp root, or from a surprising **`umask`** on the runner. replayt does **not** embed **`TMPDIR`** / **`TEMP`** writable checks in **`replayt.operational_paths.v1`** or hard-fail **`replayt doctor`** on temp: which env names win and whether a probe should abort the job vary by OS, **Windows** sandboxes, and shared builders. Exercise the directory your stack really uses before **`replayt ci`**:
+
+```bash
+python -c "import pathlib, tempfile; d=pathlib.Path(tempfile.gettempdir()); print(d); open(d/'replayt-ci-probe','w').close()"
+```
+
+**`umask`** is also session-wide and policy-sensitive; replayt does **not** stamp it into **`replayt.ci_run_summary.v1`**. Emit it from **`run_hook`** or your job wrapper when auditors need proof of inherited file modes:
+
+```bash
+umask
 ```
 
 replayt does **not** tee JSONL to **stdout**: treat **`.replayt/runs/*.jsonl`** as the audit source and tail or ship them with your log agent instead of turning the workflow process into a log forwarder.
@@ -300,11 +314,26 @@ python scripts/changelog_unreleased.py --format json --changelog CHANGELOG.md | 
 
 ### Beyond core: bundled pip extra installers and venv scaffolding
 
-replayt does **not** run **`pip`**, **`uv`**, or **`python -m venv`** for you from the CLI. Resolver choice, private indexes, and who may change **site-packages** belong in your shell or CI image. When YAML workflows need **PyYAML**, install the extra yourself; errors from **`replayt run workflow.yaml`** already mention **`pip install replayt[yaml]`** when the module is missing. For a fresh checkout, create **`.venv`** with **`python -m venv .venv`**, activate it (see the quickstart for Windows vs POSIX), then **`pip install replayt`** or **`pip install -e ".[dev]"`** when you are contributing. After **`replayt validate TARGET`** succeeds in text mode, copy the printed **Next:** / **Then:** lines for **`--dry-check`** and a real run. When your steps declare **`@wf.step(..., expects={...})`**, **`replayt validate TARGET --print-inputs-template`** prints a compact JSON skeleton on stdout (placeholders per type; conflicting annotations become **`null`**) so you can redirect to **`inputs.json`** or compare with **`inputs.example.json`** from **`replayt init`**.
+replayt does **not** run **`pip`**, **`uv`**, or **`python -m venv`** for you from the CLI. Resolver choice, private indexes, and who may change **site-packages** belong in your shell or CI image. When YAML workflows need **PyYAML**, install the extra yourself; errors from **`replayt run workflow.yaml`** already mention **`pip install replayt[yaml]`** when the module is missing. For a fresh checkout, create **`.venv`** with **`python -m venv .venv`**, activate it (see the quickstart for Windows vs POSIX), then **`pip install replayt`** or **`pip install -e ".[dev]"`** when you are contributing. After **`replayt validate`** (with **`TARGET`** on argv or resolved from **`REPLAYT_TARGET`** / project **`target`**) succeeds in text mode, copy the printed **Next:** / **Then:** lines for **`--dry-check`** and a real run. When your steps declare **`@wf.step(..., expects={...})`**, **`replayt validate --print-inputs-template`** (same target resolution) prints a compact JSON skeleton on stdout (placeholders per type; conflicting annotations become **`null`**) so you can redirect to **`inputs.json`** or compare with **`inputs.example.json`** from **`replayt init`**.
 
 ```bash
 python -m venv .venv
 pip install "replayt[yaml]"
+```
+
+### Beyond core: dependency lockfiles and secret sync
+
+Some teams want **`replayt freeze`**, **`replayt deps`**, or a command that turns workflow imports into **`requirements.txt`**. Import graphs and resolver choice (**`pip-tools`**, **`uv lock`**, Poetry) stay in **your** packaging layer; replayt workflows are normal Python modules. Capture pins with **`pip freeze`**, **`uv pip freeze`**, or **`pip-compile`** in CI and commit the lockfile your team already uses. When you only need a copy-paste **`replayt run`** line for a packaged tutorial workflow, **`replayt try --example KEY --print-snippet run`** (or **`run_dry_check`**) prints **`MODULE:VAR`** plus compact **`--inputs-json`** with POSIX **`shlex.quote`** wrapping.
+
+```bash
+uv pip freeze > requirements.txt
+replayt try --example issue-triage --print-snippet run_dry_check
+```
+
+For **`.env`** populated from **1Password**, **Doppler**, or another vault, replayt keeps env provenance explicit: run your vendor CLI or an **`op run --`** wrapper before **`replayt run`**, or set **`REPLAYT_*`** and **`OPENAI_API_KEY`** from the CI job's secret store. **`replayt doctor`** reports what the process can see; it does not pull cloud secrets into the shell for you.
+
+```bash
+op run --env-file=.env.template -- replayt run mypkg.workflow:wf --inputs-file inputs.json
 ```
 
 ### Beyond core: maintainer credits CLI and prose linters
@@ -336,7 +365,7 @@ python scripts/public_api_report.py --check docs/PUBLIC_API_CONTRACT.json
 
 ### Beyond core: MCP servers wrap the CLI
 
-**Model Context Protocol** hosts expect stable tool contracts, explicit argv, and parseable errors. replayt stays a **CLI + library**, not an MCP runtime: implement tools in **your** server that call **`replayt`** as a subprocess with a fixed allowlist (for example only **`inspect`**, **`runs`**, **`verify-seal`** in production). Cross-check allowlisted names against sorted **`cli_subcommands`** from the same JSON when you upgrade replayt. Use **`--output json`** / **`--format json`**. Each row under **`cli_json_stdout_contract.subcommands`** includes **`schema`**: the full **`replayt.*.v1`** id for the matching stdout payload (same value as **`cli_machine_readable_schemas[schema_key]`**), so a tool definition can read one object; successful stdout bodies also carry their own top-level **`schema`** field when the payload schema defines it. Read **`cli_json_stdout_contract`** from the same JSON when you need the exact flag shape per subcommand (for example **`contract`** uses **`--format json`**, while **`inspect`** also accepts **`--json`**). The same object includes **`subprocess_stream_semantics`**: one UTF-8 JSON object on stdout when a machine route is active, with stderr allowed to carry human hints (for example **`replayt ci`** always prints a one-line exit-code legend on stderr). Each JSON-on-stdout route includes a **`trust_profile`** id; resolve it against sibling **`trust_profiles`** to see whether that argv can append run logs, invoke **`run_hook`** or seal/verify hooks, write scaffold files (**`try --copy-to`**), or stay inventory-only when you split read tools from execute tools in the host. For **`jq`** / policy checks without parsing prose, use sibling **`trust_profile_machine_flags`**: each profile id maps to the same boolean keys (**`appends_run_timeline`**, **`executes_workflow_runner`**, **`may_invoke_trusted_policy_hooks`**, **`writes_seal_manifest`**, **`writes_scaffold_paths`**, **`may_probe_default_llm_http`**). Read **`cli_stdio_contract`** from the same JSON: unless you intentionally pipe a UTF-8 JSON object for **`--inputs-file -`**, **`--inputs-json @-`**, or **`REPLAYT_INPUTS_FILE=-`**, pass **`stdin=subprocess.DEVNULL`** so the host's attached stdin does not become workflow inputs on **`run`**, **`ci`**, **`validate`**, or **`doctor`**. There is no generated OpenAPI or function-calling schema for every CLI flag; derive tool argv from **`--help`** and validate JSON payloads with **`cli_machine_readable_schemas`**. When you implement **`run_hook`**, **`resume_hook`**, or export/seal/verify hooks yourself, read **`policy_hook_env_catalog`** from the same JSON so your wrapper asserts the full set of injected **`REPLAYT_*`** names (optional keys may be absent on a given invocation) and matches **`subprocess_stdin`**: **`devnull`**. Respect exit codes: **`0`** success, **`1`** user or verification errors on read-only commands, **`2`** approval pause on **`replayt run`** / **`replayt ci`** / **`replayt resume`** / **`replayt try`**, and **`2`** when Typer rejects argv before any workflow runs (bad flags, missing args). **`cli_json_stdout_contract.typer_pre_dispatch_phase`** and **`cli_exit_codes.typer_pre_dispatch_failures`** document the overlap: with **`--output json`** on **`run` / `ci` / `try`**, a real pause prints **`replayt.run_result.v1`** with **`status`** **`paused`** on stdout; Typer parse failures usually leave stdout non-JSON so **`json.loads`** fails and stderr has the Usage / Error panel. **`replayt resume`** has no JSON-on-stdout mode; pauses still exit **`2`** after text lines such as **`status=paused`**. Compare Typer-only failures using stderr and whether runner output appeared (**`disambiguation_for_resume_text_stdout`** in the same contract object).
+**Model Context Protocol** hosts expect stable tool contracts, explicit argv, and parseable errors. replayt stays a **CLI + library**, not an MCP runtime: implement tools in **your** server that call **`replayt`** as a subprocess with a fixed allowlist (for example only **`inspect`**, **`runs`**, **`verify-seal`** in production). Cross-check allowlisted names against sorted **`cli_subcommands`** from the same JSON when you upgrade replayt. Use **`--output json`** / **`--format json`**. Each row under **`cli_json_stdout_contract.subcommands`** includes **`schema`**: the full **`replayt.*.v1`** id for the matching stdout payload (same value as **`cli_machine_readable_schemas[schema_key]`**), so a tool definition can read one object; successful stdout bodies also carry their own top-level **`schema`** field when the payload schema defines it. The same rows list **`exit_codes_with_json_on_stdout`**: sorted exit codes that can occur **after** replayt wrote that JSON to stdout (for example **`[0, 1, 2]`** on **`run_result`** routes). If the process exits with another code, or Typer bails before the callback, stdout is often empty or not JSON; pair this field with **`typer_pre_dispatch_phase`** instead of assuming **`json.loads`** always works. Read **`cli_json_stdout_contract`** from the same JSON when you need the exact flag shape per subcommand (for example **`contract`** uses **`--format json`**, while **`inspect`** also accepts **`--json`**). The same object includes **`subprocess_stream_semantics`**: one UTF-8 JSON object on stdout when a machine route is active, with stderr allowed to carry human hints (for example **`replayt ci`** always prints a one-line exit-code legend on stderr). Each JSON-on-stdout route includes a **`trust_profile`** id; resolve it against sibling **`trust_profiles`** to see whether that argv can append run logs, invoke **`run_hook`** or seal/verify hooks, write scaffold files (**`try --copy-to`**), or stay inventory-only when you split read tools from execute tools in the host. For **`jq`** / policy checks without parsing prose, use sibling **`trust_profile_machine_flags`**: each profile id maps to the same boolean keys (**`appends_run_timeline`**, **`executes_workflow_runner`**, **`may_invoke_trusted_policy_hooks`**, **`writes_seal_manifest`**, **`writes_scaffold_paths`**, **`may_probe_default_llm_http`**). Read **`cli_stdio_contract`** from the same JSON: unless you intentionally pipe a UTF-8 JSON object for **`--inputs-file -`**, **`--inputs-json @-`**, or **`REPLAYT_INPUTS_FILE=-`**, pass **`stdin=subprocess.DEVNULL`** so the host's attached stdin does not become workflow inputs on **`run`**, **`ci`**, **`validate`**, or **`doctor`**. There is no generated OpenAPI or function-calling schema for every CLI flag; derive tool argv from **`--help`** and validate JSON payloads with **`cli_machine_readable_schemas`**. When you implement **`run_hook`**, **`resume_hook`**, or export/seal/verify hooks yourself, read **`policy_hook_env_catalog`** from the same JSON so your wrapper asserts the full set of injected **`REPLAYT_*`** names (optional keys may be absent on a given invocation) and matches **`subprocess_stdin`**: **`devnull`**. Respect exit codes: **`0`** success, **`1`** user or verification errors on read-only commands, **`2`** approval pause on **`replayt run`** / **`replayt ci`** / **`replayt resume`** / **`replayt try`**, and **`2`** when Typer rejects argv before any workflow runs (bad flags, missing args). **`cli_json_stdout_contract.typer_pre_dispatch_phase`** and **`cli_exit_codes.typer_pre_dispatch_failures`** document the overlap: with **`--output json`** on **`run` / `ci` / `try`**, a real pause prints **`replayt.run_result.v1`** with **`status`** **`paused`** on stdout; Typer parse failures usually leave stdout non-JSON so **`json.loads`** fails and stderr has the Usage / Error panel. **`replayt resume`** has no JSON-on-stdout mode; pauses still exit **`2`** after text lines such as **`status=paused`**. Compare Typer-only failures using stderr and whether runner output appeared (**`disambiguation_for_resume_text_stdout`** in the same contract object).
 
 ```bash
 replayt version --format json | python -c "import json,sys; print(json.load(sys.stdin)['cli_machine_readable_schemas']['verify_seal_report'])"
@@ -380,6 +409,11 @@ replayt version --format json | jq -e '.cli_json_stdout_contract.subcommands.ins
 replayt version --format json | jq -r '.cli_json_stdout_contract.subcommands.inspect[0].schema'
 ```
 
+```bash
+# Exit codes that can follow a parseable run_result JSON body on stdout (0=completed, 1=failed, 2=paused).
+replayt version --format json | jq '.cli_json_stdout_contract.subcommands.run[] | select(.schema_key=="run_result") | .exit_codes_with_json_on_stdout'
+```
+
 ```python
 import json
 import subprocess
@@ -412,7 +446,7 @@ replayt version --format json | python -c "import json,sys; print(json.load(sys.
 
 ### Beyond core: skill-release loop wrappers and sidecar integrity
 
-Maintainer **`scripts/skill_release_loop.py`** (and **`skill_release_loop_agent.py`**) export **`SKILL_*`** environment variables and write **`replayt.skill_invocation.v1`** JSON beside each generated **`*.prompt.md`**; see **Automated skill-loop release** in [`CONTRIBUTING.md`](../../CONTRIBUTING.md). **`replayt version --format json`** includes **`skill_loop_env_contract`** (`replayt.skill_loop_env_contract.v1`) with **`main_injected_env`** and **`fix_injected_env`** rows (**`name`**, **`description`**) for the same variable names the loop sets on subprocesses (fix steps omit **`SKILL_PATH`** / **`SKILL_REQUESTED_NAME`**), and **`skill_loop_placeholder_contract`** (`replayt.skill_loop_placeholder_contract.v1`) listing every **`--skill-command`** and **`--check`** template key (including **`{task}`**: full outer **`--task`** for normal skills, short fix text for **`fix_check`** / **`fix_pre_tag_ci`**, while **`{task_sha256}`** always fingerprints the outer task). Sidecars and the environment include repo-relative paths (**`SKILL_PROMPT_REL`**, **`SKILL_LOG_REL`**, **`SKILL_RUN_DIR_REL`**) plus **`SKILL_RUN_STAMP`** (basename of the run directory, same as **`{run_stamp}`** in **`--skill-command`** templates) and **`SKILL_COMMAND_SHA256`** / **`SKILL_TASK_SHA256`**, mirrored as **`run_stamp`**, **`skill_command_sha256`**, and **`task_sha256`** in JSON and in **`pipeline.json`**. The first skill step writes **`pipeline.json`** (**`replayt.skill_release_pipeline.v1`**) with ordered skill names, **`pipeline_sha256`**, **`skill_command_sha256`**, **`task_sha256`**, and **`run_stamp`**. **`--resume`** refuses to continue if **`--skills`** order drifts, if the stored **`skill_command_sha256`** disagrees with the current template, or if **`task_sha256`** disagrees with the current **`--task`** (older **`pipeline.json`** files that omit either digest field still skip only that check). replayt does not auto-inject a parent run directory for nested loops or add a **`prompt_sha256`** field on every sidecar: only your outer harness knows whether a run is nested, and hashing prompts is a one-liner when you need it.
+Maintainer **`scripts/skill_release_loop.py`** (and **`skill_release_loop_agent.py`**) export **`SKILL_*`** environment variables and write **`replayt.skill_invocation.v1`** JSON beside each generated **`*.prompt.md`**; see **Automated skill-loop release** in [`CONTRIBUTING.md`](../../CONTRIBUTING.md). **`replayt version --format json`** includes **`skill_loop_env_contract`** (`replayt.skill_loop_env_contract.v1`) with **`main_injected_env`** and **`fix_injected_env`** rows (**`name`**, **`description`**) for the same variable names the loop sets on subprocesses (fix steps omit **`SKILL_PATH`** / **`SKILL_REQUESTED_NAME`**), and **`skill_loop_placeholder_contract`** (`replayt.skill_loop_placeholder_contract.v1`) listing every **`--skill-command`** and **`--check`** template key (including **`{task}`**: full outer **`--task`** for normal skills, short fix text for **`fix_check`** / **`fix_pre_tag_ci`**, while **`{task_sha256}`** always fingerprints the outer task). Sidecars and the environment include **`SKILL_INVOCATION_FILE`** / **`SKILL_INVOCATION_REL`** (absolute and repo-relative path to this step's **`*.invocation.json`**, also **`{invocation_file}`** / **`{invocation_file_q}`** in **`--skill-command`** templates), repo-relative paths (**`SKILL_PROMPT_REL`**, **`SKILL_LOG_REL`**, **`SKILL_RUN_DIR_REL`**) plus **`SKILL_RUN_STAMP`** (basename of the run directory, same as **`{run_stamp}`** in **`--skill-command`** templates) and **`SKILL_COMMAND_SHA256`** / **`SKILL_TASK_SHA256`**, mirrored as **`run_stamp`**, **`skill_command_sha256`**, and **`task_sha256`** in JSON and in **`pipeline.json`**. The first skill step writes **`pipeline.json`** (**`replayt.skill_release_pipeline.v1`**) with ordered skill names, **`pipeline_sha256`**, **`skill_command_sha256`**, **`task_sha256`**, and **`run_stamp`**. **`--resume`** refuses to continue if **`--skills`** order drifts, if the stored **`skill_command_sha256`** disagrees with the current template, or if **`task_sha256`** disagrees with the current **`--task`** (older **`pipeline.json`** files that omit either digest field still skip only that check). replayt does not auto-inject a parent run directory for nested loops or add a **`prompt_sha256`** field on every sidecar: only your outer harness knows whether a run is nested, and hashing prompts is a one-liner when you need it.
 
 ```bash
 INV=iter-01-demo.invocation.json
@@ -462,6 +496,16 @@ python -c "import os, urllib.parse as u; h=u.urlparse(os.environ.get('OPENAI_BAS
 ```
 
 replayt keeps explicit states, append-only **JSONL**, and structured LLM outputs. Use **`ctx.llm.with_settings(...)`** for per-call overrides; they show up under **`effective`** on **`llm_request`** events. Core does **not** log per-token streams because that is too noisy for replay. Stream inside a step, then store a **Pydantic-validated** result or a short summary. **`replayt resume`** covers many approval flows; richer UIs can read the same JSONL and resolve gates in **your** app. Notifications, trace IDs, and policy hooks belong in wrappers or callbacks. If you need stronger audit handoff, hash, encrypt, or archive **your** logs; the runtime cannot prove integrity if an attacker can write the log directory (see **Security and trust boundaries** in [`README.md`](../../README.md)).
+
+### Beyond core: policy hook output limits and shared log-directory modes
+
+replayt does **not** cap how many bytes a **`run_hook`** or **`resume_hook`** subprocess writes to stdout or stderr, or tee those streams into JSONL: truncation policy, log redaction, and whether to fail the gate on large output belong in **your** wrapper (for example wrap the hook in **`bash -c`** and redirect to **`head -c …`** or a tempfile you scan before the parent sees it).
+
+On **Unix**, new run **`*.jsonl`** files default to **`0600`** when the CLI builds the store; export **`REPLAYT_JSONL_POSIX_MODE=inherit`** when a **shared group** must read fresh logs without an explicit **`chmod`** step, or pass **`posix_new_file_mode=0o660`** to **`JSONLStore(...)`** when you construct the store for **`Runner(wf, store=...)`** yourself.
+
+```bash
+REPLAYT_JSONL_POSIX_MODE=inherit replayt ci "$TARGET"
+```
 
 ### Beyond core: clean git trees and LLM spend gates
 
@@ -554,11 +598,12 @@ replayt replay <run_id> --format html --style stakeholder --out run.html
 replayt report <run_id> --format markdown --style support --out handoff.md
 ```
 
-**Two-run comparison:** **`replayt report-diff RUN_A RUN_B`** defaults to HTML; add **`--format markdown`** when you need the same stakeholder sections (metadata, failures, structured outputs, approvals) as pasteable text. With **`--style stakeholder`** or **`support`**, the document ends with **Stakeholder CLI handoff** copy-paste lines (regenerate this comparison, **`replayt diff … --output json`**, per-run **`inspect`** / stakeholder **`report`** / offline **`replay`**, per-run **`bundle-export`** with matching **`--report-style`**, JSON **`inspect`** when a side failed, and **`resume`** hints per paused run), aligned with **`replayt report`**. For automation, use **`replayt diff RUN_A RUN_B --output json`** instead of a parallel JSON report-diff schema.
+**Two-run comparison:** **`replayt report-diff RUN_A RUN_B`** defaults to HTML; add **`--format markdown`** when you need the same stakeholder sections (metadata, failures, structured outputs, approvals) as pasteable text. With **`--style stakeholder`** or **`support`**, the document ends with **Stakeholder CLI handoff** copy-paste lines (regenerate this comparison, **`replayt diff … --output json`**, per-run **`inspect`** / stakeholder **`report`** / offline **`replay`**, per-run **`bundle-export`** with matching **`--report-style`**, JSON **`inspect`** when a side failed, and **`resume`** hints per paused run), aligned with **`replayt report`**. In the terminal, **`replayt diff RUN_A RUN_B --style stakeholder`** (or **`support`**) prints the compact text diff first, then the same handoff block, so you can paste next steps without opening **`report-diff`**. For automation, use **`replayt diff RUN_A RUN_B --output json`** instead of a parallel JSON report-diff schema.
 
 ```bash
 replayt report-diff <run_a> <run_b> --format markdown --out compare.md
 replayt diff <run_a> <run_b> --output json
+replayt diff <run_a> <run_b> --style stakeholder
 ```
 
 **`bundle-export`** still ships **`report.html`** only; generate **`.md`** in CI with **`--format markdown`** when your process wants both.
@@ -588,7 +633,7 @@ replayt keeps **explicit** states and append-only JSONL. Per-token log lines and
 
 ### LangGraph (and similar frameworks): **composition**, not core
 
-replayt will not ship LangGraph inside the runner because that would hide control flow next to an explicit FSM (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). The supported shape is to run LangGraph **inside one `@wf.step`**, then move replayt forward from **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log the **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, tools, or a small `ctx.note(...)` breadcrumb, not every planner tick. When you call the OpenAI-style chat API with native `tool_calls` in that sandbox, **`ctx.tools.openai_chat_tools()`** mirrors your **`@ctx.tools.register`** handlers into the vendor `tools=` list; run the returned calls with **`ctx.tools.apply_openai_chat_tool_calls([tc.model_dump() for tc in msg.tool_calls])`** (or **`ctx.tools.call`** in a loop) so JSONL keeps typed **`tool_call`** / **`tool_result`** lines (**Sub-pattern: OpenAI `tools=` from `ctx.tools`** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)**). For **Anthropic Messages** (`anthropic` SDK, `messages.create`), use **`ctx.tools.anthropic_messages_tools()`** and **`ctx.tools.apply_anthropic_tool_use_blocks(...)`** on **`tool_use`** content blocks (**Sub-pattern: Anthropic `tools=` / `tool_use` from `ctx.tools`** in the same doc).
+replayt will not ship LangGraph inside the runner because that would hide control flow next to an explicit FSM (see the **LangChain / LangGraph** row in **[docs/SCOPE.md](../../docs/SCOPE.md)**). The supported shape is to run LangGraph **inside one `@wf.step`**, then move replayt forward from **one** Pydantic-shaped outcome (or a small summary you write to context). Stream tokens and run planner loops **inside** that handler; log the **final** structured data via `ctx.llm.parse(...)`, `structured_output` events, tools, or a small `ctx.note(...)` breadcrumb, not every planner tick. When you call the OpenAI-style chat API with native `tool_calls` in that sandbox, **`ctx.tools.openai_chat_tools()`** mirrors your **`@ctx.tools.register`** handlers into the vendor `tools=` list; run the returned calls with **`ctx.tools.apply_openai_chat_tool_calls([tc.model_dump() for tc in msg.tool_calls])`** (or **`ctx.tools.call`** in a loop) so JSONL keeps typed **`tool_call`** / **`tool_result`** lines (**Sub-pattern: OpenAI `tools=` from `ctx.tools`** in **[docs/EXAMPLES_PATTERNS.md](../../docs/EXAMPLES_PATTERNS.md)**). For **Anthropic Messages** (`anthropic` SDK, `messages.create`), use **`ctx.tools.anthropic_messages_tools()`** and **`ctx.tools.apply_anthropic_tool_use_blocks(...)`** on **`tool_use`** content blocks (**Sub-pattern: Anthropic `tools=` / `tool_use` from `ctx.tools`** in the same doc). For **Amazon Bedrock Converse** (`boto3` `bedrock-runtime` `converse`), use **`toolConfig={"tools": ctx.tools.bedrock_converse_tools()}`** and **`ctx.tools.apply_bedrock_converse_tool_use_blocks(...)`** on assistant **`content`** entries that carry **`toolUse`** (**Sub-pattern: Bedrock Converse `toolConfig` / `toolUse` from `ctx.tools`** in the same doc).
 
 Install graph libraries in **your** project only:
 
@@ -657,6 +702,20 @@ critique = ctx.llm.with_settings(call_label="critic").parse(Review, messages=[..
 
 ```bash
 jq 'select(.type=="llm_response" and .payload.call_label=="critic")' run.jsonl
+```
+
+### Audit-only `llm_tags` on LLM lines
+
+**`llm_tags`** are short strings (up to **16** unique tags, **64** characters each after strip) you attach to LLM traffic for **`jq` / DuckDB** filters (prompt pack ids, eval splits, or A/B buckets) without nesting another object under **`experiment`**. Set them in **`Workflow(..., llm_defaults={"llm_tags": ["baseline"]})`**, merge more with **`ctx.llm.with_settings(llm_tags=["ab:high_temp"])`** (union of prior and new tags, then sorted), or pass **`complete_text(..., llm_tags=["nightly"])`** / **`parse(..., llm_tags=[...])`** for one call. They appear on **`payload.effective.llm_tags`** and as top-level **`payload.llm_tags`** on **`llm_request`**, **`llm_response`**, **`structured_output`**, and **`structured_output_failed`**. They are **not** included in the **`/chat/completions`** JSON; use **`extra_body`** when your gateway needs the same labels on the wire. **`extra_body`** rejects a bare **`llm_tags`** key so it cannot silently duplicate or collide with the audit field.
+
+```python
+out = ctx.llm.with_settings(llm_tags=["prompt:v2", "split:eval"]).parse(
+    Answer, messages=[{"role": "user", "content": "Return {\"value\": 1}"}]
+)
+```
+
+```bash
+jq 'select(.type=="llm_response" and (.payload.llm_tags // [] | any(. == "prompt:v2")))' run.jsonl
 ```
 
 ### Transient HTTP retries (`http_retries`)

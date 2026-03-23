@@ -7,11 +7,13 @@ from replayt.llm_coercion import (
     coerce_llm_extra_body,
     coerce_llm_seed,
     coerce_llm_stop_sequences,
+    coerce_llm_tags,
     coerce_max_tokens_for_api,
     coerce_openai_penalty,
     coerce_temperature,
     coerce_timeout_seconds,
     coerce_top_p,
+    merge_llm_tag_tuples,
 )
 
 
@@ -65,6 +67,35 @@ def test_coerce_http_retries_rejects_negative() -> None:
 def test_coerce_http_retries_rejects_above_cap() -> None:
     with pytest.raises(ValueError, match="<="):
         coerce_http_retries(26)
+
+
+def test_coerce_llm_tags_sorts_uniques() -> None:
+    assert coerce_llm_tags(["b", "a", "b"]) == ("a", "b")
+    assert coerce_llm_tags("  solo  ") == ("solo",)
+
+
+def test_coerce_llm_tags_empty() -> None:
+    assert coerce_llm_tags(None) is None
+    assert coerce_llm_tags([]) is None
+    assert coerce_llm_tags(["", "  "]) is None
+
+
+def test_coerce_llm_tags_rejects_too_many_uniques() -> None:
+    tags = [f"t{i}" for i in range(17)]
+    with pytest.raises(ValueError, match="at most 16"):
+        coerce_llm_tags(tags)
+
+
+def test_merge_llm_tag_tuples_rejects_overflow() -> None:
+    a = tuple(f"x{i}" for i in range(10))
+    b = tuple(f"y{i}" for i in range(10))
+    with pytest.raises(ValueError, match="after merge"):
+        merge_llm_tag_tuples(a, b)
+
+
+def test_merge_llm_tag_tuples_union() -> None:
+    assert merge_llm_tag_tuples(("a",), ("b", "a")) == ("a", "b")
+    assert merge_llm_tag_tuples(None, None) is None
 
 
 def test_coerce_temperature_rejects_bool() -> None:

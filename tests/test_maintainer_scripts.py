@@ -182,6 +182,9 @@ def test_example_catalog_contract_report_for_temp_module(tmp_path: Path, monkeyp
             "inputs_example": {"name": "Sam"},
         }
     ]
+    assert report["example_sha256s"] == [
+        "336ba18523857815363b9b227bd5529262253aa18d523d293f7ccf796b3e9c8b"
+    ]
 
 
 def test_example_catalog_contract_check_snapshot_round_trip(tmp_path: Path) -> None:
@@ -492,6 +495,9 @@ def test_maintainer_checks_tmp_pass_skipping_public_api(tmp_path: Path) -> None:
         """
         {
           "example_count": 1,
+          "example_sha256s": [
+            "8efa2e85faac4f9bcf76e768829e6ff858d612057fe29af86a553d6dbbdac224"
+          ],
           "examples": [
             {
               "description": "A tiny example.",
@@ -613,6 +619,9 @@ def test_maintainer_checks_tmp_pass_with_public_api_snapshot(tmp_path: Path) -> 
         """
         {
           "example_count": 1,
+          "example_sha256s": [
+            "8efa2e85faac4f9bcf76e768829e6ff858d612057fe29af86a553d6dbbdac224"
+          ],
           "examples": [
             {
               "description": "A tiny example.",

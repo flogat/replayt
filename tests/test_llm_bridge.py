@@ -120,6 +120,134 @@ def test_llm_bridge_with_settings_merges_experiment_into_effective() -> None:
     assert "schema_name" not in req
 
 
+def test_llm_bridge_with_settings_unions_llm_tags_sorted() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="test-key", model="base-model")
+    client = OpenAICompatClient(settings)
+    bridge = (
+        LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+        .with_settings(llm_tags=["beta", "alpha"])
+        .with_settings(llm_tags=["gamma", "alpha"])
+    )
+
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    req = next(p for t, p in events if t == "llm_request")
+    resp = next(p for t, p in events if t == "llm_response")
+    assert req["effective"]["llm_tags"] == ["alpha", "beta", "gamma"]
+    assert req["llm_tags"] == ["alpha", "beta", "gamma"]
+    assert resp["llm_tags"] == ["alpha", "beta", "gamma"]
+
+
+def test_llm_bridge_defaults_union_per_call_llm_tags() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    settings = LLMSettings(api_key="k", model="m")
+    client = OpenAICompatClient(settings)
+    bridge = LLMBridge(
+        emit=emit,
+        client=client,
+        log_mode=LogMode.redacted,
+        state_getter=lambda: "s",
+        defaults={"llm_tags": ["base"]},
+    )
+    canned = {"choices": [{"message": {"content": "x"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], llm_tags=["call"])
+
+    req = next(p for t, p in events if t == "llm_request")
+    assert req["effective"]["llm_tags"] == ["base", "call"]
+
+
+def test_llm_bridge_with_settings_clears_llm_tags_with_empty_sequence() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = (
+        LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+        .with_settings(llm_tags=["a"])
+        .with_settings(llm_tags=[])
+    )
+    canned = {"choices": [{"message": {"content": "z"}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        bridge.complete_text(messages=[{"role": "user", "content": "hi"}], temperature=0.0)
+
+    req = next(p for t, p in events if t == "llm_request")
+    assert "llm_tags" not in req["effective"]
+    assert "llm_tags" not in req
+
+
+def test_llm_bridge_with_settings_extra_body_rejects_llm_tags_key() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+    with pytest.raises(ValueError, match="llm_tags"):
+        bridge.with_settings(extra_body={"llm_tags": ["x"]})
+
+
+def test_llm_bridge_parse_mirrors_llm_tags_on_structured_output() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    bridge = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s").with_settings(
+        llm_tags=["pack:v1"]
+    )
+    canned = {"choices": [{"message": {"content": '{"value": 3}'}}], "usage": {}}
+
+    with patch.object(client, "chat_completions", return_value=canned):
+        out = bridge.parse(Answer, messages=[{"role": "user", "content": "json"}], temperature=0.0)
+
+    assert out.value == 3
+    so = next(p for t, p in events if t == "structured_output")
+    assert so["llm_tags"] == ["pack:v1"]
+    assert so["effective"]["llm_tags"] == ["pack:v1"]
+
+
+def test_llm_bridge_effective_sha256_depends_on_llm_tags() -> None:
+    events: list[tuple[str, dict]] = []
+
+    def emit(typ: str, payload: dict) -> None:
+        events.append((typ, payload))
+
+    client = OpenAICompatClient(LLMSettings(api_key="k", model="m"))
+    base = LLMBridge(emit=emit, client=client, log_mode=LogMode.redacted, state_getter=lambda: "s")
+    canned = {"choices": [{"message": {"content": "ok"}}], "usage": {}}
+
+    shas: list[str] = []
+    for tag in ("a", "b"):
+        events.clear()
+        with patch.object(client, "chat_completions", return_value=canned):
+            base.with_settings(llm_tags=[tag]).complete_text(
+                messages=[{"role": "user", "content": "hi"}], temperature=0.0
+            )
+        req = next(p for t, p in events if t == "llm_request")
+        shas.append(req["effective_sha256"])
+
+    assert shas[0] != shas[1]
+
+
 def test_llm_bridge_float_max_tokens_from_defaults_passed_to_client() -> None:
     events: list[tuple[str, dict]] = []
 
@@ -900,6 +1028,17 @@ def test_openai_compat_invalid_json_body_raises() -> None:
         client.chat_completions(messages=[{"role": "user", "content": "x"}])
     assert "body_bytes=" in str(excinfo.value)
     assert "not json" not in str(excinfo.value).lower()
+
+
+def test_openai_compat_invalid_utf8_body_raises() -> None:
+    body = b"\xff\xfe\x00"
+    client = OpenAICompatClient(
+        LLMSettings(api_key=None, base_url="http://127.0.0.1:9999/v1"),
+        http_client=_FakeHTTPClient(lambda *a, **k: _stream_cm(_FakeStreamResp(body))),
+    )
+    with pytest.raises(RuntimeError, match="not valid UTF-8") as excinfo:
+        client.chat_completions(messages=[{"role": "user", "content": "x"}])
+    assert "body_bytes=" in str(excinfo.value)
 
 
 def test_openai_compat_omits_authorization_without_api_key() -> None:

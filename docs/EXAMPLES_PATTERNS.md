@@ -108,7 +108,7 @@ In Python, the same shape is `Runner.run(..., run_metadata={"deployment_tier": "
 replayt contract "$TARGET" --check policies/workflow.contract.json
 ```
 
-**Hook env: logging contract.** Every trusted policy subprocess (`run_hook`, `resume_hook`, `export_hook`, `seal_hook`, `verify_seal_hook`) receives **`REPLAYT_POLICY_HOOK_NAME`** (the hook key: `run_hook`, `resume_hook`, `export_hook`, `seal_hook`, or `verify_seal_hook`, so one shared gate script can branch or emit structured audit lines without re-parsing argv), **`REPLAYT_LOG_MODE`**, **`REPLAYT_FORBID_LOG_MODE_FULL`** (`1` / `0`), **`REPLAYT_REDACT_KEYS_JSON`** (sorted JSON array of field names from project config / CLI, never secret values), and **`REPLAYT_REPLAYT_VERSION`** (installed **replayt** version string, same as `replayt.__version__`). Use the logging fields when auditors want proof that `log_mode=full` is blocked or that specific structured keys are redacted before you allow resume, export, or seal; compare **`REPLAYT_REPLAYT_VERSION`** to a pinned allowlist when production gates must reject stale CLIs. **`run_hook`** and **`resume_hook`** each receive **`REPLAYT_LOG_DIR`** and **`REPLAYT_RUN_JSONL`** (absolute paths): on a fresh run the JSONL file may not exist until after the hook returns, but the path is stable for mount checks, overwrite policy, or sharing one script with resume gates. Those two hooks also receive optional **`REPLAYT_WORKFLOW_ENTRY_PATH`** (absolute path to the workflow `.py` / YAML file or the imported module's `__file__` when replayt can resolve **`REPLAYT_TARGET`**); **`export_hook`** receives the same when you pass **`--target`**, so allowlists can **`stat`** the entry file without parsing JSONL. When **`--policy-hook-context-json`**, env **`REPLAYT_POLICY_HOOK_CONTEXT_JSON`**, or **`[tool.replayt] policy_hook_context_json`** supplies a JSON object, hooks also receive **`REPLAYT_POLICY_HOOK_CONTEXT_JSON`** (canonical sorted JSON) for CI correlation ids, pipeline URLs, or approver hints that should not appear on **`run_started.run_metadata`**. **`resume_hook`**, **`export_hook`**, **`seal_hook`**, and **`verify_seal_hook`** also receive **`REPLAYT_RUN_INPUTS_JSON`** when the first **`run_started`** line is readable: sorted JSON of **`run_started.inputs`**, or **`{}`** when **`inputs`** is absent or null (same shape **`run_hook`** uses for the resolved inputs on a fresh run). The canonical sorted env name list is also in **`replayt version --format json`** → **`policy_hook_env_catalog`**.
+**Hook env: logging contract.** Every trusted policy subprocess (`run_hook`, `resume_hook`, `export_hook`, `seal_hook`, `verify_seal_hook`) receives **`REPLAYT_POLICY_HOOK_NAME`** (the hook key: `run_hook`, `resume_hook`, `export_hook`, `seal_hook`, or `verify_seal_hook`, so one shared gate script can branch or emit structured audit lines without re-parsing argv), **`REPLAYT_LOG_MODE`**, **`REPLAYT_FORBID_LOG_MODE_FULL`** (`1` / `0`), **`REPLAYT_REDACT_KEYS_JSON`** (sorted JSON array of field names from project config / CLI, never secret values), and **`REPLAYT_REPLAYT_VERSION`** (installed **replayt** version string, same as `replayt.__version__`). Use the logging fields when auditors want proof that `log_mode=full` is blocked or that specific structured keys are redacted before you allow resume, export, or seal; compare **`REPLAYT_REPLAYT_VERSION`** to a pinned allowlist when production gates must reject stale CLIs. **`run_hook`** and **`resume_hook`** each receive **`REPLAYT_LOG_DIR`** and **`REPLAYT_RUN_JSONL`** (absolute paths): on a fresh run the JSONL file may not exist until after the hook returns, but the path is stable for mount checks, overwrite policy, or sharing one script with resume gates. Those two hooks also receive optional **`REPLAYT_WORKFLOW_ENTRY_PATH`** (absolute path to the workflow `.py` / YAML file or the imported module's `__file__` when replayt can resolve **`REPLAYT_TARGET`**); **`export_hook`** receives the same when you pass **`--target`**, so allowlists can **`stat`** the entry file without parsing JSONL. When **`--policy-hook-context-json`**, env **`REPLAYT_POLICY_HOOK_CONTEXT_JSON`**, or **`[tool.replayt] policy_hook_context_json`** supplies a JSON object, hooks also receive **`REPLAYT_POLICY_HOOK_CONTEXT_JSON`** (canonical sorted JSON) for CI correlation ids, pipeline URLs, or approver hints that should not appear on **`run_started.run_metadata`**. **`resume_hook`**, **`export_hook`**, **`seal_hook`**, and **`verify_seal_hook`** also receive **`REPLAYT_RUN_INPUTS_JSON`** when the first **`run_started`** line is readable: sorted JSON of **`run_started.inputs`**, or **`{}`** when **`inputs`** is absent or null (same shape **`run_hook`** uses for the resolved inputs on a fresh run). When that line has a non-empty string envelope **`ts`**, optional **`REPLAYT_RUN_STARTED_TS`** carries the same ISO 8601 UTC value for SIEM correlation; **`run_hook`** sets it only when **`replayt run` / `replayt ci`** uses **`--resume`** and the JSONL already contains **`run_started`**. The canonical sorted env name list is also in **`replayt version --format json`** → **`policy_hook_env_catalog`**.
 
 **Beyond core: stronger digests and control frameworks.** If policy requires FIPS-approved primitives, PKCS#7, or HSM-backed signing, run **`openssl dgst`** / **`openssl cms`** (or your org tool) in **`seal_hook`** / **`export_hook`** on the tarball or manifest path replayt already wrote; do not fork core for module-validation semantics. If auditors want SOC 2 / ISO control ids on each event, add a **`ctx.note`** from application code or append a small sidecar in **your** CI job; replayt keeps JSONL schema stable and avoids embedding vendor-specific control taxonomies in core.
 
@@ -207,7 +207,35 @@ def sdk_tools(ctx):
 
 **Approach:** Register handlers on `ctx.tools`, pass `tools=ctx.tools.anthropic_messages_tools()` to `messages.create`, then run assistant `content` blocks with `ctx.tools.apply_anthropic_tool_use_blocks(blocks)` (or pass only the `tool_use` dicts). Non-`tool_use` blocks are ignored; results are returned in `tool_use` order. Each invocation still goes through `ctx.tools.call`, so JSONL gets the same `tool_call` / `tool_result` events as the OpenAI helper path.
 
-Google Gemini and other vendors: core does not emit their proto or JSON tool shapes; map `openai_chat_tools()` / `anthropic_messages_tools()` fields inside the step, or declare tools next to that vendor's SDK.
+#### Sub-pattern: Bedrock Converse `toolConfig` / `toolUse` from `ctx.tools`
+
+**Scenario:** You call `bedrock-runtime` `converse` (or `converse_stream`) with native tool configuration and `toolUse` content blocks from boto3-shaped responses.
+
+**Approach:** Register handlers on `ctx.tools`, pass `toolConfig={"tools": ctx.tools.bedrock_converse_tools()}` (and any required `toolChoice`) to `converse`, then run assistant `output` / `message` `content` with `ctx.tools.apply_bedrock_converse_tool_use_blocks(blocks)`. Blocks without `toolUse` are skipped; results are returned in `toolUse` order. Each invocation still goes through `ctx.tools.call`, so JSONL matches the OpenAI and Anthropic helper paths.
+
+```python
+# Inside a @wf.step (illustrative; pip install boto3 in your project)
+# import boto3
+#
+# @wf.step("bedrock_sdk_tools")
+# def bedrock_sdk_tools(ctx):
+#     @ctx.tools.register
+#     def lookup(q: str) -> dict:
+#         """Search the catalog."""
+#         return {"hits": [q]}
+#
+#     client = boto3.client("bedrock-runtime", region_name="us-east-1")
+#     resp = client.converse(
+#         modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+#         messages=[{"role": "user", "content": [{"text": "Call lookup for hats."}]}],
+#         toolConfig={"tools": ctx.tools.bedrock_converse_tools()},
+#     )
+#     blocks = resp["output"]["message"]["content"]
+#     ctx.tools.apply_bedrock_converse_tool_use_blocks(blocks)
+#     return "done"
+```
+
+Google Gemini and other vendors: core does not emit their proto or JSON tool shapes; map `openai_chat_tools()` / `anthropic_messages_tools()` / `bedrock_converse_tools()` fields inside the step, or declare tools next to that vendor's SDK.
 
 ```python
 import anthropic

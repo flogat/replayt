@@ -143,6 +143,42 @@ class ToolRegistry:
             out.append(row)
         return out
 
+    def bedrock_converse_tools(self) -> list[dict[str, Any]]:
+        """Amazon Bedrock Converse API ``toolConfig["tools"]`` entries (composition helper).
+
+        Each element matches ``{"toolSpec": {"name", "inputSchema": {"json": ...}, ...}}``
+        where ``inputSchema.json`` is the JSON object schema from handler type hints (the
+        same shapes as OpenAI ``function.parameters`` from :meth:`openai_chat_tools`).
+        Docstrings supply ``toolSpec.description`` (first paragraph only) when present.
+
+        Bedrock constrains tool names to the same 1-64 character pattern as OpenAI Chat
+        function names; longer Anthropic-only names must be registered under an alias or
+        declared beside the Bedrock SDK without this helper.
+
+        Pair with :meth:`apply_bedrock_converse_tool_use_blocks` on assistant ``content``
+        from ``converse`` / ``converse_stream`` so invocations still go through
+        :meth:`call` and emit replayt ``tool_call`` / ``tool_result`` lines.
+        """
+
+        out: list[dict[str, Any]] = []
+        for name in sorted(self._tools):
+            if not _OPENAI_TOOL_FUNCTION_NAME_RE.fullmatch(name):
+                msg = (
+                    f"Tool name {name!r} is not valid for Amazon Bedrock Converse tools "
+                    "(use 1-64 characters: ASCII letters, digits, underscore, or hyphen only)."
+                )
+                raise ValueError(msg)
+            fn = self._tools[name]
+            spec: dict[str, Any] = {
+                "name": name,
+                "inputSchema": {"json": _openai_parameters_schema(fn)},
+            }
+            desc = _first_paragraph_doc(fn)
+            if desc:
+                spec["description"] = desc
+            out.append({"toolSpec": spec})
+        return out
+
     def apply_anthropic_tool_use_blocks(
         self,
         content: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
@@ -192,6 +228,63 @@ class ToolRegistry:
                 raise TypeError(msg)
             if not isinstance(args, dict):
                 msg = f"content[{i}]: decoded tool_use.input must be a JSON object"
+                raise TypeError(msg)
+            results.append(self.call(name, args))
+        return results
+
+    def apply_bedrock_converse_tool_use_blocks(
+        self,
+        content: list[dict[str, Any]] | tuple[dict[str, Any], ...] | None,
+    ) -> list[Any]:
+        """Run Bedrock Converse ``toolUse`` content blocks through :meth:`call` in list order.
+
+        Each element should be a Converse **ContentBlock** mapping (as returned by boto3):
+        a ``toolUse`` object with non-empty ``name`` and ``input`` (JSON object, or a JSON
+        object string). Other blocks (``text``, ``image``, and similar) are skipped;
+        results are returned **only** for ``toolUse`` blocks, in the order they appear.
+
+        ``toolUseId`` is ignored for replayt logging; it is only for pairing results when
+        you send ``toolResult`` blocks back to Bedrock.
+        """
+
+        if not content:
+            return []
+        results: list[Any] = []
+        for i, block in enumerate(content):
+            if not isinstance(block, dict):
+                msg = f"content[{i}]: expected dict, got {type(block).__name__}"
+                raise TypeError(msg)
+            tu = block.get("toolUse")
+            if tu is None:
+                continue
+            if not isinstance(tu, dict):
+                msg = f"content[{i}]: toolUse must be a dict, got {type(tu).__name__}"
+                raise TypeError(msg)
+            name = tu.get("name")
+            if not isinstance(name, str) or not name.strip():
+                msg = f"content[{i}]: toolUse missing or invalid name"
+                raise ValueError(msg)
+            raw_input = tu.get("input", {})
+            if isinstance(raw_input, str):
+                stripped = raw_input.strip()
+                if not stripped:
+                    args = {}
+                else:
+                    try:
+                        args = json.loads(stripped)
+                    except json.JSONDecodeError as exc:
+                        msg = f"content[{i}]: invalid JSON in toolUse.input: {exc.msg}"
+                        raise ValueError(msg) from exc
+            elif isinstance(raw_input, dict):
+                args = raw_input
+            else:
+                msg = (
+                    f"content[{i}]: toolUse.input must be str or dict, "
+                    f"got {type(raw_input).__name__}"
+                )
+                raise TypeError(msg)
+            if not isinstance(args, dict):
+                msg = f"content[{i}]: decoded toolUse.input must be a JSON object"
                 raise TypeError(msg)
             results.append(self.call(name, args))
         return results

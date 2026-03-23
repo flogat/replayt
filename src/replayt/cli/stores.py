@@ -9,11 +9,12 @@ from pathlib import Path
 import typer
 
 from replayt.persistence import JSONLStore, MultiStore, SQLiteStore
+from replayt.persistence.jsonl import resolve_jsonl_posix_new_file_mode_from_env
 
 
 def make_store(log_dir: Path, sqlite: Path | None, *, strict_mirror: bool = False) -> JSONLStore | MultiStore:
     log_dir.mkdir(parents=True, exist_ok=True)
-    primary = JSONLStore(log_dir)
+    primary = JSONLStore(log_dir, posix_new_file_mode=resolve_jsonl_posix_new_file_mode_from_env())
     if sqlite is None:
         return primary
     sqlite.parent.mkdir(parents=True, exist_ok=True)
